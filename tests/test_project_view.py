@@ -5,9 +5,11 @@ The invariants pinned here:
   * the "全部" scope groups by project and shows a PROJECT column,
   * `project_overview()` numbers are derived from the same rows `list_tasks`
     returns (they must agree),
-  * the board is grouped into one `<section>` per project with tasks, ordered
-    by most recent activity, still zero `<script>`, still escaping user text,
-  * serve mode filters by `?project=` (unknown ids 404).
+  * the board is a swimlane matrix: one `display:contents` `.rowrow` per
+    project with tasks, ordered by most recent activity, one inline `<script>`
+    and still escaping user text,
+  * serve mode filters by repeated `?project=` (unknown ids 404), opens a
+    `?task=` drawer, and serves `/api/tasks/<id>/events` as JSON.
 """
 
 import contextlib
@@ -98,6 +100,13 @@ class ProjectViewBase(unittest.TestCase):
                     created_at=created_at,
                 ),
             )
+        finally:
+            conn.close()
+
+    def insert_event(self, task_id, event, payload=None):
+        conn = self._connect()
+        try:
+            storage.append_event(conn, task_id, event, payload)
         finally:
             conn.close()
 
@@ -250,50 +259,57 @@ class TasksScopeTest(ProjectViewBase):
 # --------------------------------------------------------------------------
 
 class BoardGroupingTest(ProjectViewBase):
-    def test_sections_match_projects_with_tasks(self):
+    def test_lanes_match_projects_with_tasks(self):
         self._seed_tasks()
         doc = render.render_board(self.ws)
         # beta has tasks; the registry's other projects do not exist here, but
-        # even a registered project with zero tasks adds no section.
-        self.assertEqual(doc.count('<section class="project-block"'), 2)
+        # even a registered project with zero tasks adds no lane.
+        self.assertEqual(doc.count('class="rowrow"'), 2)
 
-    def test_project_without_tasks_has_no_section(self):
+    def test_project_without_tasks_has_no_lane(self):
         self.insert("t-a1", "alpha")
         doc = render.render_board(self.ws)
-        self.assertEqual(doc.count('<section class="project-block"'), 1)
-        self.assertNotIn('id="project-beta"', doc)
+        self.assertEqual(doc.count('class="rowrow"'), 1)
+        self.assertNotIn('data-project="beta"', doc)
 
-    def test_sections_ordered_by_recent_activity(self):
+    def test_lanes_ordered_by_recent_activity(self):
         self.insert("t-a1", "alpha", created_at="2026-10-01T10:00:00+08:00")
         self.insert("t-b1", "beta", created_at="2026-10-05T10:00:00+08:00")
         doc = render.render_board(self.ws)
-        self.assertLess(doc.index('id="project-beta"'), doc.index('id="project-alpha"'))
+        self.assertLess(doc.index('data-project="beta"'), doc.index('data-project="alpha"'))
 
-    def test_board_has_zero_script_tags(self):
+    def test_board_has_at_most_one_inline_script(self):
         self._seed_tasks()
         doc = render.render_board(self.ws)
-        self.assertNotIn("<script", doc)
+        self.assertEqual(doc.count("<script"), 1)
+        self.assertNotIn("<script src", doc)
+        self.assertNotIn('href="http', doc)
 
     def test_board_escapes_project_id_and_brief(self):
         payload = "<script>alert('xss')</script>"
         self.insert("t-x", payload, brief=f"fix {payload}")
         doc = render.render_board(self.ws)
-        self.assertNotIn("<script", doc)
+        self.assertNotIn("<script>alert", doc)
         self.assertIn("&lt;script&gt;", doc)
 
-    def test_board_single_project_filter(self):
+    def test_board_project_filter(self):
         self._seed_tasks()
-        doc = render.render_board(self.ws, project="alpha")
-        self.assertEqual(doc.count('<section class="project-block"'), 1)
+        doc = render.render_board(self.ws, projects=["alpha"])
+        self.assertEqual(doc.count('class="rowrow"'), 1)
         self.assertIn("t-a1", doc)
         self.assertNotIn("t-b1", doc)
+
+    def test_board_empty_projects_means_all(self):
+        self._seed_tasks()
+        doc = render.render_board(self.ws, projects=[])
+        self.assertEqual(doc.count('class="rowrow"'), 2)
 
     def test_board_unaffected_by_cwd(self):
         self._seed_tasks()
         with chdir(self.alpha):
             doc = render.render_board(self.ws)
-        # Still the global grouped view: beta's section is present.
-        self.assertIn('id="project-beta"', doc)
+        # Still the global grouped view: beta's lane is present.
+        self.assertIn('data-project="beta"', doc)
 
 
 class BoardServeTest(ProjectViewBase):
@@ -324,16 +340,24 @@ class BoardServeTest(ProjectViewBase):
     def test_project_query_filters_to_subset(self):
         status, body = self._get("/?project=alpha")
         self.assertEqual(status, 200)
-        self.assertEqual(body.count('<section class="project-block"'), 1)
+        self.assertEqual(body.count('class="rowrow"'), 1)
+        self.assertIn('data-project="alpha"', body)
+        self.assertNotIn('data-project="beta"', body)
         self.assertIn("t-a1", body)
         self.assertNotIn("t-b1", body)
-        self.assertIn("proj-link active", body)  # current project highlighted
+
+    def test_repeated_project_query_selects_multiple(self):
+        status, body = self._get("/?project=alpha&project=beta")
+        self.assertEqual(status, 200)
+        self.assertIn('data-project="alpha"', body)
+        self.assertIn('data-project="beta"', body)
 
     def test_all_query_returns_everything(self):
         for path in ("/", "/?project="):
             status, body = self._get(path)
             self.assertEqual(status, 200, path)
-            self.assertEqual(body.count('<section class="project-block"'), 2, path)
+            self.assertIn('data-project="alpha"', body, path)
+            self.assertIn('data-project="beta"', body, path)
             self.assertIn("t-a1", body, path)
             self.assertIn("t-b1", body, path)
 
@@ -342,12 +366,41 @@ class BoardServeTest(ProjectViewBase):
         self.assertEqual(status, 404)
         self.assertIn("unknown project", body.lower())
 
-    def test_links_are_zero_javascript(self):
+    def test_unknown_task_is_404(self):
+        status, body = self._get("/?task=ghost")
+        self.assertEqual(status, 404)
+        self.assertIn("unknown task", body.lower())
+
+    def test_task_query_opens_only_that_drawer(self):
+        status, body = self._get("/?task=t-a1")
+        self.assertEqual(status, 200)
+        self.assertEqual(body.count('class="drawer open"'), 1)
+        self.assertIn('class="drawer open" id="task-t-a1"', body)
+        # every other drawer stays closed
+        self.assertIn('class="drawer" id="task-t-b1"', body)
+
+    def test_events_endpoint_returns_task_events(self):
+        self.insert_event("t-a1", "started", {"project": "alpha", "adapter": "codex"})
+        status, body = self._get("/api/tasks/t-a1/events")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["task_id"], "t-a1")
+        self.assertTrue(payload["events"])
+        self.assertEqual(payload["events"][0]["event"], "started")
+
+    def test_events_endpoint_unknown_task_is_404_json(self):
+        status, body = self._get("/api/tasks/ghost/events")
+        self.assertEqual(status, 404)
+        payload = json.loads(body)
+        self.assertEqual(payload.get("error"), "unknown task")
+
+    def test_page_uses_a_single_inline_script(self):
         status, body = self._get("/")
         self.assertEqual(status, 200)
-        self.assertNotIn("<script", body)
-        self.assertIn('href="?project=alpha"', body)
-        self.assertIn("全部", body)
+        self.assertEqual(body.count("<script"), 1)
+        self.assertNotIn("<script src", body)
+        self.assertIn("全选", body)
+        self.assertIn("清空", body)
 
 
 if __name__ == "__main__":

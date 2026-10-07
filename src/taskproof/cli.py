@@ -623,36 +623,69 @@ def cmd_verify(args):
 
 
 def board_handler_class(workspace):
-    """HTTP handler for ``board --serve``: server-rendered, zero JavaScript.
+    """HTTP handler for ``board --serve``: server-rendered board + events API.
 
-    ``?project=<id>`` narrows the page; no/blank ``?project=`` is the full,
-    grouped board. Unknown ids are a 404 rather than a silently empty page (a
-    link that leads nowhere is a bug, not a scope). Exposed as a factory so the
-    tests can bind it to an ephemeral port instead of the blocking server.
+    ``?project=<id>`` may be repeated to narrow the page to a multi-select
+    subset; no/blank ``?project=`` is the full board. Unknown ids are a 404
+    rather than a silently empty page (a link that leads nowhere is a bug, not
+    a scope). ``?task=<id>`` renders that task's drawer already open. The same
+    handler also answers ``GET /api/tasks/<id>/events`` with JSON, so the live
+    board polls its own origin instead of the separate REST service (which may
+    be on a different port, i.e. a different origin). Exposed as a factory so
+    the tests can bind it to an ephemeral port instead of the blocking server.
     """
     import http.server
-    from urllib.parse import parse_qs, urlsplit
+    from urllib.parse import parse_qs, unquote, urlsplit
 
     from .board import render
 
+    prefix = "/api/tasks/"
+    suffix = "/events"
+
     class Handler(http.server.BaseHTTPRequestHandler):
+        def _write(self, status, body, content_type):
+            payload = body.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def _json(self, status, payload):
+            self._write(status, json.dumps(payload, ensure_ascii=False, default=str),
+                        "application/json; charset=utf-8")
+
+        def _events(self, path):
+            task_id = unquote(path[len(prefix):-len(suffix)])
+            detail = dispatch.task_detail(workspace, task_id)
+            if detail.get("task") is None:
+                self._json(404, {"error": "unknown task", "task_id": task_id})
+                return
+            self._json(200, {"task_id": task_id, "events": detail.get("events") or []})
+
         def do_GET(self):  # noqa: N802
             parsed = urlsplit(self.path)
+            if parsed.path.startswith(prefix) and parsed.path.endswith(suffix):
+                self._events(parsed.path)
+                return
             if parsed.path not in ("/", "/index.html"):
                 self.send_error(404, "not found")
                 return
-            project = (parse_qs(parsed.query).get("project") or [None])[0] or None
-            if project is not None and project not in render.known_project_ids(workspace):
-                self.send_error(404, f"unknown project: {project}")
+            query = parse_qs(parsed.query)
+            projects = [pid for pid in query.get("project", []) if pid]
+            known = set(render.known_project_ids(workspace))
+            for pid in projects:
+                if pid not in known:
+                    self.send_error(404, f"unknown project: {pid}")
+                    return
+            task = (query.get("task") or [None])[0] or None
+            if task is not None and dispatch.task_detail(workspace, task).get("task") is None:
+                self.send_error(404, f"unknown task: {task}")
                 return
             body = render.render_board(
-                workspace, project=project, serve=True
-            ).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+                workspace, projects=projects, task=task, serve=True
+            )
+            self._write(200, body, "text/html; charset=utf-8")
 
         def log_message(self, *args):
             pass
@@ -720,7 +753,9 @@ def cmd_board(args):
             raise UsageError(f"unknown project: {args.project}")
 
     out = args.out or os.path.join(args.workspace, "board.html")
-    document = render.render_board(args.workspace, project=project)
+    document = render.render_board(
+        args.workspace, projects=[project] if project is not None else None
+    )
     directory = os.path.dirname(os.path.abspath(out))
     if directory:
         os.makedirs(directory, exist_ok=True)
