@@ -12,6 +12,7 @@ Rules
    if the agent reported success.
 """
 
+import os
 import subprocess
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -27,6 +28,24 @@ class VerifyOutcome:
     violations: List[str] = field(default_factory=list)
     files_changed: Optional[int] = None
     note: str = ""
+
+
+def _tail(text: str, lines: int) -> str:
+    """Last `lines` lines of `text` (no trailing newline). Long output must
+    never be dumped wholesale into the ledger."""
+    if not text:
+        return ""
+    if not lines or lines <= 0:
+        return text
+    return "\n".join(text.splitlines()[-lines:])
+
+
+def _as_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return str(value)
 
 
 def run_acceptance(
@@ -45,7 +64,81 @@ def run_acceptance(
     * A timeout is a FAILURE, not an error: exit code is recorded as None and
       `note` says so.
     """
-    raise NotImplementedError("card: verify")
+    if command is None or not str(command).strip():
+        # Skipping is NOT passing: ran=False lets the caller record SKIPPED
+        # rather than DONE even though `passed` is trivially true.
+        return VerifyOutcome(ran=False, passed=True, note="no acceptance command")
+
+    command = str(command)
+    # Registry acceptance commands are shell one-liners ("exit 0",
+    # "for i in $(seq 1 200); do ...; done", "npm run build && npm test") that
+    # need real shell features. We therefore choose the EXPLICIT shell string
+    # form, `/bin/sh -c <command>`, over `shlex.split`. This keeps argv a list
+    # (no `shell=True`), makes the use of a shell visible and auditable, and is
+    # required because shell builtins like `exit` are not executables.
+    argv = ["/bin/sh", "-c", command]
+
+    run_env = None
+    if env:
+        # Merge so the command still inherits PATH etc.
+        run_env = {**os.environ, **env}
+
+    try:
+        proc = subprocess.run(
+            argv,
+            cwd=workdir,
+            env=run_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return VerifyOutcome(
+            ran=True,
+            passed=False,
+            exit_code=None,
+            command=command,
+            output_tail=_tail(_as_text(exc.output), tail_lines),
+            note=f"acceptance timeout: command exceeded {timeout}s (treated as failure)",
+        )
+    except FileNotFoundError as exc:
+        return VerifyOutcome(
+            ran=True,
+            passed=False,
+            exit_code=None,
+            command=command,
+            note=f"acceptance command could not run: {exc}",
+        )
+
+    output = proc.stdout or ""
+    passed = proc.returncode == 0
+    note = "" if passed else f"acceptance command exited {proc.returncode}"
+    return VerifyOutcome(
+        ran=True,
+        passed=passed,
+        exit_code=proc.returncode,
+        command=command,
+        output_tail=_tail(output, tail_lines),
+        note=note,
+    )
+
+
+def _git_porcelain(workdir: str) -> Optional[str]:
+    """Read-only `git status --porcelain`; None when workdir is not a repo."""
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=workdir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
 
 
 def detect_changes(workdir: str) -> Optional[int]:
@@ -54,18 +147,85 @@ def detect_changes(workdir: str) -> Optional[int]:
     Read-only: `git status --porcelain` and nothing else. taskproof never runs
     a git write command.
     """
-    raise NotImplementedError("card: verify")
-
-
-def check_forbidden(workdir: str, forbidden_paths: List[str], changed_files: List[str]) -> List[str]:
-    """Return the subset of `changed_files` that violates `forbidden_paths`.
-
-    Matching is on normalised relative paths and must catch a change nested
-    under a forbidden directory (e.g. `dist/app.js` for `dist/`).
-    """
-    raise NotImplementedError("card: verify")
+    porcelain = _git_porcelain(workdir)
+    if porcelain is None:
+        return None
+    return len([line for line in porcelain.splitlines() if line.strip()])
 
 
 def changed_files(workdir: str) -> List[str]:
     """Relative paths reported by `git status --porcelain` (read-only)."""
-    raise NotImplementedError("card: verify")
+    porcelain = _git_porcelain(workdir)
+    if not porcelain:
+        return []
+
+    files: List[str] = []
+    for line in porcelain.splitlines():
+        if not line.strip():
+            continue
+        # Format: two status columns, a space, then the path.
+        path = line[3:] if len(line) > 3 else line.strip()
+        # Renames/copies read "R  old -> new"; we care about the new path.
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        path = path.strip().strip('"')
+        files.append(path)
+    return files
+
+
+def _normalise(workdir: str, path: str) -> str:
+    """Normalise a path to a POSIX-style relative path from `workdir`.
+
+    Handles relative (`dist/x`), `./`-prefixed (`./dist/x`) and absolute
+    (`/repo/dist/x`) spellings so they all compare on the same footing.
+    """
+    text = str(path).replace("\\", "/")
+    base = os.path.abspath(workdir)
+    if os.path.isabs(text):
+        try:
+            text = os.path.relpath(os.path.normpath(text), base)
+        except ValueError:
+            # Different drive (Windows); fall through using the raw text.
+            pass
+    normalised = os.path.normpath(text).replace(os.sep, "/")
+    # Strip any leading "./" that survived normpath (e.g. on odd inputs).
+    while normalised.startswith("./"):
+        normalised = normalised[2:]
+    if normalised == ".":
+        normalised = ""
+    return normalised
+
+
+def check_forbidden(workdir: str, forbidden_paths: List[str],
+                    changed_files: List[str]) -> List[str]:
+    """Return the subset of `changed_files` that violates `forbidden_paths`.
+
+    Matching is on normalised relative paths and must catch a change nested
+    under a forbidden directory (e.g. `dist/app.js` for `dist/`). A rule that
+    ends with `/` is a directory rule (matches the directory and everything
+    below it); a rule without a trailing slash must match that exact path.
+    """
+    rules = []
+    for raw in forbidden_paths or []:
+        if raw is None:
+            continue
+        rule_text = str(raw).replace("\\", "/")
+        is_dir = rule_text.endswith("/")
+        rule_path = _normalise(workdir, rule_text)
+        if not rule_path:
+            continue
+        rules.append((rule_path, is_dir))
+
+    violations: List[str] = []
+    for original in changed_files or []:
+        candidate = _normalise(workdir, original)
+        for rule_path, is_dir in rules:
+            if is_dir:
+                if candidate == rule_path or candidate.startswith(rule_path + "/"):
+                    violations.append(original)
+                    break
+            else:
+                if candidate == rule_path:
+                    violations.append(original)
+                    break
+    return violations
