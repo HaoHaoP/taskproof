@@ -8,28 +8,83 @@ from `events-*.jsonl` alone.
 
 What this module deliberately does NOT do: decide whether the agent's claim is
 true. The acceptance command in `verify.py` decides that.
+
+Slot handling
+-------------
+`concurrency.acquire()` returns a list of :class:`concurrency.Lease` objects.
+A ``Lease`` is a ``str`` (the scope name) that *also* carries the owner
+``token``; `concurrency.release()` walks that list through ``_iter_leases`` and
+only deletes a row whose token matches this process. The value returned by
+``acquire`` is therefore kept verbatim and handed straight back to ``release``
+inside a ``finally`` — passing it through anything lossy (e.g. a bare scope
+string) would strip the proof of ownership and silently leak the slot.
 """
 
+import json
 import os
+import shutil
+import signal
 import subprocess
+import tempfile
+import threading
+from datetime import datetime
 from typing import Optional
 
-from . import concurrency, ledger, registry, storage, verify
+from . import concurrency, registry, storage, verify
 from .adapters import get as get_adapter
-from .errors import AdapterError, TaskproofError, VerifyError
+from .adapters.base import ResultParseError
+from .errors import EXIT_VERIFY, AdapterError, UsageError, VerifyError
 from .models import (
     STATUS_BLOCKED,
+    STATUS_CANCELLED,
     STATUS_DONE,
     STATUS_FAILED,
+    STATUS_QUEUED,
     STATUS_RUNNING,
+    STATUS_TIMEOUT,
     STATUS_VERIFYING,
     Task,
 )
 
+#: Every status the dashboard reports on, so a status with no rows still shows
+#: up as 0 instead of disappearing from the summary.
+_ALL_STATUSES = (
+    STATUS_QUEUED,
+    STATUS_RUNNING,
+    STATUS_VERIFYING,
+    STATUS_DONE,
+    STATUS_FAILED,
+    STATUS_BLOCKED,
+    STATUS_TIMEOUT,
+    STATUS_CANCELLED,
+)
+
+#: Written to `tasks.verify_cmd` when acceptance did not run. Deliberately NOT a
+#: command: a skipped check must never be readable as a pass.
+VERIFY_SKIPPED = "SKIPPED"
+
 
 def prepare_workspace(workspace: str) -> None:
-    """Create the workspace, database and audit directory if missing."""
-    raise NotImplementedError("card: dispatch")
+    """Create the workspace, database and audit directory if missing.
+
+    A brand-new workspace also gets a copy of `registry.SAMPLE_REGISTRY` so a
+    first-time user can see the file format without reading the docs.
+    """
+    os.makedirs(workspace, exist_ok=True)
+    # The audit stream (`events-<month>.jsonl`) and per-task logs live beside the
+    # database, i.e. in the workspace itself; `logs/` keeps the logs tidy.
+    os.makedirs(os.path.join(workspace, "logs"), exist_ok=True)
+
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+    finally:
+        conn.close()
+
+    reg_path = registry.workspace_registry_path(workspace)
+    if not os.path.exists(reg_path):
+        with open(reg_path, "w", encoding="utf-8") as handle:
+            handle.write(registry.SAMPLE_REGISTRY)
 
 
 def dispatch(
@@ -56,29 +111,679 @@ def dispatch(
       * slots are released on every exit path, including exceptions
       * only processes this function spawned are ever terminated
     """
-    raise NotImplementedError("card: dispatch")
+    # ② prepare + connect (creates the db and, on a fresh workspace, the sample
+    # registry we are about to read).
+    prepare_workspace(workspace)
+
+    # ① resolve the project. A missing/unknown key is a RegistryError (exit 2).
+    reg = registry.load(registry.workspace_registry_path(workspace))
+    project = reg.require(project_key)
+
+    effective_timeout = timeout if timeout is not None else reg.timeout
+
+    # Resolve the adapter object now (a bare constructor, no side effects): a bad
+    # adapter name is a UsageError raised before any task row or slot exists, so
+    # a typo can never leave a task stuck in `running`.
+    adapter_obj = get_adapter(
+        adapter, model=model, reasoning=reasoning, timeout=effective_timeout
+    )
+
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+
+        # ② allocate the task id before claiming a slot, so the claim row can
+        # name the task it is protecting.
+        prefix_date = datetime.now().strftime("%Y%m%d")
+        task_id = storage.next_task_id(conn, prefix_date=prefix_date)
+
+        # ③ claim the group slot + a slot under the global cap. A refusal is a
+        # ConcurrencyError (exit 75) and nothing is queued.
+        ttl = max(1, int(effective_timeout)) + 60
+        scopes = concurrency.acquire(
+            conn, task_id, project.group, cap=reg.concurrency, ttl=ttl
+        )
+
+        # ⑨ Whatever happens below — success, a recorded failure, or a raised
+        # error — the exact credential from ③ is released. `release` verifies the
+        # ownership token, so this can only ever drop our own claim.
+        try:
+            # ④ the task row + the `started` event.
+            task = Task(
+                id=task_id,
+                project=project.id,
+                group=project.group,
+                brief=brief,
+                status=STATUS_RUNNING,
+                adapter=adapter,
+                model=model,
+                reasoning=reasoning,
+                pid=os.getpid(),
+                created_at=storage.now_iso(),
+                started_at=storage.now_iso(),
+            )
+            storage.insert_task(conn, task)
+            storage.append_event(
+                conn,
+                task_id,
+                "started",
+                {
+                    "project": project.id,
+                    "group": project.group,
+                    "adapter": adapter,
+                    "read_only": read_only,
+                    "worktree": worktree,
+                    "skip_verify": skip_verify,
+                },
+            )
+
+            worktree_root = None
+            worktree_path = None
+            run_dir = project.path
+            try:
+                if worktree:
+                    if not _is_git_repo(project.path):
+                        raise UsageError(
+                            f"--worktree needs a git repository, but {project.path} "
+                            "is not one",
+                            hint="run without --worktree, or point the registry at a git checkout",
+                        )
+                    worktree_root, worktree_path = _create_worktree(project.path)
+                    run_dir = worktree_path
+                    storage.append_event(
+                        conn, task_id, "worktree_created", {"path": run_dir}
+                    )
+
+                _execute(
+                    conn,
+                    task_id=task_id,
+                    project=project,
+                    adapter_obj=adapter_obj,
+                    adapter_name=adapter,
+                    brief=brief,
+                    run_dir=run_dir,
+                    workspace=workspace,
+                    read_only=read_only,
+                    skip_verify=skip_verify,
+                    timeout=effective_timeout,
+                )
+                return task_id
+            finally:
+                # The worktree must be cleaned up on every exit path; a cleanup
+                # failure is recorded rather than raised (it would mask the real
+                # outcome).
+                if worktree_root is not None:
+                    error = _remove_worktree(project.path, worktree_root, worktree_path)
+                    if error:
+                        storage.append_event(
+                            conn,
+                            task_id,
+                            "worktree_cleanup_failed",
+                            {"path": worktree_path, "error": error},
+                        )
+                    else:
+                        storage.append_event(
+                            conn,
+                            task_id,
+                            "worktree_removed",
+                            {"path": worktree_path},
+                        )
+        finally:
+            concurrency.release(conn, scopes)
+    finally:
+        conn.close()
+
+
+def _execute(
+    conn,
+    *,
+    task_id: str,
+    project,
+    adapter_obj,
+    adapter_name: str,
+    brief: str,
+    run_dir: str,
+    workspace: str,
+    read_only: bool,
+    skip_verify: bool,
+    timeout: int,
+) -> None:
+    """Steps ⑤-⑧: run the adapter, gate on forbidden paths, verify, then record.
+
+    Raises AdapterError / VerifyError; always leaves the task row in a terminal
+    state (or already recorded) before it does.
+    """
+    log_path = os.path.join(workspace, "logs", f"{task_id}.log")
+
+    # ⑤ run the agent CLI, teeing its output to `log_path` as it goes.
+    try:
+        exit_code, out, err = _run_adapter(
+            adapter_obj,
+            brief=brief,
+            workdir=run_dir,
+            log_path=log_path,
+            schema_path=None,
+            read_only=read_only,
+        )
+    except VerifyError as exc:
+        # timeout: `timeout` terminal state, exit code carries EXIT_VERIFY meaning.
+        _finish_task(
+            conn, task_id, status=STATUS_TIMEOUT, exit_code=EXIT_VERIFY, workdir=run_dir
+        )
+        storage.append_event(
+            conn, task_id, "timeout", {"adapter": adapter_name, "detail": str(exc)}
+        )
+        raise
+    except AdapterError as exc:
+        _finish_task(conn, task_id, status=STATUS_FAILED, workdir=run_dir)
+        storage.append_event(
+            conn, task_id, "failed", {"stage": "adapter", "reason": str(exc)}
+        )
+        raise
+
+    # ⑤ (cont.) parse the adapter's result. A parse failure is an adapter failure
+    # (exit 70) — it must never be rounded up to success.
+    result_path = getattr(adapter_obj, "result_path", None)
+    result = None
+    parse_error = None
+    if exit_code == 0:
+        try:
+            result = adapter_obj.parse_result(
+                exit_code=exit_code, stdout=out, stderr=err, result_path=result_path
+            )
+        except ResultParseError as exc:
+            parse_error = exc
+
+    if exit_code != 0 or result is None:
+        reason = parse_error or f"agent CLI exited {exit_code}"
+        _finish_task(
+            conn,
+            task_id,
+            status=STATUS_FAILED,
+            exit_code=exit_code,
+            workdir=run_dir,
+            result_path=result_path,
+        )
+        storage.append_event(
+            conn,
+            task_id,
+            "failed",
+            {"stage": "adapter", "exit_code": exit_code, "reason": str(reason)},
+        )
+        raise AdapterError(
+            f"adapter '{adapter_name}' failed: {reason}",
+            hint=f"see {log_path} for the full agent output",
+        )
+
+    storage.append_event(
+        conn,
+        task_id,
+        "adapter",
+        {
+            "exit_code": exit_code,
+            "degraded": bool(result.parse_degraded),
+            "summary": result.summary,
+        },
+    )
+
+    # ⑥ change + forbidden-path check, on the PROJECT workdir (or its worktree).
+    changed = verify.changed_files(run_dir)
+    files_changed = verify.detect_changes(run_dir)
+    violations = verify.check_forbidden(run_dir, project.forbidden_paths, changed)
+    if violations:
+        # A protected path was touched: fail outright, even though the adapter
+        # reported success. The offending paths go into the audit stream.
+        _finish_task(
+            conn,
+            task_id,
+            status=STATUS_FAILED,
+            exit_code=exit_code,
+            files_changed=files_changed,
+            workdir=run_dir,
+            result_path=result_path,
+        )
+        storage.append_event(
+            conn,
+            task_id,
+            "forbidden",
+            {"paths": violations, "rules": list(project.forbidden_paths)},
+        )
+        storage.append_event(
+            conn, task_id, "failed", {"stage": "forbidden", "paths": violations}
+        )
+        raise VerifyError(
+            f"forbidden path(s) changed: {', '.join(violations)}",
+            hint="the task touched a path the registry protects",
+        )
+
+    # ⑦ acceptance, run in the PROJECT workdir — never the workspace. A run that
+    # is skipped (read-only, --no-verify, or no configured command) is recorded
+    # as SKIPPED, never as a pass.
+    skip_reason = _skip_reason(read_only, skip_verify, project.verify)
+    outcome = None
+    if skip_reason is not None:
+        verify_status = VERIFY_SKIPPED
+        verify_cmd_field = VERIFY_SKIPPED
+        verify_exit_field = None
+        ran = False
+        note = skip_reason
+    else:
+        outcome = verify.run_acceptance(
+            run_dir, project.verify, timeout=timeout
+        )
+        ran = outcome.ran
+        if not outcome.ran:
+            verify_status = VERIFY_SKIPPED
+            verify_cmd_field = VERIFY_SKIPPED
+            verify_exit_field = None
+        else:
+            verify_status = "PASSED" if outcome.passed else "FAILED"
+            verify_cmd_field = project.verify
+            verify_exit_field = outcome.exit_code
+        note = outcome.note
+
+    storage.append_event(
+        conn,
+        task_id,
+        "verify",
+        {
+            "status": verify_status,
+            "ran": ran,
+            "exit_code": verify_exit_field,
+            "note": note,
+            "output_tail": outcome.output_tail if outcome is not None else "",
+        },
+    )
+
+    # ⑧ terminal row + event.
+    if verify_status == "FAILED":
+        _finish_task(
+            conn,
+            task_id,
+            status=STATUS_FAILED,
+            exit_code=exit_code,
+            verify_cmd=verify_cmd_field,
+            verify_exit=verify_exit_field,
+            files_changed=files_changed,
+            workdir=run_dir,
+            result_path=result_path,
+        )
+        storage.append_event(
+            conn,
+            task_id,
+            "failed",
+            {
+                "stage": "verify",
+                "verify_exit": verify_exit_field,
+                "note": note,
+            },
+        )
+        raise VerifyError(
+            f"acceptance command failed (exit {verify_exit_field})",
+            hint=f"output: {outcome.output_tail}" if outcome and outcome.output_tail else None,
+        )
+
+    _finish_task(
+        conn,
+        task_id,
+        status=STATUS_DONE,
+        exit_code=exit_code,
+        verify_cmd=verify_cmd_field,
+        verify_exit=verify_exit_field,
+        files_changed=files_changed,
+        workdir=run_dir,
+        result_path=result_path,
+    )
+    storage.append_event(
+        conn,
+        task_id,
+        "done",
+        {
+            "verify": verify_status,
+            "files_changed": files_changed,
+            "summary": result.summary,
+        },
+    )
+
+
+def _skip_reason(read_only: bool, skip_verify: bool, verify_cmd) -> Optional[str]:
+    """Why acceptance is not being run, or None when it should run."""
+    if read_only:
+        return "read-only run: acceptance skipped"
+    if skip_verify:
+        return "--no-verify requested: acceptance skipped"
+    if not verify_cmd:
+        return "no acceptance command configured"
+    return None
+
+
+def _finish_task(
+    conn,
+    task_id: str,
+    *,
+    status: str,
+    exit_code=None,
+    verify_cmd=None,
+    verify_exit=None,
+    files_changed=None,
+    workdir=None,
+    result_path=None,
+) -> None:
+    """Patch the terminal columns of a task. Only non-None fields are written."""
+    fields = {"status": status, "finished_at": storage.now_iso()}
+    if exit_code is not None:
+        fields["exit_code"] = exit_code
+    if verify_cmd is not None:
+        fields["verify_cmd"] = verify_cmd
+    if verify_exit is not None:
+        fields["verify_exit"] = verify_exit
+    if files_changed is not None:
+        fields["files_changed"] = files_changed
+    if workdir is not None:
+        fields["workdir"] = workdir
+    if result_path is not None:
+        fields["result_path"] = result_path
+    storage.update_task(conn, task_id, **fields)
+
+
+# ---------------------------------------------------------------------------
+# Adapter execution
+# ---------------------------------------------------------------------------
+
+
+def _terminate_tree(proc) -> None:
+    """SIGTERM (then SIGKILL) only the process group this function started.
+
+    `_run_adapter` spawns with `start_new_session=True`, so the child leads its
+    own process group; signalling that group reaches the agent and its children
+    but nothing else. If the group id ever equaled ours we fall back to
+    signalling the child alone, so we can never take down our own process.
+    """
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (ProcessLookupError, OSError):
+        return
+
+    own_group = os.getpgid(0)
+    if pgid == own_group:
+        # Should not happen with start_new_session; never risk our own group.
+        try:
+            proc.terminate()
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except (ProcessLookupError, OSError):
+                pass
+        return
+
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, OSError):
+        return
+    try:
+        proc.wait(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, OSError):
+        pass
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def _run_adapter(adapter_obj, *, brief: str, workdir: str, log_path: str,
                  schema_path: Optional[str] = None, read_only: bool = False):
     """Spawn the agent CLI, tee output to `log_path`, return (exit_code, out, err).
 
-    Must not use shell=True. Must enforce `adapter_obj.timeout` and, on expiry,
-    terminate only the process tree it started.
+    * argv is a list and the shell is never used.
+    * stdout/stderr are streamed to ``log_path`` line by line as the child runs,
+      so the board can watch progress instead of waiting for the process to exit.
+    * ``stdin`` is ``/dev/null`` so an agent that reads input can never hang.
+    * `adapter_obj.timeout` is enforced; on expiry the process group this call
+      created is terminated (SIGTERM then SIGKILL) and a `VerifyError` is raised
+      (exit code 71 semantics).
     """
-    raise NotImplementedError("card: dispatch")
+    try:
+        argv = adapter_obj.build_command(
+            brief=brief, workdir=workdir, schema_path=schema_path, read_only=read_only
+        )
+    except (ValueError, TypeError) as exc:
+        raise AdapterError(
+            f"adapter '{adapter_obj.name}': could not build a command: {exc}"
+        )
+    if not argv:
+        raise AdapterError(f"adapter '{adapter_obj.name}': built an empty command")
+
+    env = {**os.environ, **(adapter_obj.env or {})}
+    timeout = adapter_obj.timeout
+
+    os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
+    out_chunks = []
+    err_chunks = []
+    write_lock = threading.Lock()
+
+    sink = open(log_path, "w", encoding="utf-8")
+    try:
+        try:
+            proc = subprocess.Popen(
+                argv,
+                cwd=workdir,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                env=env,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise AdapterError(
+                f"adapter '{adapter_obj.name}': could not start '{argv[0]}': {exc}"
+            )
+
+        def pump(stream, chunks):
+            try:
+                for line in stream:
+                    with write_lock:
+                        sink.write(line)
+                        sink.flush()
+                    chunks.append(line)
+            finally:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+
+        readers = [
+            threading.Thread(target=pump, args=(proc.stdout, out_chunks), daemon=True),
+            threading.Thread(target=pump, args=(proc.stderr, err_chunks), daemon=True),
+        ]
+        for reader in readers:
+            reader.start()
+
+        timed_out = False
+        try:
+            exit_code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _terminate_tree(proc)
+            exit_code = proc.wait()
+        for reader in readers:
+            reader.join()
+    finally:
+        sink.close()
+
+    out = "".join(out_chunks)
+    err = "".join(err_chunks)
+    if timed_out:
+        raise VerifyError(
+            f"adapter '{adapter_obj.name}': timeout after {timeout}s "
+            "(process tree terminated)",
+            hint=f"see {log_path}",
+        )
+    return exit_code, out, err
+
+
+# ---------------------------------------------------------------------------
+# git worktrees
+# ---------------------------------------------------------------------------
+
+
+def _is_git_repo(path: str) -> bool:
+    """Read-only probe: is `path` inside a git work tree?"""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+def _create_worktree(repo_path: str):
+    """`git worktree add` a fresh detached checkout; return (root, worktree).
+
+    `root` is the temporary directory that owns the checkout, so cleanup can
+    remove the whole thing even if `git worktree remove` fails.
+    """
+    root = tempfile.mkdtemp(prefix="taskproof-worktree-")
+    path = os.path.join(root, "wt")
+    proc = subprocess.run(
+        ["git", "worktree", "add", "--detach", path],
+        cwd=repo_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if proc.returncode != 0:
+        shutil.rmtree(root, ignore_errors=True)
+        raise UsageError(
+            "could not create a git worktree for this project",
+            hint=(proc.stdout or "").strip() or "git worktree add failed",
+        )
+    return root, path
+
+
+def _remove_worktree(repo_path: str, root: str, path: str) -> Optional[str]:
+    """Best-effort `git worktree remove`; returns an error string on failure."""
+    error = None
+    try:
+        proc = subprocess.run(
+            ["git", "worktree", "remove", "--force", path],
+            cwd=repo_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if proc.returncode != 0:
+            error = (proc.stdout or "").strip() or (
+                f"git worktree remove exited {proc.returncode}"
+            )
+    except (OSError, subprocess.SubprocessError) as exc:
+        error = str(exc)
+
+    # The checkout's owning temp dir always goes, even when git refused.
+    shutil.rmtree(root, ignore_errors=True)
+    if error is not None:
+        try:
+            subprocess.run(
+                ["git", "worktree", "prune"],
+                cwd=repo_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return error
+
+
+# ---------------------------------------------------------------------------
+# Queries
+# ---------------------------------------------------------------------------
 
 
 def verify_task(workspace: str, task_id: str) -> verify.VerifyOutcome:
     """Re-run acceptance for an existing task (`taskproof verify <id>`)."""
-    raise NotImplementedError("card: dispatch")
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+        row = storage.get_task(conn, task_id)
+        if row is None:
+            raise UsageError(f"no such task: {task_id}")
+        project = registry.load(
+            registry.workspace_registry_path(workspace)
+        ).require(row["project"])
+        workdir = row["workdir"] or project.path
+
+        outcome = verify.run_acceptance(workdir, project.verify)
+        status = VERIFY_SKIPPED if not outcome.ran else (
+            "PASSED" if outcome.passed else "FAILED"
+        )
+        fields = {"verify_cmd": project.verify if outcome.ran else VERIFY_SKIPPED}
+        if outcome.exit_code is not None:
+            fields["verify_exit"] = outcome.exit_code
+        if outcome.files_changed is not None:
+            fields["files_changed"] = outcome.files_changed
+        storage.update_task(conn, task_id, **fields)
+        storage.append_event(
+            conn,
+            task_id,
+            "verify",
+            {
+                "status": status,
+                "ran": outcome.ran,
+                "exit_code": outcome.exit_code,
+                "note": outcome.note,
+                "violations": outcome.violations,
+            },
+        )
+        return outcome
+    finally:
+        conn.close()
 
 
 def task_detail(workspace: str, task_id: str) -> dict:
-    """Task row plus its event stream, for `show` and the board's detail view."""
-    raise NotImplementedError("card: dispatch")
+    """Task row plus its (JSON-decoded) event stream, for `show` and the board."""
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+        row = storage.get_task(conn, task_id)
+        task = dict(row) if row is not None else None
+
+        events = []
+        for event in storage.list_events(conn, task_id):
+            item = dict(event)
+            raw = item.get("payload")
+            if raw is not None:
+                try:
+                    item["payload"] = json.loads(raw)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
+            events.append(item)
+        return {"task": task, "events": events}
+    finally:
+        conn.close()
 
 
 def summary_counts(workspace: str, conn) -> dict:
-    """Counts per status — the one query the dashboard leans on."""
-    raise NotImplementedError("card: storage-crud")
+    """Counts per status — the one query the dashboard leans on.
+
+    Every known status is present (0 when it has no rows) so the board can draw
+    a stable set of columns without special-casing a missing bucket.
+    """
+    counts = {status: 0 for status in _ALL_STATUSES}
+    for row in conn.execute("SELECT status, COUNT(*) FROM tasks GROUP BY status"):
+        counts[row[0]] = int(row[1])
+    return counts
