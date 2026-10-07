@@ -44,6 +44,12 @@ class _UsageErrorParser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # Imported inside the function (not at module scope) so cli does not depend
+    # on api.server at import time; api.server pulls in package modules that cli
+    # also imports, and a module-level import risks a cycle. 8787 lives in one
+    # place: api/server.py:DEFAULT_PORT.
+    from .api.server import DEFAULT_PORT
+
     parser = _UsageErrorParser(
         prog="taskproof",
         description="A conveyor belt for AI coding agents: dispatch, independently verify, record.",
@@ -94,14 +100,19 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("verify", help="re-run acceptance for a task")
     p.add_argument("task_id")
 
-    p = sub.add_parser("board", help="dashboard")
-    p.add_argument("--open", action="store_true", help="write HTML and open it")
-    p.add_argument("--serve", type=int, nargs="?", const=8787, metavar="PORT")
-    p.add_argument("--out", help="write a standalone HTML snapshot to this path")
+    p = sub.add_parser("board", help="dashboard: static snapshot or live server")
+    p.add_argument("--open", action="store_true",
+                   help="serve the live board and open it in a browser (blocks)")
+    p.add_argument("--serve", type=int, nargs="?", const=DEFAULT_PORT, metavar="PORT",
+                   help="serve the live board only, do not open a browser (blocks)")
+    p.add_argument("--snapshot", action="store_true",
+                   help="write a standalone static snapshot (does not auto-refresh)")
+    p.add_argument("--out", metavar="FILE",
+                   help="write a standalone static snapshot to FILE (no browser, does not block)")
     p.add_argument("--project", help="render only this project id")
 
     p = sub.add_parser("api", help="serve the local REST API (consumed by the desktop frontend)")
-    p.add_argument("--port", type=int, default=8787)
+    p.add_argument("--port", type=int, default=DEFAULT_PORT)
 
     sub.add_parser("doctor", help="environment self-check")
     sub.add_parser("gc", help="rotate the audit stream and prune old state")
@@ -155,7 +166,8 @@ def cmd_init(args):
         "next:\n"
         "  taskproof register <path>         # probe and register a repository\n"
         '  taskproof run <project> "<task>"  # dispatch, verify, record\n'
-        "  taskproof board --open            # static dashboard snapshot"
+        "  taskproof board --open            # live dashboard (serves + opens a browser)\n"
+        "  taskproof board --out board.html  # static snapshot (does not auto-refresh)"
     )
     emit(args, payload, human)
     return 0
@@ -648,19 +660,30 @@ def board_handler_class(workspace):
     return Handler
 
 
-def _board_serve(workspace, port):
+def _board_serve(workspace, port, *, open_browser=False, httpd_factory=None):
+    """Bind 127.0.0.1:port, then optionally open a browser and serve forever.
+
+    Binding happens *before* the browser is opened, so a busy port surfaces as a
+    UsageError instead of a tab that never loads. ``httpd_factory`` and
+    ``open_browser`` are seams for the tests: they let a test observe the URL
+    handed to ``webbrowser.open`` and stop the loop without a real socket or a
+    permanent block. The opened URL uses the port the socket actually bound
+    (so ``port=0`` still yields a reachable address).
+    """
     import http.server
 
+    factory = httpd_factory or http.server.ThreadingHTTPServer
     try:
-        httpd = http.server.ThreadingHTTPServer(
-            ("127.0.0.1", port), board_handler_class(workspace)
-        )
+        httpd = factory(("127.0.0.1", port), board_handler_class(workspace))
     except OSError as exc:
         raise UsageError(
             f"cannot serve the board on 127.0.0.1:{port}: {exc}",
             hint="the port is already in use; pass another --serve PORT",
         )
+    bound_port = httpd.server_address[1]
     try:
+        if open_browser:
+            webbrowser.open(f"http://127.0.0.1:{bound_port}/")
         httpd.serve_forever()
     finally:
         httpd.server_close()
@@ -668,12 +691,27 @@ def _board_serve(workspace, port):
 
 
 def cmd_board(args):
+    from .api.server import DEFAULT_PORT
     from .board import render
+
+    # Two mutually exclusive modes: a live server (--open/--serve, blocks) or a
+    # static snapshot (--out/--snapshot, writes a file and returns). Never
+    # silently drop one: mixing them is a usage error, not a coin flip.
+    live = args.open or args.serve is not None
+    snapshot = args.snapshot or args.out is not None
+    if live and snapshot:
+        raise UsageError(
+            "--open/--serve (live view) cannot be combined with "
+            "--out/--snapshot (static snapshot)",
+            hint="pick one: `taskproof board --open` for the live view, or "
+                 "`taskproof board --out FILE` for a static snapshot",
+        )
 
     # The board is a "global view": it never consults the cwd. Choosing a subset
     # is explicit (--project here, or ?project= in serve mode).
-    if args.serve is not None:
-        return _board_serve(args.workspace, args.serve)
+    if live:
+        port = args.serve if args.serve is not None else DEFAULT_PORT
+        return _board_serve(args.workspace, port, open_browser=args.open)
 
     project = args.project
     if project is not None:
@@ -689,12 +727,11 @@ def cmd_board(args):
     with open(out, "w", encoding="utf-8") as handle:
         handle.write(document)
 
-    opened = False
-    if args.open:
-        webbrowser.open("file://" + os.path.abspath(out))
-        opened = True
-    payload = {"path": os.path.abspath(out), "opened": opened, "bytes": len(document)}
-    human = f"board written: {os.path.abspath(out)}" + (" (opened)" if opened else "")
+    payload = {"path": os.path.abspath(out), "bytes": len(document)}
+    human = (
+        f"board written: {os.path.abspath(out)} — static snapshot "
+        "(does not auto-refresh); use `taskproof board --open` for the live view"
+    )
     emit(args, payload, human)
     return 0
 
