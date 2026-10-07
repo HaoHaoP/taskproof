@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.db
+*.db-shm
+*.db-wal
+
+# Node / frontend
+node_modules/
+web/dist/
+.vite/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local state produced by running taskproof
+.taskproof/
+*.jsonl
+!docs/**/*.jsonl
+
+# Secrets / local config (never commit)
+.env
+.env.*
+!env.example
