@@ -28,8 +28,23 @@ from .models import TERMINAL_STATUSES
 DEFAULT_WORKSPACE = os.path.join(os.path.expanduser("~"), ".taskproof")
 
 
+class _UsageErrorParser(argparse.ArgumentParser):
+    """Route usage errors to EXIT_USAGE (64) instead of argparse's default 2.
+
+    The exit-code table in errors.py is a contract for callers. argparse exits 2
+    on a bad invocation, which collides with EXIT_REGISTRY (also 2) — leaving a
+    caller unable to tell "you typed the command wrong" apart from "that project
+    is not registered". Overriding here restores the documented distinction.
+    """
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: {message}", file=sys.stderr)
+        sys.exit(errors.EXIT_USAGE)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _UsageErrorParser(
         prog="taskproof",
         description="A conveyor belt for AI coding agents: dispatch, independently verify, record.",
     )
