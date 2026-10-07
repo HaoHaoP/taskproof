@@ -39,7 +39,15 @@ def append(audit_dir: str, event: dict) -> str:
     Must be atomic enough that a concurrent reader never sees a partial line:
     one `write()` of a complete line, opened in append mode.
     """
-    raise NotImplementedError("card: ledger")
+    if audit_dir:
+        ensure_dir(audit_dir)
+    path = stream_path(audit_dir, month_key(event.get("ts")))
+    line = json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n"
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(line)  # one write() of a complete line
+        fh.flush()
+        os.fsync(fh.fileno())
+    return path
 
 
 def rotate(audit_dir: str, *, keep_months: int = 6, compress: bool = True) -> list:
