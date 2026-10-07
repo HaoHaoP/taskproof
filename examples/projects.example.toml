@@ -1,0 +1,48 @@
+# taskproof project registry — EXAMPLE
+#
+# Copy to <workspace>/projects.toml and edit. This file is CONFIGURATION:
+# commit it to your own repository if you like. Runtime state lives in SQLite.
+#
+# Only one task per `group` runs at a time; `group` therefore expresses
+# "these repositories must not be built simultaneously" (shared build output,
+# same monorepo, same device, ...). Different groups run in parallel up to
+# `concurrency`.
+
+[defaults]
+concurrency = 3   # global cap on simultaneous tasks
+timeout = 1800    # seconds before a task is judged stuck and terminated
+
+# ---------------------------------------------------------------------------
+# A minimal entry: one path, one acceptance command.
+# ---------------------------------------------------------------------------
+[[project]]
+id = "my-app"
+path = "/absolute/path/to/my-app"
+group = "my-app"
+aliases = ["app"]
+# The acceptance command is run by taskproof AFTER the agent exits, in this
+# workdir. The agent's own "I'm done" is never evidence.
+verify = "npm run build"
+verify_kind = "build"          # check | build | none
+forbidden_paths = [".git/", "dist/", "node_modules/"]
+
+# ---------------------------------------------------------------------------
+# A repository with no runnable acceptance command yet.
+# `verify_kind = "none"` records verification as SKIPPED — never as passed.
+# ---------------------------------------------------------------------------
+[[project]]
+id = "docs-site"
+path = "/absolute/path/to/docs-site"
+group = "docs"
+verify_kind = "none"
+
+# ---------------------------------------------------------------------------
+# A backend where the cheap check is preferred over a full build.
+# ---------------------------------------------------------------------------
+[[project]]
+id = "api-service"
+path = "/absolute/path/to/api-service"
+group = "api"
+verify = "mvn -q -DskipTests compile"
+verify_kind = "check"
+forbidden_paths = [".git/", "target/"]

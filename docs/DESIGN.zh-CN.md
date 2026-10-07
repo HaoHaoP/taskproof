@@ -54,7 +54,8 @@ agent 报告成功                        → 独立跑验收命令，是红的
 ## 技术选型
 
 ```
-语言      Python 单包，纯标准库（sqlite3 / subprocess / json / http.server / argparse）
+语言      Python 单包，纯标准库，Python 3.11+
+          （sqlite3 / subprocess / json / http.server / argparse / tomllib）
 安装      pipx install taskproof
 许可证    Apache-2.0（含专利授权，公司可用；刻意不用 AGPL —— 本工具的价值依赖被采用）
 仓库      独立仓库，与雇主代码严格隔离
@@ -78,8 +79,9 @@ events.jsonl —— 审计流水
 （前身同时维护账本和一份独立的卡片注册表，二者会漂移 —— 看板显示"运行中"
 而任务几小时前就结束，就是这么来的。）
 
-**配置与状态分离**：项目注册表是 YAML 文件（人可编辑，可放进用户自己的 git 仓库）。
-只有运行时状态进 SQLite。
+**配置与状态分离**：项目注册表是 TOML 文件（人可编辑，可放进用户自己的 git 仓库）。
+只有运行时状态进 SQLite。选 TOML 而非 YAML，是因为标准库自带 `tomllib`（Python 3.11+），
+而 YAML 会引入外部依赖。
 
 ## 数据模型
 

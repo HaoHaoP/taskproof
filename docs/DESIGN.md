@@ -60,8 +60,8 @@ No automated git write operations (commit / push are never automated)
 ## Stack
 
 ```
-Language    Python, single package, standard library only
-            (sqlite3 / subprocess / json / http.server / argparse)
+Language    Python, single package, standard library only, Python 3.11+
+            (sqlite3 / subprocess / json / http.server / argparse / tomllib)
 Install     pipx install taskproof
 License     Apache-2.0 (patent grant included, corporate-friendly; deliberately
             not AGPL — this tool's value depends on being adopted)
@@ -87,9 +87,10 @@ Key design point: JSONL carries no query responsibility, so the
 a separate card registry that drifted, which is how a dashboard ends up showing
 "running" for a task that finished hours ago.)
 
-**Config and state are separated**: the project registry is a YAML file (human
+**Config and state are separated**: the project registry is a TOML file (human
 editable, version-controllable in the user's own repo). Only runtime state goes
-into SQLite.
+into SQLite. TOML rather than YAML because the standard library ships `tomllib`
+(Python 3.11+) while YAML would pull in a dependency.
 
 ## Data model
 

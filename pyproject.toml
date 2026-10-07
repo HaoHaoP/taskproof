@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taskproof"
+version = "0.0.1"
+description = "A conveyor belt for AI coding agents: dispatch, independently verify, record."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "HaoHaoP" }]
+keywords = ["ai-agents", "orchestration", "verification", "codex", "claude-code", "cli"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Build Tools",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/HaoHaoP/taskproof"
+Issues = "https://github.com/HaoHaoP/taskproof/issues"
+
+[project.scripts]
+taskproof = "taskproof.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+taskproof = ["web/**/*", "sql/*.sql"]
