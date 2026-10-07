@@ -5,7 +5,18 @@
 它不决定**该做什么**，只保证派出去的活都被**独立验收**过、**留了痕迹** ——
 你不需要相信 agent 自称"我干完了"。
 
-**状态：设计阶段。** 尚无实现。完整设计与决策记录见 [`docs/DESIGN.zh-CN.md`](docs/DESIGN.zh-CN.md)。
+**状态：stage 1 已可用。** 引擎、CLI、静态看板与本地只读 REST API 均已实现。
+完整设计与决策记录见 [`docs/DESIGN.zh-CN.md`](docs/DESIGN.zh-CN.md)。
+
+### 快速上手
+
+```bash
+pipx install taskproof        # 或从源码安装：pip install -e .
+taskproof init
+taskproof register /path/to/your/repo
+taskproof run your-repo "修掉那个挂掉的测试"
+taskproof board --open
+```
 
 ---
 
@@ -57,6 +68,20 @@ taskproof board                  # 看板
 - 不做 agent 之间的对话层
 - 不生成、不编辑代码
 - 不做任何自动化的 `git` 写操作
+
+## 退出码
+
+退出码是给调用方（脚本、agent、CI）的契约：不用解析 stdout，
+就能知道这次运行**为什么**结束。
+
+| 码 | 含义 |
+|---|---|
+| 0  | 成功 |
+| 2  | 注册表问题（项目未注册、注册表缺失/损坏、id 重复） |
+| 64 | 用法错误（参数不对、路径不存在、任务或适配器不存在） |
+| 70 | 适配器（agent）失败 —— CLI 没跑起来，或结果无法解析 |
+| 71 | 验收/产物自检失败（验收命令没通过） |
+| 75 | 并发受限（同组占用，或全局配额已满） |
 
 ## 许可证
 

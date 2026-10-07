@@ -6,8 +6,19 @@ It does not decide *what* to do. It guarantees that whatever gets dispatched is
 **independently verified** and **recorded** — so you never have to trust an
 agent's own claim that it finished.
 
-**Status: design phase.** No implementation yet. See [`docs/DESIGN.md`](docs/DESIGN.md)
-for the full design and the decision log.
+**Status: stage 1 is usable.** The engine, CLI, a static board and a local
+read-only REST API are implemented. See [`docs/DESIGN.md`](docs/DESIGN.md) for
+the full design and the decision log.
+
+### Quick start
+
+```bash
+pipx install taskproof        # or, from a source checkout: pip install -e .
+taskproof init
+taskproof register /path/to/your/repo
+taskproof run your-repo "fix the failing test"
+taskproof board --open
+```
 
 ---
 
@@ -67,6 +78,20 @@ taskproof board                      # dashboard
 - No agent-to-agent conversation layer
 - No code generation or editing of its own
 - No automated `git` write operations
+
+## Exit codes
+
+Exit codes are part of the contract for callers (scripts, agents, CI): they tell
+you *why* a run ended without parsing stdout.
+
+| Code | Meaning |
+|---|---|
+| 0  | success |
+| 2  | registry problem (unknown project, missing/malformed registry, duplicate id) |
+| 64 | usage error (bad flags, missing path, unknown task or adapter) |
+| 70 | adapter (agent) failure — the CLI failed to run, or its result could not be parsed |
+| 71 | verification or artifact self-check failure (acceptance command failed) |
+| 75 | concurrency limit reached (same-group busy, or the global cap is full) |
 
 ## License
 
