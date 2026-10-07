@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "taskproof Codex task result",
+  "description": "Passed to `codex exec --output-schema <this file> -o <result file>` to constrain the agent's final answer to a machine-readable shape. IMPORTANT: DeepSeek structured output runs in strict mode — every key under an object's `properties` MUST also be listed in that object's `required` array (a missing key fails with HTTP 400 'Required properties must match all properties in the object'). Every level of this schema therefore lists all of its fields as required and has no optional fields; when a value does not apply, use an empty string or an empty array.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "files_changed", "verify", "blockers", "needs_approval", "contract_dispute"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["done", "partial", "blocked", "rejected"],
+      "description": "done=completed as specified; partial=partially done (explain in summary); blocked=stopped by an external factor; rejected=the task boundary itself is wrong (do not change code in that case)"
+    },
+    "summary": {
+      "type": "string",
+      "description": "One to three sentences on what was done and the outcome. Do not replay the process log."
+    },
+    "files_changed": {
+      "type": "array",
+      "description": "Files actually added/changed/deleted; empty array when no file changed",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "change", "why"],
+        "properties": {
+          "path": { "type": "string", "description": "Path relative to the repository root" },
+          "change": { "type": "string", "enum": ["add", "modify", "delete"] },
+          "why": { "type": "string", "description": "Why this file was touched (one sentence)" }
+        }
+      }
+    },
+    "verify": {
+      "type": "object",
+      "description": "The verification commands actually run and their results; if none were run, leave command as an empty string, set exit_code to -1, and explain why under blockers",
+      "additionalProperties": false,
+      "required": ["command", "exit_code", "output_excerpt"],
+      "properties": {
+        "command": { "type": "string" },
+        "exit_code": { "type": "integer" },
+        "output_excerpt": { "type": "string", "description": "Key output summary (error lines or the tail); do not paste the whole log" }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "description": "Anything that prevented completion: missing dependency, missing permission, insufficient information, needed human confirmation, ...; empty array when there is none",
+      "items": { "type": "string" }
+    },
+    "needs_approval": {
+      "type": "array",
+      "description": "Actions that need the user's go-ahead (changing config, touching git, installing dependencies, connecting to a database, touching production/internal systems, ...). List them but do not perform them; empty array when there is none",
+      "items": { "type": "string" }
+    },
+    "contract_dispute": {
+      "type": "string",
+      "description": "If the task boundary is wrong (the repository or the files that should change are not the ones named in the contract), write that here and do not change any code; empty string when there is no dispute"
+    }
+  }
+}

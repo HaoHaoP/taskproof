@@ -255,6 +255,27 @@ def _execute(
     """
     log_path = os.path.join(workspace, "logs", f"{task_id}.log")
 
+    # Resolve the structured-result contract for THIS project: the project
+    # setting wins, otherwise the package default. `None` means structured
+    # output is disabled — that is recorded rather than done silently, so a
+    # free-text result can always be explained after the fact.
+    schema_path = registry.result_schema_path(project)
+    if schema_path is None:
+        storage.append_event(
+            conn,
+            task_id,
+            "result_schema",
+            {
+                "enabled": False,
+                "path": None,
+                "note": "structured result disabled (result_schema = \"none\")",
+            },
+        )
+    else:
+        storage.append_event(
+            conn, task_id, "result_schema", {"enabled": True, "path": schema_path}
+        )
+
     # ⑤ run the agent CLI, teeing its output to `log_path` as it goes.
     try:
         exit_code, out, err = _run_adapter(
@@ -262,7 +283,7 @@ def _execute(
             brief=brief,
             workdir=run_dir,
             log_path=log_path,
-            schema_path=None,
+            schema_path=schema_path,
             read_only=read_only,
         )
     except VerifyError as exc:
@@ -539,6 +560,42 @@ def _terminate_tree(proc) -> None:
         pass
 
 
+#: Loopback hosts that must never be sent to a forward proxy: a local service
+#: (e.g. a CC Switch endpoint on http://127.0.0.1:15721/v1) is not reachable
+#: through a proxy.
+_LOCALHOST_NO_PROXY = ("127.0.0.1", "localhost", "::1")
+
+#: Proxy variables whose presence means the child could otherwise be routed.
+_PROXY_ENV_NAMES = (
+    "http_proxy", "https_proxy", "all_proxy",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+)
+
+
+def _ensure_localhost_no_proxy(env: dict) -> dict:
+    """Make loopback hosts bypass any proxy, without clobbering the user's.
+
+    Defence: when the parent routes through a proxy (any of http_proxy /
+    https_proxy / all_proxy), a request to a local service must still go direct,
+    or it is shipped off to the proxy and fails. `no_proxy` and `NO_PROXY` are
+    extended with 127.0.0.1, localhost and ::1; existing entries are kept and
+    merged — never overwritten — and no other proxy semantics are changed.
+    """
+    if not any(env.get(name) for name in _PROXY_ENV_NAMES):
+        return env
+    for name in ("no_proxy", "NO_PROXY"):
+        entries = [
+            item.strip() for item in (env.get(name) or "").split(",") if item.strip()
+        ]
+        seen = {item.lower() for item in entries}
+        for host in _LOCALHOST_NO_PROXY:
+            if host.lower() not in seen:
+                entries.append(host)
+                seen.add(host.lower())
+        env[name] = ",".join(entries)
+    return env
+
+
 def _run_adapter(adapter_obj, *, brief: str, workdir: str, log_path: str,
                  schema_path: Optional[str] = None, read_only: bool = False):
     """Spawn the agent CLI, tee output to `log_path`, return (exit_code, out, err).
@@ -563,6 +620,7 @@ def _run_adapter(adapter_obj, *, brief: str, workdir: str, log_path: str,
         raise AdapterError(f"adapter '{adapter_obj.name}': built an empty command")
 
     env = {**os.environ, **(adapter_obj.env or {})}
+    env = _ensure_localhost_no_proxy(env)
     timeout = adapter_obj.timeout
 
     os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)

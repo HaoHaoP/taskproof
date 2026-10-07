@@ -46,3 +46,27 @@ group = "api"
 verify = "mvn -q -DskipTests compile"
 verify_kind = "check"
 forbidden_paths = [".git/", "target/"]
+
+# ---------------------------------------------------------------------------
+# Structured results (`result_schema`)
+#
+# `codex exec` accepts `--output-schema`, which constrains the agent's final
+# answer to JSON. taskproof always ships a default schema; override it per
+# project with `result_schema`:
+#
+#   (omit)  or  result_schema = "default"
+#       Use the package-shipped default schema (recommended).
+#   result_schema = "none"
+#       Disable structured output; the result falls back to free text and a
+#       task event records that structured results were turned off.
+#   result_schema = "/absolute/path/to/schema.json"
+#       Use a custom JSON Schema. A path that does not exist is a hard error —
+#       taskproof never silently falls back to the default.
+#
+# Example:
+#   [[project]]
+#   id = "custom-json"
+#   path = "/absolute/path/to/repo"
+#   verify_kind = "none"
+#   result_schema = "/absolute/path/to/schema.json"
+# ---------------------------------------------------------------------------

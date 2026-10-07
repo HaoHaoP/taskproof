@@ -38,6 +38,10 @@ class Project:
     verify_kind: str = "none"  # check | build | none
     forbidden_paths: List[str] = field(default_factory=list)
     auto_registered: bool = False
+    #: Structured-result contract: "default" (package-shipped schema), "none"
+    #: (fall back to free text, never silent), or an absolute path to a custom
+    #: JSON Schema. See `registry.result_schema_path`.
+    result_schema: str = "default"
 
 
 @dataclass

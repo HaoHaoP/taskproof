@@ -20,6 +20,7 @@ Example
     verify = "npm run build"
     verify_kind = "build"
     forbidden_paths = [".git/", "dist/"]
+    result_schema = "default"   # "default" | "none" | "/abs/path.json"
 
 Resolution accepts an id, an alias, or a filesystem path.
 """
@@ -32,6 +33,41 @@ from .errors import RegistryError
 from .models import Project
 
 DEFAULT_REGISTRY_NAME = "projects.toml"
+
+#: Package-shipped default structured-result contract (`schemas/result.json`).
+#: Resolved relative to this file so the path is correct whether the package is
+#: run from a source checkout or installed from a wheel.
+BUILTIN_RESULT_SCHEMA = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "schemas", "result.json"
+)
+
+#: `result_schema` values that are settings rather than filesystem paths.
+RESULT_SCHEMA_DEFAULT = "default"
+RESULT_SCHEMA_NONE = "none"
+
+
+def builtin_result_schema_path() -> str:
+    """Absolute path to the package-shipped default result schema."""
+    return BUILTIN_RESULT_SCHEMA
+
+
+def result_schema_path(project: Project) -> Optional[str]:
+    """Resolve a project's `result_schema` setting to an argv-ready path.
+
+    * omitted / ``"default"`` -> the package-shipped ``schemas/result.json``
+    * ``"none"``              -> ``None`` (structured result disabled)
+    * any other string        -> the absolute path validated at load time
+
+    Returning ``None`` is the ONLY way structured output is turned off, and it
+    is always paired with an explicit event at dispatch time — a run never
+    silently falls back to free text.
+    """
+    value = project.result_schema
+    if value == RESULT_SCHEMA_NONE:
+        return None
+    if not value or value == RESULT_SCHEMA_DEFAULT:
+        return BUILTIN_RESULT_SCHEMA
+    return value
 
 
 class Registry:
@@ -129,6 +165,28 @@ def load(path: str) -> Registry:
             raise RegistryError(f"{path}: duplicate project id: {project_id}")
         seen[project_id] = True
 
+        result_schema = entry.get("result_schema", RESULT_SCHEMA_DEFAULT)
+        if not isinstance(result_schema, str):
+            raise RegistryError(
+                f"{path}: project '{project_id}' result_schema must be a string "
+                f"(got {type(result_schema).__name__})"
+            )
+        result_schema = result_schema.strip()
+        if result_schema not in (RESULT_SCHEMA_DEFAULT, RESULT_SCHEMA_NONE):
+            # Anything else is an absolute path to a custom schema. A missing
+            # path is a hard error: silently falling back to the default would
+            # change the result contract behind the user's back.
+            if not os.path.isabs(result_schema):
+                raise RegistryError(
+                    f"{path}: project '{project_id}' result_schema must be "
+                    f"'default', 'none', or an absolute path: {result_schema!r}"
+                )
+            if not os.path.isfile(result_schema):
+                raise RegistryError(
+                    f"{path}: project '{project_id}' result_schema file not "
+                    f"found: {result_schema}"
+                )
+
         verify = entry.get("verify")
         if isinstance(verify, str) and not verify.strip():
             verify = None
@@ -152,6 +210,7 @@ def load(path: str) -> Registry:
                 verify_kind=verify_kind,
                 forbidden_paths=list(entry.get("forbidden_paths") or []),
                 auto_registered=bool(entry.get("auto_registered", False)),
+                result_schema=result_schema,
             )
         )
 
