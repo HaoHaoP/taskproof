@@ -121,6 +121,49 @@ class Registry:
         return int(self.defaults.get("timeout", 1800))
 
 
+#: Scope-source labels. The CLI prints these verbatim, so they are part of the
+#: human contract (see docs: the scope must always be visible).
+SCOPE_FROM_PROJECT = "来自 --project"
+SCOPE_FROM_ALL = "来自 --all"
+SCOPE_FROM_CWD = "来自 cwd"
+SCOPE_OUTSIDE = "cwd 不在任何已登记仓库内"
+
+
+def resolve_scope(reg, *, explicit_project=None, force_all=False, cwd=None):
+    """Map the caller's context to one project (or all), plus a source label.
+
+    Returns ``(project_id_or_None, source_label)``. ``None`` means "all
+    projects". Priority is fixed and deliberately boring:
+
+        ``--project`` > ``--all`` > cwd inference > all (when cwd is outside)
+
+    cwd inference matches a registered project when the working directory is
+    that project's directory *or* a descendant. Symlinks are resolved first
+    (macOS spells ``/tmp`` and ``/private/tmp`` differently), and the *longest*
+    matching project path wins so a nested project beats its parent repo.
+    """
+    if explicit_project:
+        project = reg.by_id(explicit_project) if reg is not None else None
+        return (project.id if project is not None else explicit_project), SCOPE_FROM_PROJECT
+    if force_all:
+        return None, SCOPE_FROM_ALL
+
+    if cwd is None:
+        cwd = os.getcwd()
+    target = os.path.realpath(cwd)
+    best = None
+    best_len = -1
+    for project in (reg.projects if reg is not None else []):
+        project_path = os.path.realpath(project.path)
+        if target == project_path or target.startswith(project_path + os.sep):
+            if len(project_path) > best_len:
+                best_len = len(project_path)
+                best = project
+    if best is not None:
+        return best.id, SCOPE_FROM_CWD
+    return None, SCOPE_OUTSIDE
+
+
 VALID_VERIFY_KINDS = ("check", "build", "none")
 
 

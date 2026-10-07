@@ -98,19 +98,34 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _projects(self):
         reg = registry.load(registry.workspace_registry_path(self.workspace))
-        return [
-            {
-                "id": project.id,
-                "path": project.path,
-                "group": project.group,
-                "aliases": list(project.aliases),
-                "verify": project.verify,
-                "verify_kind": project.verify_kind,
-                "forbidden_paths": list(project.forbidden_paths),
-                "auto_registered": bool(project.auto_registered),
-            }
-            for project in reg.projects
-        ]
+        conn = storage.connect(storage.db_path(self.workspace))
+        try:
+            storage.migrate(conn)
+            overview = {row["project"]: row for row in storage.project_overview(conn)}
+        finally:
+            conn.close()
+        projects = []
+        for project in reg.projects:
+            stat = overview.get(project.id) or {}
+            projects.append(
+                {
+                    "id": project.id,
+                    "path": project.path,
+                    "group": project.group,
+                    "aliases": list(project.aliases),
+                    "verify": project.verify,
+                    "verify_kind": project.verify_kind,
+                    "forbidden_paths": list(project.forbidden_paths),
+                    "auto_registered": bool(project.auto_registered),
+                    # Overview numbers, derived from the same aggregate SQL the
+                    # `projects` command uses.
+                    "tasks": int(stat.get("total", 0)),
+                    "in_progress": int(stat.get("in_progress", 0)),
+                    "failed": int(stat.get("failed", 0)),
+                    "last_activity": stat.get("last_activity"),
+                }
+            )
+        return projects
 
     def _tasks(self, query):
         limit = _DEFAULT_LIMIT

@@ -14,7 +14,7 @@ import html
 from datetime import datetime
 from typing import Optional
 
-from .. import dispatch, storage
+from .. import registry, storage
 
 #: Stable column order for the header, matching models.py.
 _STATUS_ORDER = (
@@ -58,6 +58,18 @@ dt { color: #656d76; font-size: 12px; }
 dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
      font-size: 12px; word-break: break-word; }
 .ts { color: #8b949e; }
+nav.projects { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
+nav.projects a { color: #cbd2d9; text-decoration: none; font-size: 12px;
+                 padding: 2px 10px; border-radius: 999px; background: #343a41; }
+nav.projects a.active { background: #f4f5f7; color: #1f2328; font-weight: 600; }
+main.sections { display: block; padding: 20px 24px; }
+section.project-block { margin: 0 0 20px; }
+section.project-block > h2 { font-size: 13px; margin: 0 0 8px; letter-spacing: .03em;
+                             text-transform: uppercase; }
+section.project-block > h2 .project-count { color: #656d76; font-weight: 400; }
+.cards { display: grid; gap: 12px;
+         grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.empty { color: #656d76; }
 """
 
 
@@ -145,22 +157,125 @@ def _card(task: dict, last_event, reference: str) -> str:
     )
 
 
+def _load_registered_projects(workspace):
+    """Best-effort registry read: ``[{id, path, group}]`` in file order.
+
+    A missing or malformed registry must not break the board (it renders from
+    the database), so failures collapse to an empty list.
+    """
+    try:
+        reg = registry.load(registry.workspace_registry_path(workspace))
+    except Exception:
+        return []
+    return [{"id": p.id, "path": p.path, "group": p.group} for p in reg.projects]
+
+
+def _nav_projects(workspace):
+    """Every project id the board knows about, in navigation order.
+
+    Projects that have tasks come first (most recently active first, via the
+    overview SQL); registry-only projects follow in configuration order.
+    """
+    ids = []
+    seen = set()
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+        for row in storage.project_overview(conn):
+            pid = row["project"]
+            if pid not in seen:
+                seen.add(pid)
+                ids.append(pid)
+    finally:
+        conn.close()
+    for proj in _load_registered_projects(workspace):
+        if proj["id"] not in seen:
+            seen.add(proj["id"])
+            ids.append(proj["id"])
+    return ids
+
+
+def known_project_ids(workspace):
+    """Project ids the ``?project=`` link may select (used to reject unknown ids)."""
+    return _nav_projects(workspace)
+
+
+def _status_counts(conn, project):
+    """Per-status counts for the whole board or for one project."""
+    counts = {status: 0 for status in _STATUS_ORDER}
+    if project is None:
+        rows = conn.execute("SELECT status, COUNT(*) FROM tasks GROUP BY status")
+    else:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) FROM tasks WHERE project = ? GROUP BY status",
+            (project,),
+        )
+    for status, count in rows:
+        counts[status] = int(count)
+    return counts
+
+
+def _nav_html(workspace, selected):
+    """Project switch links — plain ``<a>`` anchors, no JavaScript.
+
+    Interpolations go through ``_escape`` (and URL-quoting for the href) because
+    project ids come from configuration.
+    """
+    from urllib.parse import quote
+
+    parts = ['<nav class="projects">']
+    all_class = "proj-link active" if selected is None else "proj-link"
+    parts.append(f'<a class="{all_class}" href="?project=">全部</a>')
+    for pid in _nav_projects(workspace):
+        active = "proj-link active" if pid == selected else "proj-link"
+        parts.append(
+            f'<a class="{active}" href="?project={quote(str(pid), safe="")}">'
+            f"{_escape(pid)}</a>"
+        )
+    parts.append("</nav>")
+    return "\n".join(parts)
+
+
+def _section_html(pid, tasks, events, reference):
+    """One project block: a heading (id + task count) and its existing cards."""
+    cards = "\n".join(
+        _card(task, events.get(task["id"]), reference) for task in tasks
+    )
+    return (
+        f'<section class="project-block" id="project-{_escape(pid)}">\n'
+        f'  <h2 class="project-title">{_escape(pid)} '
+        f'<span class="project-count">{_escape(len(tasks))}</span></h2>\n'
+        f'  <div class="cards">\n{cards}\n  </div>\n'
+        "</section>"
+    )
+
+
 def render_board(workspace: str, *, limit: int = 200,
-                 generated_at: Optional[str] = None) -> str:
-    """Render the whole board as a single self-contained HTML document."""
+                 generated_at: Optional[str] = None, project=None,
+                 serve: bool = False) -> str:
+    """Render the whole board as a single self-contained HTML document.
+
+    ``project`` narrows the board to one project id (``board --project``).
+    ``serve`` adds the ``?project=`` switch links; a static snapshot leaves them
+    out because there is no server to answer them. The board never consults the
+    working directory — it shows the global (grouped) view by default.
+    """
     reference = generated_at or storage.now_iso()
 
     conn = storage.connect(storage.db_path(workspace))
     try:
         storage.migrate(conn)
-        counts = dispatch.summary_counts(workspace, conn)
-        rows = storage.list_tasks(conn, limit=limit)
-        cards = []
-        for row in rows:
-            task = dict(row)
-            cards.append((task, _last_event(conn, task["id"])))
+        counts = _status_counts(conn, project)
+        rows = [
+            dict(row)
+            for row in storage.list_tasks(conn, project=project, limit=limit)
+        ]
+        events = {row["id"]: _last_event(conn, row["id"]) for row in rows}
     finally:
         conn.close()
+
+    # One block per project, most recently active first, cards newest-first.
+    groups = storage.group_tasks_by_project(rows)
 
     total = sum(counts.values())
     ordered = list(_STATUS_ORDER) + [
@@ -187,8 +302,14 @@ def render_board(workspace: str, *, limit: int = 200,
             f'<span class="count {_escape(status)}">{_escape(status)}'
             f' <b>{_escape(int(counts.get(status, 0)))}</b></span>'
         )
-    parts += ["</div>", "</header>", '<main class="cards">']
-    for task, last_event in cards:
-        parts.append(_card(task, last_event, reference))
+    parts.append("</div>")
+    if serve:
+        parts.append(_nav_html(workspace, project))
+    parts.append("</header>")
+    parts.append('<main class="sections">')
+    if not groups:
+        parts.append('<p class="empty">no tasks</p>')
+    for pid, tasks in groups:
+        parts.append(_section_html(pid, tasks, events, reference))
     parts += ["</main>", "</body>", "</html>", ""]
     return "\n".join(parts)

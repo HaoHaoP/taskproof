@@ -79,7 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("tasks", help="list tasks")
     p.add_argument("--status")
-    p.add_argument("--project")
+    p.add_argument("--project", help="project id, alias, or path (overrides cwd)")
+    p.add_argument("--all", dest="all_projects", action="store_true",
+                   help="every project, ignoring the cwd scope (overrides cwd)")
     p.add_argument("--limit", type=int, default=20)
 
     p = sub.add_parser("show", help="show one task")
@@ -96,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--open", action="store_true", help="write HTML and open it")
     p.add_argument("--serve", type=int, nargs="?", const=8787, metavar="PORT")
     p.add_argument("--out", help="write a standalone HTML snapshot to this path")
+    p.add_argument("--project", help="render only this project id")
 
     p = sub.add_parser("api", help="serve the local REST API (consumed by the desktop frontend)")
     p.add_argument("--port", type=int, default=8787)
@@ -302,32 +305,84 @@ def _read_probe_flags(reg_path) -> dict:
 
 
 def cmd_projects(args):
+    """Project overview: registry configuration joined with task aggregates.
+
+    The numbers come from a single aggregate query (`storage.project_overview`)
+    so they can never disagree with `tasks`.
+    """
     reg_path = registry.workspace_registry_path(args.workspace)
     reg = registry.load(reg_path)
     probes = _read_probe_flags(reg_path)
-    projects = [
-        {
-            "id": project.id,
-            "group": project.group,
-            "path": project.path,
-            "verify": project.verify,
-            "verify_kind": project.verify_kind,
-            "probe": probes.get(project.id),
-        }
-        for project in reg.projects
-    ]
+
+    overview = []
+    db = storage.db_path(args.workspace)
+    if os.path.exists(db):  # never create a database just to list projects
+        conn = storage.connect(db)
+        try:
+            storage.migrate(conn)
+            overview = storage.project_overview(conn)
+        finally:
+            conn.close()
+    stats = {row["project"]: row for row in overview}
+
+    projects = []
+    known = set()
+    for project in reg.projects:
+        stat = stats.get(project.id) or {}
+        probe = probes.get(project.id)
+        if probe is None and project.verify_kind == "none":
+            probe = "none"  # no acceptance command -> the task is always SKIPPED
+        projects.append(
+            {
+                "id": project.id,
+                "group": project.group,
+                "path": project.path,
+                "verify": project.verify,
+                "verify_kind": project.verify_kind,
+                "probe": probe,
+                "tasks": int(stat.get("total", 0)),
+                "in_progress": int(stat.get("in_progress", 0)),
+                "failed": int(stat.get("failed", 0)),
+                "last_activity": stat.get("last_activity"),
+            }
+        )
+        known.add(project.id)
+    # Tasks may name a project that is no longer in the registry (hand-edited
+    # config or database). Keep it so the totals still match `tasks` exactly.
+    for row in overview:
+        if row["project"] in known:
+            continue
+        projects.append(
+            {
+                "id": row["project"],
+                "group": None,
+                "path": None,
+                "verify": None,
+                "verify_kind": None,
+                "probe": None,
+                "tasks": int(row["total"]),
+                "in_progress": int(row["in_progress"]),
+                "failed": int(row["failed"]),
+                "last_activity": row["last_activity"],
+            }
+        )
     payload = {"projects": projects, "registry": reg_path}
 
     if not projects:
         human = f"no projects registered in {reg_path}"
     else:
-        lines = [f"{'ID':<20} {'GROUP':<14} {'PROBE':<7} VERIFY"]
+        lines = [
+            f"{'ID':<20} {'GROUP':<14} {'PROBE':<7} {'TASKS':>5} "
+            f"{'ACTV':>4} {'FAIL':>4} {'LAST ACTIVITY':<25} VERIFY"
+        ]
         for project in projects:
             lines.append(
-                f"{project['id']:<20} {project['group']:<14} "
-                f"{str(project['probe'] or '-'):<7} {project['verify'] or '-'}"
+                f"{project['id']:<20} {str(project['group'] or '-'):<14} "
+                f"{str(project['probe'] or '-'):<7} {project['tasks']:>5} "
+                f"{project['in_progress']:>4} {project['failed']:>4} "
+                f"{str(project['last_activity'] or '—'):<25} {project['verify'] or '-'}"
             )
-            lines.append(f"  path: {project['path']}")
+            lines.append(f"  path: {project['path'] or '-'}")
         human = "\n".join(lines)
     emit(args, payload, human)
     return 0
@@ -364,34 +419,102 @@ def _resolve_project_key(workspace, key):
     return project.id if project is not None else key
 
 
-def _tasks_human(tasks) -> str:
+def _load_registry_best_effort(workspace):
+    """Load the workspace registry, or ``None`` when it is missing/broken.
+
+    `tasks` must still work against the database alone; a bad registry only
+    drops the cwd inference back to "no registered projects".
+    """
+    try:
+        return registry.load(registry.workspace_registry_path(workspace))
+    except errors.TaskproofError:
+        return None
+
+
+def _scope_banner(project_id, source, n_projects) -> str:
+    """The mandatory scope label: ``--project`` > ``--all`` > cwd > all."""
+    if project_id is None:
+        return f"作用域: 全部 {n_projects} 个项目（{source}）"
+    return f"当前项目: {project_id}（{source}）"
+
+
+def _row_brief(task) -> str:
+    brief = (task.get("brief") or "").replace("\n", " ")
+    return brief[:45] + "..." if len(brief) > 48 else brief
+
+
+def _tasks_human(tasks, *, project_id, source, n_projects) -> str:
+    """Human rendering of `tasks`, grouped by project for the "全部" scope."""
+    lines = [_scope_banner(project_id, source, n_projects)]
+    if project_id is None:
+        groups = storage.group_tasks_by_project(tasks)
+        if not groups:
+            lines.append("no tasks")
+            return "\n".join(lines)
+        for pid, items in groups:
+            lines.append("")
+            lines.append(f"# {pid} ({len(items)} 个任务)")
+            lines.append(f"    {'ID':<18} {'STATUS':<10} {'PROJECT':<16} BRIEF")
+            for task in items:
+                lines.append(
+                    f"    {str(task.get('id') or ''):<18} "
+                    f"{str(task.get('status') or ''):<10} "
+                    f"{str(task.get('project') or ''):<16} {_row_brief(task)}"
+                )
+        return "\n".join(lines)
+
     if not tasks:
-        return "no tasks"
-    lines = [f"{'ID':<18} {'STATUS':<10} {'PROJECT':<16} BRIEF"]
+        lines.append("no tasks")
+        return "\n".join(lines)
+    lines.append(f"    {'ID':<18} {'STATUS':<10} BRIEF")
     for task in tasks:
-        brief = (task.get("brief") or "").replace("\n", " ")
-        if len(brief) > 48:
-            brief = brief[:45] + "..."
         lines.append(
-            f"{str(task.get('id') or ''):<18} {str(task.get('status') or ''):<10} "
-            f"{str(task.get('project') or ''):<16} {brief}"
+            f"    {str(task.get('id') or ''):<18} "
+            f"{str(task.get('status') or ''):<10} {_row_brief(task)}"
         )
     return "\n".join(lines)
 
 
 def cmd_tasks(args):
-    project_key = _resolve_project_key(args.workspace, args.project)
+    reg = _load_registry_best_effort(args.workspace)
+    project_id, source = registry.resolve_scope(
+        reg, explicit_project=args.project, force_all=args.all_projects
+    )
+
     conn = storage.connect(storage.db_path(args.workspace))
     try:
         storage.migrate(conn)
         rows = storage.list_tasks(
-            conn, status=args.status, project=project_key, limit=args.limit
+            conn, status=args.status, project=project_id, limit=args.limit
         )
         tasks = [dict(row) for row in rows]
     finally:
         conn.close()
-    payload = {"tasks": tasks, "count": len(tasks)}
-    emit(args, payload, _tasks_human(tasks))
+
+    if project_id is None:
+        groups = storage.group_tasks_by_project(tasks)
+        tasks = [task for _pid, items in groups for task in items]
+    else:
+        tasks = sorted(tasks, key=lambda t: t.get("created_at") or "", reverse=True)
+
+    if reg is not None:
+        n_projects = len(reg.projects)
+    else:
+        n_projects = len({t.get("project") for t in tasks if t.get("project")})
+
+    payload = {
+        "tasks": tasks,
+        "count": len(tasks),
+        "project": project_id,
+        "scope": source,
+    }
+    emit(
+        args,
+        payload,
+        _tasks_human(
+            tasks, project_id=project_id, source=source, n_projects=n_projects
+        ),
+    )
     return 0
 
 
@@ -487,18 +610,32 @@ def cmd_verify(args):
     return 0
 
 
-def _board_serve(workspace, port):
+def board_handler_class(workspace):
+    """HTTP handler for ``board --serve``: server-rendered, zero JavaScript.
+
+    ``?project=<id>`` narrows the page; no/blank ``?project=`` is the full,
+    grouped board. Unknown ids are a 404 rather than a silently empty page (a
+    link that leads nowhere is a bug, not a scope). Exposed as a factory so the
+    tests can bind it to an ephemeral port instead of the blocking server.
+    """
     import http.server
-    from urllib.parse import urlsplit
+    from urllib.parse import parse_qs, urlsplit
 
     from .board import render
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
-            if urlsplit(self.path).path not in ("/", "/index.html"):
+            parsed = urlsplit(self.path)
+            if parsed.path not in ("/", "/index.html"):
                 self.send_error(404, "not found")
                 return
-            body = render.render_board(workspace).encode("utf-8")
+            project = (parse_qs(parsed.query).get("project") or [None])[0] or None
+            if project is not None and project not in render.known_project_ids(workspace):
+                self.send_error(404, f"unknown project: {project}")
+                return
+            body = render.render_board(
+                workspace, project=project, serve=True
+            ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -508,8 +645,16 @@ def _board_serve(workspace, port):
         def log_message(self, *args):
             pass
 
+    return Handler
+
+
+def _board_serve(workspace, port):
+    import http.server
+
     try:
-        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        httpd = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", port), board_handler_class(workspace)
+        )
     except OSError as exc:
         raise UsageError(
             f"cannot serve the board on 127.0.0.1:{port}: {exc}",
@@ -525,11 +670,19 @@ def _board_serve(workspace, port):
 def cmd_board(args):
     from .board import render
 
+    # The board is a "global view": it never consults the cwd. Choosing a subset
+    # is explicit (--project here, or ?project= in serve mode).
     if args.serve is not None:
         return _board_serve(args.workspace, args.serve)
 
+    project = args.project
+    if project is not None:
+        project = _resolve_project_key(args.workspace, project)
+        if project not in render.known_project_ids(args.workspace):
+            raise UsageError(f"unknown project: {args.project}")
+
     out = args.out or os.path.join(args.workspace, "board.html")
-    document = render.render_board(args.workspace)
+    document = render.render_board(args.workspace, project=project)
     directory = os.path.dirname(os.path.abspath(out))
     if directory:
         os.makedirs(directory, exist_ok=True)

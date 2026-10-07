@@ -163,6 +163,54 @@ def list_tasks(conn, *, status=None, project=None, limit=50):
     ).fetchall()
 
 
+#: Statuses that count as "in progress" in the project overview. These are the
+#: non-terminal states: a queued task is still work the user is waiting on.
+IN_PROGRESS_STATUSES = ("queued", "running", "verifying")
+
+
+def project_overview(conn: sqlite3.Connection):
+    """Per-project task counts — the whole overview in ONE SQL statement.
+
+    Returns a list of dicts with ``project``, ``total``, ``in_progress``,
+    ``failed`` and ``last_activity`` (the newest ``created_at`` for the
+    project, or ``None`` when it has no tasks). Ordered by most recent activity
+    first; projects that never ran a task sort last.
+    """
+    placeholders = ", ".join("?" for _ in IN_PROGRESS_STATUSES)
+    rows = conn.execute(
+        "SELECT project, "
+        "COUNT(*) AS total, "
+        f"SUM(CASE WHEN status IN ({placeholders}) THEN 1 ELSE 0 END) AS in_progress, "
+        "SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS failed, "
+        "MAX(created_at) AS last_activity "
+        "FROM tasks GROUP BY project "
+        "ORDER BY last_activity IS NULL, last_activity DESC, project ASC",
+        (*IN_PROGRESS_STATUSES, "failed"),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def group_tasks_by_project(tasks):
+    """Group task mappings by project: newest-active block first.
+
+    Shared by the CLI and the board so the two surfaces order groups
+    identically. Groups are ordered by the most recent ``created_at`` inside
+    each group (desc); tasks within a group are returned newest-first too.
+    """
+    groups: dict = {}
+    for task in tasks:
+        groups.setdefault(task.get("project") or "", []).append(task)
+    ordered = sorted(
+        groups.items(),
+        key=lambda item: max((t.get("created_at") or "") for t in item[1]),
+        reverse=True,
+    )
+    return [
+        (pid, sorted(items, key=lambda t: t.get("created_at") or "", reverse=True))
+        for pid, items in ordered
+    ]
+
+
 def next_task_id(conn: sqlite3.Connection, *, prefix_date: str) -> str:
     """Allocate `t-<yyyymmdd>-<nnn>`; must be safe under concurrent dispatch.
 
