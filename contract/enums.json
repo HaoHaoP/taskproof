@@ -1,0 +1,69 @@
+{
+  "generated_by": "tools/gen_contract.py",
+  "note": "generated from the Python constants; run --check in CI",
+  "statuses": [
+    {
+      "id": "queued",
+      "terminal": false
+    },
+    {
+      "id": "running",
+      "terminal": false
+    },
+    {
+      "id": "verifying",
+      "terminal": false
+    },
+    {
+      "id": "done",
+      "terminal": true
+    },
+    {
+      "id": "failed",
+      "terminal": true
+    },
+    {
+      "id": "blocked",
+      "terminal": true
+    },
+    {
+      "id": "timeout",
+      "terminal": true
+    },
+    {
+      "id": "cancelled",
+      "terminal": true
+    }
+  ],
+  "verify_kinds": [
+    "check",
+    "build",
+    "none"
+  ],
+  "exit_codes": [
+    {
+      "code": 0,
+      "meaning": "success"
+    },
+    {
+      "code": 2,
+      "meaning": "registry"
+    },
+    {
+      "code": 64,
+      "meaning": "usage"
+    },
+    {
+      "code": 70,
+      "meaning": "adapter"
+    },
+    {
+      "code": 71,
+      "meaning": "verify"
+    },
+    {
+      "code": 75,
+      "meaning": "concurrency"
+    }
+  ]
+}
