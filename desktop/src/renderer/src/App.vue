@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import FilterBar from './components/FilterBar.vue'
 import { ICONS } from './icons'
 import { shellPlaceholder } from './shell'
+import { useElementLocale } from './i18n/element'
 import { useBoardStore } from './stores/board'
 import { useSettingsStore } from './stores/settings'
 
@@ -12,6 +13,16 @@ const store = useBoardStore()
 const settings = useSettingsStore()
 const route = useRoute()
 const { t } = useI18n()
+
+/**
+ * Element Plus keeps its own built-in strings (table empty text, the dialog
+ * close button's aria-label, ...) in a locale bundle that has nothing to do
+ * with vue-i18n. This is the reactive bridge: it reads the settings store's
+ * live language choice, so switching language repaints EP's strings in place --
+ * no reload. It tracks the *choice*, not the resolved locale, so "follow the
+ * system" is re-resolved against the system language.
+ */
+const epLocale = useElementLocale(() => settings.settings.language)
 
 /** The three data views. Settings sits below a separator, as in the prototype. */
 const mainViews = [
@@ -59,92 +70,94 @@ onBeforeUnmount(() => store.dispose())
 </script>
 
 <template>
-  <div class="app">
-    <!-- The whole mast is draggable; the one interactive control opts back out. -->
-    <header class="mast">
-      <button
-        class="mastbtn"
-        type="button"
-        :aria-label="t(rail ? 'nav.collapse' : 'nav.expand')"
-        :title="t(rail ? 'nav.collapse' : 'nav.expand')"
-        v-html="rail ? ICONS.collapse : ICONS.expand"
-        @click="rail = !rail"
-      ></button>
-      <div class="id">Taskproof <em>· {{ t('app.subtitle') }}</em></div>
-      <div class="spacer"></div>
-      <div class="tally">
-        <span>{{ t('tally.tasks') }}<b>{{ store.tasks.length }}</b></span>
-        <span>{{ t('tally.flying') }}<b>{{ store.inFlightCount }}</b></span>
-        <span class="alarm">{{ t('tally.failed') }}<b>{{ store.abnormalCount }}</b></span>
-      </div>
-      <div class="svc" :data-state="store.connected ? 'on' : 'off'">
-        <i></i>
-        <span v-if="store.connected">{{ t('service.local') }} :{{ store.service.port ?? '—' }}</span>
-        <span v-else>{{ t('service.offline') }}</span>
-      </div>
-    </header>
+  <el-config-provider :locale="epLocale">
+    <div class="app">
+      <!-- The whole mast is draggable; the one interactive control opts back out. -->
+      <header class="mast">
+        <button
+          class="mastbtn"
+          type="button"
+          :aria-label="t(rail ? 'nav.collapse' : 'nav.expand')"
+          :title="t(rail ? 'nav.collapse' : 'nav.expand')"
+          v-html="rail ? ICONS.collapse : ICONS.expand"
+          @click="rail = !rail"
+        ></button>
+        <div class="id">Taskproof <em>· {{ t('app.subtitle') }}</em></div>
+        <div class="spacer"></div>
+        <div class="tally">
+          <span>{{ t('tally.tasks') }}<b>{{ store.tasks.length }}</b></span>
+          <span>{{ t('tally.flying') }}<b>{{ store.inFlightCount }}</b></span>
+          <span class="alarm">{{ t('tally.failed') }}<b>{{ store.abnormalCount }}</b></span>
+        </div>
+        <div class="svc" :data-state="store.connected ? 'on' : 'off'">
+          <i></i>
+          <span v-if="store.connected">{{ t('service.local') }} :{{ store.service.port ?? '—' }}</span>
+          <span v-else>{{ t('service.offline') }}</span>
+        </div>
+      </header>
 
-    <div class="shell">
-      <nav v-show="rail" class="nav">
-        <template v-for="view in mainViews" :key="view.name">
-          <RouterLink custom :to="view.path" v-slot="{ href, navigate, isActive }">
-            <a
-              class="nitem"
-              :href="href"
-              :aria-current="isActive ? 'page' : undefined"
-              @click="navigate"
-            >
-              <span v-html="ICONS[view.name]"></span>{{ t(view.key) }}
+      <div class="shell">
+        <nav v-show="rail" class="nav">
+          <template v-for="view in mainViews" :key="view.name">
+            <RouterLink custom :to="view.path" v-slot="{ href, navigate, isActive }">
+              <a
+                class="nitem"
+                :href="href"
+                :aria-current="isActive ? 'page' : undefined"
+                @click="navigate"
+              >
+                <span v-html="ICONS[view.name]"></span>{{ t(view.key) }}
+              </a>
+            </RouterLink>
+          </template>
+          <div class="nsep"></div>
+          <RouterLink custom :to="settingsView.path" v-slot="{ href, navigate, isActive }">
+            <a class="nitem" :href="href" :aria-current="isActive ? 'page' : undefined" @click="navigate">
+              <span v-html="ICONS[settingsView.name]"></span>{{ t(settingsView.key) }}
             </a>
           </RouterLink>
-        </template>
-        <div class="nsep"></div>
-        <RouterLink custom :to="settingsView.path" v-slot="{ href, navigate, isActive }">
-          <a class="nitem" :href="href" :aria-current="isActive ? 'page' : undefined" @click="navigate">
-            <span v-html="ICONS[settingsView.name]"></span>{{ t(settingsView.key) }}
-          </a>
-        </RouterLink>
-      </nav>
+        </nav>
 
-      <main class="content">
-        <FilterBar
-          v-if="isDataView && !blank"
-          :projects="store.projects"
-          :visible="store.visible"
-          :polling="store.polling"
-          @toggle="store.toggleProject"
-          @select-all="store.selectAllProjects"
-        />
+        <main class="content">
+          <FilterBar
+            v-if="isDataView && !blank"
+            :projects="store.projects"
+            :visible="store.visible"
+            :polling="store.polling"
+            @toggle="store.toggleProject"
+            @select-all="store.selectAllProjects"
+          />
 
-        <!-- The API reported a status word this build does not know. It is still
-             rendered; this banner is how the drift becomes visible instead of
-             silently mislabelling a task. Not in the prototype: there the word
-             list was hard-coded, so it could not drift. -->
-        <div v-if="store.unknownWords.length" class="banner drift">
-          <strong>{{ t('drift.title') }}</strong>
-          <span class="detail">{{ store.unknownWords.join(', ') }}</span>
-          <span>{{ t('drift.hint') }}</span>
-        </div>
+          <!-- The API reported a status word this build does not know. It is still
+               rendered; this banner is how the drift becomes visible instead of
+               silently mislabelling a task. Not in the prototype: there the word
+               list was hard-coded, so it could not drift. -->
+          <div v-if="store.unknownWords.length" class="banner drift">
+            <strong>{{ t('drift.title') }}</strong>
+            <span class="detail">{{ store.unknownWords.join(', ') }}</span>
+            <span>{{ t('drift.hint') }}</span>
+          </div>
 
-        <!-- Offline, or a registry with nothing in it yet: this replaces the
-             matrix body only. The nav above never gives way, and the projects
-             page keeps its real layout -- that is where the first project is
-             registered. -->
-        <section v-if="blank" class="blank">
-          <div class="big">{{ t(blank === 'offline' ? 'offline.title' : 'empty.projects') }}</div>
-          <p class="hint">{{ t(blank === 'offline' ? 'offline.hint' : 'empty.hint') }}</p>
-          <code>{{
-            blank === 'offline' ? 'taskproof api --port 0' : 'taskproof register <path>'
-          }}</code>
-          <button v-if="blank === 'offline'" class="retry" type="button" @click="store.retry()">
-            {{ t('service.retry') }}
-          </button>
-          <p v-if="blank === 'offline' && store.lastError" class="detail">{{ store.lastError }}</p>
-        </section>
-        <RouterView v-else />
-      </main>
+          <!-- Offline, or a registry with nothing in it yet: this replaces the
+               matrix body only. The nav above never gives way, and the projects
+               page keeps its real layout -- that is where the first project is
+               registered. -->
+          <section v-if="blank" class="blank">
+            <div class="big">{{ t(blank === 'offline' ? 'offline.title' : 'empty.projects') }}</div>
+            <p class="hint">{{ t(blank === 'offline' ? 'offline.hint' : 'empty.hint') }}</p>
+            <code>{{
+              blank === 'offline' ? 'taskproof api --port 0' : 'taskproof register <path>'
+            }}</code>
+            <button v-if="blank === 'offline'" class="retry" type="button" @click="store.retry()">
+              {{ t('service.retry') }}
+            </button>
+            <p v-if="blank === 'offline' && store.lastError" class="detail">{{ store.lastError }}</p>
+          </section>
+          <RouterView v-else />
+        </main>
+      </div>
     </div>
-  </div>
+  </el-config-provider>
 </template>
 
 <style scoped>
