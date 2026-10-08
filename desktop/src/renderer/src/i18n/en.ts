@@ -18,7 +18,22 @@ export default {
     label: 'Status'
   },
 
-  tally: { tasks: 'tasks', flying: 'in flight', failed: 'failed' },
+  tally: { tasks: 'tasks', flying: 'in progress', failed: 'failed' },
+
+  columns: {
+    id: 'ID',
+    path: 'Path',
+    group: 'Group',
+    verifyKind: 'Verify type',
+    tasks: 'Tasks',
+    inProgress: 'In progress',
+    failed: 'Failed',
+    lastActivity: 'Last activity',
+    project: 'Project',
+    brief: 'Brief',
+    adapter: 'Adapter',
+    duration: 'Duration'
+  },
 
   matrix: { live: 'live', window: 'in window' },
 

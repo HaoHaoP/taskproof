@@ -18,7 +18,22 @@ export default {
     label: '状态'
   },
 
-  tally: { tasks: '任务', flying: '在飞', failed: '未通过' },
+  tally: { tasks: '任务', flying: '处理中', failed: '未通过' },
+
+  columns: {
+    id: 'ID',
+    path: '路径',
+    group: '并发组',
+    verifyKind: '验收类型',
+    tasks: '任务',
+    inProgress: '处理中',
+    failed: '未通过',
+    lastActivity: '最近活动',
+    project: '项目',
+    brief: '任务',
+    adapter: '适配器',
+    duration: '时长'
+  },
 
   matrix: { live: '实时', window: '窗口内' },
 

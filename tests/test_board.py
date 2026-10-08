@@ -101,7 +101,7 @@ class BoardTest(unittest.TestCase):
         self._insert("t-3", brief="c", status="running")
         doc = render.render_board(self.ws)
         self.assertIn("任务<b>3</b>", doc)
-        self.assertIn("在飞<b>1</b>", doc)
+        self.assertIn("处理中<b>1</b>", doc)
         self.assertIn("未通过<b>1</b>", doc)
         self.assertNotIn("worker 自称不算数", doc)
         self.assertNotIn("<link", doc)

@@ -44,18 +44,18 @@ function open(id: string): void {
             <span class="mono">{{ scope.row.id }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="project" width="140">
+        <el-table-column prop="project" :label="t('columns.project')" width="140">
           <template #default="scope">
             <span class="mono muted">{{ scope.row.project }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="brief" min-width="320" show-overflow-tooltip />
-        <el-table-column prop="adapter" width="110">
+        <el-table-column prop="brief" :label="t('columns.brief')" min-width="320" show-overflow-tooltip />
+        <el-table-column prop="adapter" :label="t('columns.adapter')" width="110">
           <template #default="scope">
             <span class="mono muted">{{ scope.row.adapter ?? '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column width="96">
+        <el-table-column :label="t('columns.duration')" width="96">
           <template #default="scope">
             <span class="mono muted">
               {{ duration(scope.row.started_at, scope.row.finished_at) }}

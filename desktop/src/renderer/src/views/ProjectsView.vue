@@ -20,17 +20,17 @@ const rows = computed(() => store.projects)
             <span class="mono">{{ scope.row.id }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="path" label="path" min-width="320" show-overflow-tooltip>
+        <el-table-column prop="path" :label="t('columns.path')" min-width="320" show-overflow-tooltip>
           <template #default="scope">
             <span class="mono muted">{{ scope.row.path }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="group" width="120" />
-        <el-table-column prop="verify_kind" width="110" />
-        <el-table-column prop="tasks" width="90" />
-        <el-table-column prop="in_progress" width="110" />
-        <el-table-column prop="failed" width="90" />
-        <el-table-column prop="last_activity" min-width="170">
+        <el-table-column prop="group" :label="t('columns.group')" width="120" />
+        <el-table-column prop="verify_kind" :label="t('columns.verifyKind')" width="110" />
+        <el-table-column prop="tasks" :label="t('columns.tasks')" width="90" />
+        <el-table-column prop="in_progress" :label="t('columns.inProgress')" width="110" />
+        <el-table-column prop="failed" :label="t('columns.failed')" width="90" />
+        <el-table-column prop="last_activity" :label="t('columns.lastActivity')" min-width="170">
           <template #default="scope">
             <span class="mono muted">{{ scope.row.last_activity ?? '—' }}</span>
           </template>
