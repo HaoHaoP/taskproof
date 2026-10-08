@@ -137,11 +137,22 @@ function openTask(id: string): void {
   font: 11px/1 var(--mono);
   color: var(--ink-4);
 }
+/* The corner is the lane column's own header, so it is sticky on BOTH axes:
+   it rides with the header row vertically and with the lane column
+   horizontally. It therefore has to outrank both -- z 4 sits above the
+   header's 3 and the lane's 2 -- and carry its own opaque background, so
+   neither the first lane cell nor the first status column can show through
+   the intersection. The background is the prototype's corner colour (--bg). */
 .hd.corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 4;
   justify-content: flex-start;
   padding-left: 4px;
   color: var(--ink-3);
   font-size: 11.5px;
+  background: var(--bg);
 }
 /* Column zebra: every other status column carries a faint tint, on both the
    header and the cells, so the band runs the full height and neighbouring
