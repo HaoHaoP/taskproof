@@ -20,7 +20,7 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 
-const projects = computed(() => store.projects)
+const projects = computed(() => store.projects.filter((project) => store.isVisible(project.id)))
 
 function tasksIn(projectId: string, columnKey: string): Task[] {
   const grouped = store.tasksByColumn[columnKey] ?? []
@@ -64,7 +64,7 @@ function openTask(id: string): void {
             <div class="name">{{ project.id }}</div>
             <div class="pth">{{ project.path }}</div>
             <div class="tally">
-              <span>{{ project.tasks }} {{ t('tally.tasks') }}</span>
+              <span>{{ project.tasks }} {{ t('rail.tasks') }}</span>
               <span v-if="project.in_progress">{{ project.in_progress }} {{ t('tally.flying') }}</span>
               <span v-if="project.failed" class="bad">{{ project.failed }} {{ t('tally.failed') }}</span>
             </div>

@@ -3,7 +3,9 @@ export default {
 
   nav: { matrix: 'Matrix', projects: 'Projects', tasks: 'Tasks', settings: 'Settings' },
 
-  rail: { title: 'Project' },
+  rail: { title: 'Projects', all: 'All', none: 'None', tasks: 'tasks' },
+
+  live: { on: 'live · every 2s', off: 'polling paused' },
 
   status: {
     queued: 'Queued',
@@ -45,6 +47,7 @@ export default {
 
   service: {
     local: 'local service',
+    offline: 'disconnected',
     ready: 'connected',
     starting: 'starting',
     stopped: 'stopped',
@@ -55,6 +58,11 @@ export default {
   offline: {
     title: 'Not connected to the local service',
     hint: 'The app spawns the local service on launch. If it did not come up, start one and retry.'
+  },
+
+  empty: {
+    projects: 'No projects registered yet',
+    hint: 'Register a repository to give the console something to show.'
   },
 
   theme: { dark: 'Dark', light: 'Light', system: 'System' },

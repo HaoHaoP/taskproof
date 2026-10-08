@@ -16,6 +16,7 @@ function defaults(): DesktopSettings {
   return {
     theme: 'dark',
     language: 'system',
+    poll: '2s',
     workspace: join(app.getPath('home'), '.taskproof'),
     // Resolved on PATH by default; the from-source workflow points this at a
     // python interpreter script instead.

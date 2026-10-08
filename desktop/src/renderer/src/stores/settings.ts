@@ -7,12 +7,18 @@
  */
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { DesktopSettings, LanguageChoice, ThemeChoice } from '../../../preload/types'
+import type {
+  DesktopSettings,
+  LanguageChoice,
+  PollChoice,
+  ThemeChoice
+} from '../../../preload/types'
 import { setLocale } from '../i18n'
 
 const FALLBACK: DesktopSettings = {
   theme: 'dark',
   language: 'system',
+  poll: '2s',
   workspace: '',
   taskproofPath: ''
 }
@@ -55,5 +61,9 @@ export const useSettingsStore = defineStore('settings', () => {
     void persist({ language })
   }
 
-  return { settings, version, load, persist, setTheme, setLanguage, applyTheme }
+  function setPoll(poll: PollChoice): void {
+    void persist({ poll })
+  }
+
+  return { settings, version, load, persist, setTheme, setLanguage, setPoll, applyTheme }
 })

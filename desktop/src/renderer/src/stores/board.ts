@@ -10,7 +10,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { createClient, type BoardClient, type Project, type Summary, type Task } from '../api/client'
 import { columnFor, unknownStatuses } from '../contract'
-import type { ServiceStatus } from '../../../preload/types'
+import type { PollChoice, ServiceStatus } from '../../../preload/types'
 
 const DEFAULT_PORT = 8787
 const POLL_MS = 2000
@@ -43,6 +43,14 @@ export const useBoardStore = defineStore('board', () => {
     null
   )
 
+  /** Which projects the matrix shows. Absent means visible, so a project that
+   *  appears in the registry shows up without needing an entry here first. */
+  const visible = ref<Record<string, boolean>>({})
+  /** Polling is a setting rather than a constant, because the toolbar reports
+   *  its state: an indicator that cannot be off is decoration. */
+  const poll = ref<PollChoice>('2s')
+  const polling = ref(false)
+
   let client: BoardClient | null = null
   let timer: ReturnType<typeof setInterval> | undefined
   let unsubscribe: (() => void) | undefined
@@ -65,6 +73,20 @@ export const useBoardStore = defineStore('board', () => {
   const inFlightCount = computed(() =>
     tasks.value.filter((task) => task.status === 'running' || task.status === 'verifying').length
   )
+
+  function isVisible(id: string): boolean {
+    return visible.value[id] !== false
+  }
+
+  function toggleProject(id: string): void {
+    visible.value = { ...visible.value, [id]: !isVisible(id) }
+  }
+
+  function selectAllProjects(on: boolean): void {
+    const next: Record<string, boolean> = {}
+    for (const project of projects.value) next[project.id] = on
+    visible.value = next
+  }
 
   async function connect(): Promise<void> {
     const baseUrl = await resolveBaseUrl()
@@ -118,11 +140,31 @@ export const useBoardStore = defineStore('board', () => {
     stop()
     void refresh()
     timer = setInterval(() => void refresh(), intervalMs)
+    polling.value = true
   }
 
   function stop(): void {
     if (timer) clearInterval(timer)
     timer = undefined
+    polling.value = false
+  }
+
+  /** Switch the pump. Turning it off still does one last read, so the snapshot
+   *  left on screen is current rather than merely recent. */
+  function setPoll(choice: PollChoice): void {
+    poll.value = choice
+    if (choice === 'off') {
+      stop()
+      void refresh()
+    } else {
+      start()
+    }
+  }
+
+  /** Re-attempt from scratch: the service may have come back on a new port. */
+  function retry(): void {
+    client = null
+    start()
   }
 
   async function watchService(): Promise<void> {
@@ -148,16 +190,24 @@ export const useBoardStore = defineStore('board', () => {
     projects,
     summary,
     detail,
+    visible,
+    poll,
+    polling,
     unknownWords,
     tasksByColumn,
     abnormalCount,
     inFlightCount,
+    isVisible,
+    toggleProject,
+    selectAllProjects,
     connect,
     refresh,
     openTask,
     closeTask,
     start,
     stop,
+    setPoll,
+    retry,
     dispose,
     watchService
   }

@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
+import FilterBar from './components/FilterBar.vue'
 import { useBoardStore } from './stores/board'
 import { useSettingsStore } from './stores/settings'
 
 const store = useBoardStore()
 const settings = useSettingsStore()
+const route = useRoute()
 const { t } = useI18n()
 
 const views = [
@@ -15,10 +18,26 @@ const views = [
   { name: 'settings', key: 'nav.settings', path: '/settings' }
 ]
 
+//: The toolbar belongs to the three data views; settings has nothing to filter.
+const isDataView = computed(() => ['matrix', 'projects', 'tasks'].includes(String(route.name)))
+
+/**
+ * Which full-page state to show, if any.
+ *
+ * Not the prototype's `!ready`: there, "ready" was a constant, so the check was
+ * really "did we fail". Here the service genuinely takes a moment to come up,
+ * and a launch that is merely slow is not an error -- claiming otherwise would
+ * flash a full-page failure on every start.
+ */
+const blank = computed<'offline' | 'empty' | null>(() => {
+  if (store.connected) return store.projects.length === 0 ? 'empty' : null
+  return store.lastError ? 'offline' : null
+})
+
 onMounted(async () => {
   await settings.load()
   await store.watchService()
-  store.start()
+  store.setPoll(settings.settings.poll)
 })
 
 onBeforeUnmount(() => store.dispose())
@@ -41,7 +60,21 @@ onBeforeUnmount(() => store.dispose())
       </span>
     </header>
 
-    <div class="shell">
+    <!-- Nothing to show. The whole shell gives way, as in the prototype: with no
+         projects there is nothing to navigate to, so the nav would be a lie. -->
+    <section v-if="blank" class="blank">
+      <div class="big">{{ t(blank === 'offline' ? 'offline.title' : 'empty.projects') }}</div>
+      <p class="hint">{{ t(blank === 'offline' ? 'offline.hint' : 'empty.hint') }}</p>
+      <code>{{
+        blank === 'offline' ? 'taskproof api --port 0' : 'taskproof register <path>'
+      }}</code>
+      <button v-if="blank === 'offline'" class="retry" type="button" @click="store.retry()">
+        {{ t('service.retry') }}
+      </button>
+      <p v-if="blank === 'offline' && store.lastError" class="detail">{{ store.lastError }}</p>
+    </section>
+
+    <div v-else class="shell">
       <nav class="nav">
         <RouterLink v-for="view in views" :key="view.name" class="nitem" :to="view.path">
           {{ t(view.key) }}
@@ -49,17 +82,19 @@ onBeforeUnmount(() => store.dispose())
       </nav>
 
       <main class="content">
-        <!-- The service not being up is a normal state, not a crash: say so and
-             keep the last snapshot on screen. -->
-        <div v-if="!store.connected" class="banner">
-          <strong>{{ t('offline.title') }}</strong>
-          <span>{{ t('offline.hint') }}</span>
-          <span v-if="store.lastError" class="detail">{{ store.lastError }}</span>
-        </div>
+        <FilterBar
+          v-if="isDataView"
+          :projects="store.projects"
+          :visible="store.visible"
+          :polling="store.polling"
+          @toggle="store.toggleProject"
+          @select-all="store.selectAllProjects"
+        />
 
-        <!-- The API reported a status word this build does not know. It is
-             still rendered; this banner is how the drift becomes visible
-             instead of silently mislabelling a task. -->
+        <!-- The API reported a status word this build does not know. It is still
+             rendered; this banner is how the drift becomes visible instead of
+             silently mislabelling a task. Not in the prototype: there the word
+             list was hard-coded, so it could not drift. -->
         <div v-if="store.unknownWords.length" class="banner drift">
           <strong>{{ t('drift.title') }}</strong>
           <span class="detail">{{ store.unknownWords.join(', ') }}</span>
@@ -179,6 +214,54 @@ onBeforeUnmount(() => store.dispose())
   font-family: var(--mono);
   font-size: 11px;
   color: var(--ink-4);
+  overflow-wrap: anywhere;
+}
+/* Nothing to show: offline, or no projects registered. */
+.blank {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 24px;
+  text-align: center;
+  color: var(--ink-4);
+}
+.blank .big {
+  font: 600 15px/1.3 var(--sans);
+  color: var(--ink-2);
+}
+.blank .hint {
+  margin: 0;
+  font: 12px/1.6 var(--sans);
+  color: var(--ink-3);
+  max-width: 440px;
+}
+.blank code {
+  font: 11.5px/1.5 var(--mono);
+  background: var(--sunken);
+  border-radius: var(--r-ctl);
+  padding: 5px 9px;
+  color: var(--ink-2);
+}
+.blank .retry {
+  margin-top: 4px;
+  font: 12.5px/1 var(--sans);
+  font-weight: 500;
+  color: #fff;
+  background: var(--accent);
+  border-radius: var(--r-ctl);
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.blank .retry:hover {
+  filter: brightness(1.08);
+}
+.blank .detail {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 </style>

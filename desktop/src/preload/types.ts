@@ -19,10 +19,13 @@ export interface ServiceStatus {
 
 export type ThemeChoice = 'system' | 'dark' | 'light'
 export type LanguageChoice = 'system' | 'zh-CN' | 'en'
+/** How often the renderer re-reads the local API; 'off' means only on demand. */
+export type PollChoice = '2s' | 'off'
 
 export interface DesktopSettings {
   theme: ThemeChoice
   language: LanguageChoice
+  poll: PollChoice
   /** Workspace holding the SQLite store and projects.toml. */
   workspace: string
   /** Path to the taskproof executable (or a python it can be run with). */

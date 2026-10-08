@@ -3,7 +3,9 @@ export default {
 
   nav: { matrix: '矩阵', projects: '项目', tasks: '任务', settings: '设置' },
 
-  rail: { title: '项目' },
+  rail: { title: '项目', all: '全选', none: '清空', tasks: '个任务' },
+
+  live: { on: '实时 · 每 2 秒', off: '已暂停轮询' },
 
   status: {
     queued: '排队',
@@ -45,6 +47,7 @@ export default {
 
   service: {
     local: '本地服务',
+    offline: '未连接',
     ready: '已连接',
     starting: '启动中',
     stopped: '已停止',
@@ -55,6 +58,11 @@ export default {
   offline: {
     title: '未连上本地服务',
     hint: '应用启动时会自动拉起本地服务。若它没起来，也可以手动起一个，然后点重试。'
+  },
+
+  empty: {
+    projects: '还没有登记项目',
+    hint: '登记一个仓库，调度台就有人可看。'
   },
 
   theme: { dark: '深色', light: '浅色', system: '跟随系统' },
