@@ -194,13 +194,18 @@
   font-size: 12px;
   border-radius: var(--r-ctl);
 }
+/* Element Plus paints the selected pill in a sibling `.el-segmented__item-selected`
+   div, not on the item itself (the item's own background is transparent), so
+   rounding only the item leaves the visible grey background square. It is also
+   where the 1px came from: the small variant computes
+   `calc(calc(var(--el-border-radius-base) - 1px) - 2px)` = 1px. The prototype
+   renders both at 4px, and itself uses `!important` for this class of override. */
+.el-segmented .el-segmented__item,
+.el-segmented .el-segmented__item-selected {
+  border-radius: 4px !important;
+}
 .el-segmented .el-segmented__item {
   padding: 4px 11px;
-  /* Element Plus leaves the item at 1px in this build, so the selected pill reads
-     as a square block inside an otherwise rounded container. The prototype
-     renders 4px (measured in its own window, not read off a stylesheet), so match
-     that rather than inventing a value. */
-  border-radius: 4px;
 }
 .el-switch {
   --el-switch-on-color: var(--ok);
