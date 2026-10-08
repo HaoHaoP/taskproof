@@ -40,11 +40,60 @@ export default {
       tasks: '任务',
       flying: '处理中',
       failed: '未通过',
-      last: '最近活动'
+      last: '最近活动',
+      probe: '验收命令'
     }
   },
 
-  proj: { group: { default: 'default · 全部串行' } },
+  /* 增删改文案逐字取自原型。原型用的是扁平点号键（`proj.group` 与
+     `proj.group.default` 并存），vue-i18n 查找扁平键时先按整串匹配，所以
+     这里原样保留这些键，不做嵌套改写。 */
+  'proj.add': '新增项目',
+  'proj.edit': '编辑…',
+  'proj.remove': '移除',
+  'proj.actions': '操作',
+  'proj.register': '登记',
+  'proj.detect': '探测',
+  'proj.detect.run': '探测',
+  'proj.detect.d': '等价于 taskproof register --dry-run：挑代码目录、猜验收命令、生成 AGENTS 草稿。',
+  'proj.path': '仓库路径',
+  'proj.path.d': '绝对路径。探测与验收命令都在这里跑。',
+  'proj.path.locked': '登记后不可改。改路径等于换了项目，历史任务记录会挂空。',
+  'proj.id.locked': '不可改 —— tasks.project 存的就是它。',
+  'proj.aliases': '别名',
+  'proj.group': '并发组',
+  'proj.group.d': '同一组的项目同时只跑 1 个任务。留空＝落进 default 组，也就是全部串行。',
+  'proj.group.default': 'default · 全部串行',
+  'proj.verify': '验收命令',
+  'proj.verify.d': 'agent 退出后由 taskproof 独立跑一遍。agent 自称"完成"永远不算证据。',
+  'proj.verify.none': '未配置（验收记为 SKIPPED，不会记为通过）',
+  'proj.verifykind': '验收方式',
+  'proj.forbidden': '禁改路径',
+  'proj.forbidden.d': '逗号分隔。agent 碰这些路径即判失败。',
+  'proj.schema': '结构化结果',
+  'proj.schema.d': '约束 agent 的最终回答为 JSON。',
+  'proj.schema.default': '默认',
+  'proj.schema.none': '关闭',
+  'proj.probe': '探测结果',
+  'proj.add.hint': '确认后会写进 ~/.taskproof/projects.toml —— 那是人可编辑的配置文件，会被一起提交进你自己的 git。',
+  'proj.edit.hint': '保存前会先比对 projects.toml 是否被外部改过；冲突会提示你选，不会静默覆盖。',
+  'proj.remove.q': '移除这个项目的登记？',
+  'proj.remove.hint': '只从注册表里去掉，不会删除仓库里的任何文件。该项目的任务记录会失去对应项目。',
+  'proj.conflict': '~/.taskproof/projects.toml 已被外部修改。',
+  'proj.reload': '重新载入文件',
+  'proj.keep': '保留我的改动',
+  /* 原型没有、忙碌态与错误文案需要的键。 */
+  'proj.writing': '写中…',
+  'proj.detecting': '探测中…',
+  'proj.error.conflict': '注册表已被外部修改，这次改动没有写入。',
+  'proj.error.invalid': '注册表拒绝了这次改动：{detail}',
+  'proj.error.forbidden': '本地服务拒绝了写入（令牌不对）。',
+  'proj.error.notfound': '没有这个项目：{detail}',
+  'proj.error.network': '连不上本地服务：{detail}',
+
+  probe: { passed: '探针通过', failed: '探针失败', none: '未配置' },
+
+  dlg: { cancel: '取消', save: '保存' },
 
   service: {
     local: '本地服务',

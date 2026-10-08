@@ -3,7 +3,7 @@
  * (taskproof-work/prototypes/desktop-app-v3.html). Apple-style thin strokes;
  * every path keeps its own `stroke="currentColor"` so the caller's colour wins.
  *
- * Only the six icons the app shell needs live here -- the other prototype icons
+ * Only the icons the app actually uses live here -- the other prototype icons
  * are introduced by the sections that first use them.
  */
 export const ICONS = {
@@ -18,7 +18,11 @@ export const ICONS = {
   collapse:
     '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.6" y="2.4" width="12.8" height="11.2" rx="2.2"/><path d="M6.4 2.4v11.2"/><path d="M10.6 6.4L8.9 8l1.7 1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   expand:
-    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.6" y="2.4" width="12.8" height="11.2" rx="2.2"/><path d="M6.4 2.4v11.2"/><path d="M9 6.4L10.7 8L9 9.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.6" y="2.4" width="12.8" height="11.2" rx="2.2"/><path d="M6.4 2.4v11.2"/><path d="M9 6.4L10.7 8L9 9.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  pencil:
+    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M11.2 2.5l2.3 2.3-8.1 8.1-3 .7.7-3 8.1-8.1z"/><path d="M9.7 4l2.3 2.3"/></svg>',
+  trash:
+    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 4.4h10.8"/><path d="M6.2 4.4V2.9h3.6v1.5"/><path d="M4.1 4.4l.7 8.1c0 .5.4.9.9.9h4.6c.5 0 .9-.4.9-.9l.7-8.1"/></svg>'
 } as const
 
 export type IconName = keyof typeof ICONS

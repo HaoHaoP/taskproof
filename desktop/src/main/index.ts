@@ -2,7 +2,12 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import * as settings from './settings'
 import { ApiService, type LaunchSpec } from './service'
-import type { DesktopSettings } from '../preload/types'
+import { createProjectsClient, type ProjectsClient } from './projects'
+import type {
+  DesktopSettings,
+  ProjectCreatePayload,
+  ProjectPatch
+} from '../preload/types'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -14,13 +19,36 @@ function launchSpec(): LaunchSpec {
   const parts = (current.taskproofPath || 'taskproof').trim().split(/\s+/)
   return {
     command: parts[0],
-    // The global flag precedes the subcommand.
-    args: [...parts.slice(1), '--workspace', current.workspace, 'api', '--port', '0'],
+    // The global flag precedes the subcommand; `--allow-write` belongs to `api`
+    // and opens the token-protected write surface.
+    args: [...parts.slice(1), '--workspace', current.workspace, 'api', '--allow-write', '--port', '0'],
     workspace: current.workspace
   }
 }
 
 const api = new ApiService(launchSpec)
+
+/**
+ * The write client, rebuilt whenever the service comes up on a new port or a
+ * new token. Everything that talks HTTP-with-a-token goes through here; the
+ * renderer only ever sees the named IPC methods below.
+ */
+let writeClient: ProjectsClient | null = null
+let writeKey = ''
+
+function projects(): ProjectsClient {
+  const port = api.getStatus().port
+  const token = api.getToken() ?? ''
+  const key = `${port}:${token}`
+  if (!writeClient || writeKey !== key) {
+    writeClient = createProjectsClient({
+      baseUrl: port ? `http://127.0.0.1:${port}` : '',
+      token
+    })
+    writeKey = key
+  }
+  return writeClient
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -68,6 +96,18 @@ function registerIpc(): void {
     await shell.openPath(String(target))
   })
   ipcMain.handle('tp:app:version', () => app.getVersion())
+
+  // Registry writes. Each answers with a typed result; the token and the
+  // expected_hash handshake stay in this process.
+  ipcMain.handle('tp:projects:registry', () => projects().registry())
+  ipcMain.handle('tp:projects:probe', (_event, path: string) => projects().probe(String(path)))
+  ipcMain.handle('tp:projects:create', (_event, payload: ProjectCreatePayload) =>
+    projects().create(payload)
+  )
+  ipcMain.handle('tp:projects:patch', (_event, id: string, patch: ProjectPatch) =>
+    projects().patch(String(id), patch)
+  )
+  ipcMain.handle('tp:projects:remove', (_event, id: string) => projects().remove(String(id)))
 }
 
 api.onStatus((status) => {

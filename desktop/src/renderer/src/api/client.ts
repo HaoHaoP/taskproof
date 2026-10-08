@@ -45,7 +45,12 @@ export interface Project {
   verify: string | null
   verify_kind: string
   forbidden_paths: string[]
+  result_schema: string
   auto_registered: boolean
+  /** Acceptance-probe verdict; null when a verify command was declared but
+   *  never run. The API returns it on `/api/projects` (see `project_record`). */
+  probe: 'passed' | 'failed' | 'none' | null
+  probe_exit: number | null
   tasks: number
   in_progress: number
   failed: number
