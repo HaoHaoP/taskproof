@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
+import AboutDialog from './components/AboutDialog.vue'
 import FilterBar from './components/FilterBar.vue'
 import { ICONS } from './icons'
 import { shellPlaceholder } from './shell'
@@ -156,6 +157,10 @@ onBeforeUnmount(() => store.dispose())
           <RouterView v-else />
         </main>
       </div>
+
+      <!-- Mounted once at the shell so the macOS "About Taskproof" menu item can
+           open it from any page; the settings row raises the same shared flag. -->
+      <AboutDialog />
     </div>
   </el-config-provider>
 </template>

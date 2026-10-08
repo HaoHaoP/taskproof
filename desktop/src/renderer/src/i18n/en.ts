@@ -184,7 +184,28 @@ export default {
     version: 'Version',
     contract: 'Contract',
     contractSynced: 'in sync with the Python constants',
-    contractDrift: 'drift detected'
+    contractDrift: 'drift detected',
+    aboutTaskproof: 'About Taskproof',
+    aboutTaskproofDesc: 'Versions, runtime and where the data lives.'
+  },
+
+  about: {
+    title: 'About Taskproof',
+    open: 'View',
+    source: 'Source and feedback live on GitHub.',
+    repo: 'GitHub repository',
+    repoHint: 'Opens in your browser.',
+    license: 'License',
+    appVersion: 'App version',
+    cliVersion: 'CLI version',
+    runtime: 'Runtime',
+    paths: 'Data locations',
+    userData: 'userData',
+    registry: 'Registry',
+    database: 'State database',
+    events: 'Event log',
+    copy: 'Copy diagnostics',
+    copied: 'Copied'
   },
 
   drift: {

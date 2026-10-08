@@ -1,11 +1,21 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
-import { mkdirSync } from 'fs'
-import { join } from 'path'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  ipcMain,
+  Menu,
+  shell,
+  type MenuItemConstructorOptions
+} from 'electron'
+import { spawn } from 'child_process'
+import { existsSync, mkdirSync } from 'fs'
+import { dirname, join } from 'path'
 import * as settings from './settings'
 import { ApiService, type LaunchSpec } from './service'
 import { runDoctor } from './doctor'
 import { createProjectsClient, type ProjectsClient } from './projects'
 import type {
+  AboutInfo,
   DesktopSettings,
   ProjectCreatePayload,
   ProjectPatch
@@ -64,6 +74,126 @@ function projects(): ProjectsClient {
   return writeClient
 }
 
+/**
+ * The About sheet's version trio, part three: `taskproof --version`.
+ *
+ * The CLI may not be installed (the app is happy to run without it), may be a
+ * wrapper that prints extra text, or may be pointed at a source checkout
+ * (`python -m taskproof`). So the raw stdout is scraped for a semver-shaped
+ * token and anything else -- a crash, a missing binary, a bare "command not
+ * found" -- becomes null, which the sheet renders as an em dash. There is
+ * deliberately no error surface here: a missing CLI must never break the app.
+ */
+export function parseCliVersion(raw: string | null | undefined): string | null {
+  if (raw == null) return null
+  const match = String(raw).match(/(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)/)
+  return match ? match[1] : null
+}
+
+const CLI_VERSION_TIMEOUT_MS = 5_000
+
+/** Run `taskproof --version` and return the parsed version, or null. */
+function runCliVersion(): Promise<string | null> {
+  const parts = commandParts()
+  return new Promise((resolve) => {
+    let child
+    try {
+      child = spawn(parts[0], [...parts.slice(1), '--version'], {
+        stdio: ['ignore', 'pipe', 'ignore']
+      })
+    } catch {
+      resolve(null)
+      return
+    }
+
+    let out = ''
+    let settled = false
+    const finish = (value: string | null): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(value)
+    }
+    const timer = setTimeout(() => {
+      child.kill()
+      finish(null)
+    }, CLI_VERSION_TIMEOUT_MS)
+
+    child.stdout?.setEncoding('utf8')
+    child.stdout?.on('data', (chunk: string) => {
+      out = (out + chunk).slice(-4_096)
+    })
+    child.once('error', () => finish(null))
+    child.once('exit', () => finish(parseCliVersion(out)))
+  })
+}
+
+/** The About sheet's payload, gathered in the main process. */
+async function aboutInfo(): Promise<AboutInfo> {
+  return {
+    version: app.getVersion(),
+    cliVersion: await runCliVersion(),
+    runtime: {
+      electron: process.versions.electron ?? '',
+      chrome: process.versions.chrome ?? '',
+      node: process.versions.node ?? ''
+    },
+    userData: app.getPath('userData')
+  }
+}
+
+/** Ask the renderer to open the About sheet (used by the app menu). */
+function showAbout(): void {
+  mainWindow?.webContents.send('tp:app:show-about')
+}
+
+/**
+ * The macOS application menu, built by hand so the App submenu's first item is
+ * our own "About Taskproof" instead of Electron's default `role: 'about'`
+ * panel. Edit (copy / paste) and Window are kept so standard shortcuts keep
+ * working; `autoHideMenuBar` does not touch the macOS menu bar.
+ */
+export function appMenuTemplate(onAbout: () => void): MenuItemConstructorOptions[] {
+  return [
+    {
+      label: app.name,
+      submenu: [
+        { label: '关于 Taskproof', click: () => onAbout() },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        { role: 'front' }
+      ]
+    }
+  ]
+}
+
 function createWindow(): void {
   // In dev the running bundle is Electron's own, so the Dock shows Electron's icon
   // and name unless we say otherwise. Packaged builds pick up build/icon.icns on
@@ -117,7 +247,28 @@ function registerIpc(): void {
   ipcMain.handle('tp:shell:open-path', async (_event, target: string) => {
     await shell.openPath(String(target))
   })
+  // The About sheet's paths may not exist yet (the store, this month's log).
+  // `openPath` on a missing file opens nothing, so fall back to the directory
+  // that would hold it -- the user can still get to the data location.
+  ipcMain.handle('tp:shell:reveal', async (_event, target: string) => {
+    const path = String(target)
+    const toOpen = existsSync(path) ? path : dirname(path)
+    await shell.openPath(toOpen)
+  })
+  ipcMain.handle('tp:shell:open-external', async (_event, url: string) => {
+    // Only ever hand http(s) to the OS; a `file:`/custom scheme here would be
+    // an escalation. The renderer only ever passes the source repo link.
+    const target = String(url)
+    if (/^https?:\/\//i.test(target)) await shell.openExternal(target)
+  })
   ipcMain.handle('tp:app:version', () => app.getVersion())
+  ipcMain.handle('tp:app:about', () => aboutInfo())
+  // Spelled out rather than `clipboard.writeText(text)` inline so the channel
+  // is greppable: this is the only place diagnostic text reaches the clipboard,
+  // and the text is assembled in the renderer (which never holds the token).
+  ipcMain.handle('tp:app:copy-text', (_event, text: string) => {
+    clipboard.writeText(String(text))
+  })
   // The About group's adapter lamps. The API has no adapter endpoint, so this
   // is the CLI's own self-check; it resolves null when it cannot answer.
   ipcMain.handle('tp:app:adapters', () => {
@@ -149,6 +300,7 @@ api.onStatus((status) => {
 app.whenReady().then(async () => {
   app.setAppUserModelId('com.taskproof.desktop')
   registerIpc()
+  Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate(showAbout)))
   createWindow()
   await api.start()
 

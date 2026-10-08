@@ -167,6 +167,33 @@ export interface AdapterStatus {
   detail: string
 }
 
+/**
+ * The three runtime versions the About sheet reports. Electron bundles a
+ * specific Chromium and Node, so a bug report that only says "the app" is
+ * hard to place -- these pin exactly which engine the user was running.
+ */
+export interface RuntimeVersions {
+  electron: string
+  chrome: string
+  node: string
+}
+
+/**
+ * Everything the About sheet needs, read once from the main process in a
+ * single round trip. `cliVersion` is null when `taskproof --version` could not
+ * be run or parsed -- the sheet shows an em dash rather than inventing a
+ * number, and never hard-depends on the CLI being installed.
+ */
+export interface AboutInfo {
+  /** `app.getVersion()`. */
+  version: string
+  /** The parsed `taskproof --version`, or null when it could not be read. */
+  cliVersion: string | null
+  runtime: RuntimeVersions
+  /** `app.getPath('userData')`; the other three paths derive from the workspace. */
+  userData: string
+}
+
 export interface TpApi {
   service: {
     status(): Promise<ServiceStatus>
@@ -181,6 +208,14 @@ export interface TpApi {
   shell: {
     /** Open a file or directory with the OS default application. */
     openPath(target: string): Promise<void>
+    /**
+     * Open a path, falling back to its containing directory when the file is
+     * not there (the store, the registry, this month's event log may not exist
+     * yet). Handing a missing file to `openPath` opens nothing.
+     */
+    reveal(target: string): Promise<void>
+    /** Hand a URL (the source repo) to the OS browser. */
+    openExternal(url: string): Promise<void>
   }
   app: {
     version(): Promise<string>
@@ -190,6 +225,15 @@ export interface TpApi {
      * an em dash for null rather than inventing a verdict.
      */
     adapters(): Promise<AdapterStatus[] | null>
+    /** App / CLI / runtime versions and the userData path, in one round trip. */
+    about(): Promise<AboutInfo>
+    /** Write the assembed diagnostic text to the system clipboard. */
+    copyText(text: string): Promise<void>
+    /**
+     * The app menu's "About Taskproof" item. Returns an unsubscribe function;
+     * the About sheet listens so the native menu opens the same dialog.
+     */
+    onShowAbout(listener: () => void): () => void
   }
   /**
    * Registry writes. Every method answers with a `RegistryResult`, never

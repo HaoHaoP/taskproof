@@ -14,6 +14,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { openAbout } from '../components/about'
 import { STATUS_IDS, VERIFY_KINDS } from '../contract'
 import { useBoardStore } from '../stores/board'
 import { useSettingsStore } from '../stores/settings'
@@ -300,6 +301,17 @@ function openRegistry(): void {
         <section class="setgroup">
           <h4>{{ t('settings.about') }}</h4>
           <div class="setcard">
+            <div class="setrow">
+              <div class="lab">
+                <div class="t">{{ t('settings.aboutTaskproof') }}</div>
+                <div class="d">{{ t('settings.aboutTaskproofDesc') }}</div>
+              </div>
+              <div class="ctl">
+                <el-button size="small" @click="openAbout">
+                  {{ t('about.open') }}
+                </el-button>
+              </div>
+            </div>
             <div class="setrow">
               <div class="lab">
                 <div class="t">{{ t('settings.version') }}</div>

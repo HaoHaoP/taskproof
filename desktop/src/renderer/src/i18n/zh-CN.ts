@@ -177,7 +177,28 @@ export default {
     version: '版本',
     contract: '契约',
     contractSynced: '与 Python 常量同步',
-    contractDrift: '检测到合同漂移'
+    contractDrift: '检测到合同漂移',
+    aboutTaskproof: '关于 Taskproof',
+    aboutTaskproofDesc: '版本、运行时与数据位置。'
+  },
+
+  about: {
+    title: '关于 Taskproof',
+    open: '查看',
+    source: '源码与反馈都在 GitHub 上。',
+    repo: 'GitHub 仓库',
+    repoHint: '点开在浏览器里查看。',
+    license: '许可证',
+    appVersion: 'App 版本',
+    cliVersion: 'CLI 版本',
+    runtime: '运行时',
+    paths: '数据位置',
+    userData: 'userData',
+    registry: '注册表',
+    database: '状态库',
+    events: '事件日志',
+    copy: '复制诊断信息',
+    copied: '已复制'
   },
 
   drift: {

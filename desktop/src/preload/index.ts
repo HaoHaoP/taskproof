@@ -33,11 +33,22 @@ const api: TpApi = {
     set: (patch: Partial<DesktopSettings>) => ipcRenderer.invoke('tp:settings:set', patch)
   },
   shell: {
-    openPath: (target: string) => ipcRenderer.invoke('tp:shell:open-path', target)
+    openPath: (target: string) => ipcRenderer.invoke('tp:shell:open-path', target),
+    reveal: (target: string) => ipcRenderer.invoke('tp:shell:reveal', target),
+    openExternal: (url: string) => ipcRenderer.invoke('tp:shell:open-external', url)
   },
   app: {
     version: () => ipcRenderer.invoke('tp:app:version'),
-    adapters: () => ipcRenderer.invoke('tp:app:adapters')
+    adapters: () => ipcRenderer.invoke('tp:app:adapters'),
+    about: () => ipcRenderer.invoke('tp:app:about'),
+    copyText: (text: string) => ipcRenderer.invoke('tp:app:copy-text', text),
+    onShowAbout: (listener) => {
+      const handler = (): void => listener()
+      ipcRenderer.on('tp:app:show-about', handler)
+      return () => {
+        ipcRenderer.removeListener('tp:app:show-about', handler)
+      }
+    }
   },
   projects: {
     registry: () => ipcRenderer.invoke('tp:projects:registry'),
