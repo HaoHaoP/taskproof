@@ -13,6 +13,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { COLUMNS } from '../contract'
 
 const view = readFileSync(new URL('./MatrixView.vue', import.meta.url), 'utf-8')
 const tokens = readFileSync(new URL('../assets/tokens.css', import.meta.url), 'utf-8')
@@ -137,5 +138,17 @@ describe('matrix sticky cells', () => {
   it('renders the frozen corner and the zebra column headers', () => {
     expect(view).toMatch(/class="hd corner"/)
     expect(view).toMatch(/zcol: index % 2 === 1/)
+  })
+})
+
+describe('matrix grid columns', () => {
+  it('draws exactly as many status tracks as the contract declares', () => {
+    // The comment above `.grid` warns that the track count must equal
+    // COLUMNS.length. This is the assertion that keeps the two in step: one
+    // fixed lane track plus one `repeat(n, ...)` block for the status columns.
+    const tracks = rule('.grid')['grid-template-columns'] ?? ''
+    const repeat = /repeat\(\s*(\d+)\s*,/.exec(tracks)
+    expect(repeat, `grid-template-columns should use repeat(): "${tracks}"`).toBeTruthy()
+    expect(Number(repeat?.[1])).toBe(COLUMNS.length)
   })
 })

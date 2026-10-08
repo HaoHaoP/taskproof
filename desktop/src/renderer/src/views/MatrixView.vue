@@ -2,8 +2,9 @@
 /**
  * Matrix container.
  *
- * Columns are pipeline stages; the last one collects every abnormal terminal
- * state. Cards are presentational and know nothing about the store.
+ * Columns are pipeline stages; the last one collects the failure-like terminal
+ * states, while cancellation gets a column of its own. Cards are presentational
+ * and know nothing about the store.
  *
  * The board's *reasoning* -- the finished column's window, each column's
  * ordering, the range / project narrowing, and the fetch budget the range
@@ -58,10 +59,16 @@ const columns = computed(() => groupColumns(filterBoard(store.tasks, filter.valu
  *  `visible`. */
 const done = computed(() => doneWindow(columns.value.done ?? [], filter.value.expanded))
 
-/** Header counts and cell contents, with the finished column already windowed. */
+/** The cancelled column gets the same window as the finished column -- both are
+ *  terminal, both are read as a recent head, and both share the board's one
+ *  fold-bar toggle (`?done=expanded`). Same pure function, not a second copy. */
+const cancelled = computed(() => doneWindow(columns.value.cancelled ?? [], filter.value.expanded))
+
+/** Header counts and cell contents, with the terminal columns already windowed. */
 const shown = computed<Record<string, Task[]>>(() => ({
   ...columns.value,
-  done: done.value.visible
+  done: done.value.visible,
+  cancelled: cancelled.value.visible
 }))
 
 function countIn(columnKey: string): number {
@@ -182,12 +189,14 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
           </div>
         </template>
 
-        <!-- The finished column's fold bar: its own trailing grid row, pinned to
-             the done column so it reads as the foot of that column. -->
+        <!-- The terminal columns' fold bars: one trailing grid row, pinned under
+             the done column and under the cancelled column so each reads as the
+             foot of its own lane. Both drive the board's single fold toggle. -->
         <button
           v-if="done.hidden > 0"
           type="button"
           class="fold"
+          data-col="done"
           @click="applyFilter({ expanded: true })"
         >
           {{ t('board.expand', { n: done.hidden }) }}
@@ -196,6 +205,25 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
           v-else-if="filter.expanded && done.total > DONE_WINDOW"
           type="button"
           class="fold collapse"
+          data-col="done"
+          @click="applyFilter({ expanded: false })"
+        >
+          {{ t('board.collapse') }}
+        </button>
+        <button
+          v-if="cancelled.hidden > 0"
+          type="button"
+          class="fold"
+          data-col="cancelled"
+          @click="applyFilter({ expanded: true })"
+        >
+          {{ t('board.expand', { n: cancelled.hidden }) }}
+        </button>
+        <button
+          v-else-if="filter.expanded && cancelled.total > DONE_WINDOW"
+          type="button"
+          class="fold collapse"
+          data-col="cancelled"
           @click="applyFilter({ expanded: false })"
         >
           {{ t('board.collapse') }}
@@ -214,7 +242,7 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   flex: 1;
 }
 /* The board filter: the two dimensions (project, time range) plus the honest
-   fetch readout. It scopes the whole board, five columns at once. */
+   fetch readout. It scopes the whole board, six columns at once. */
 .boardbar {
   flex: none;
   display: flex;
@@ -252,7 +280,7 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
    silently. */
 .grid {
   display: grid;
-  grid-template-columns: var(--lane) repeat(5, minmax(var(--col), 1fr));
+  grid-template-columns: var(--lane) repeat(6, minmax(var(--col), 1fr));
   align-content: start;
   min-height: 100%;
   padding: 0 10px;
@@ -347,8 +375,9 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   color: var(--ink-4);
   opacity: 0.4;
 }
-/* The fold bar sits in its own row, in the finished column only (grid column 5:
-   the lane is 1, then the five status columns 2..6). */
+/* The fold bars sit in their own trailing row: the done lane is grid column 5
+   and the cancelled lane is 6 (the lane is 1, then the six status columns
+   2..7). Both drive the same `expanded` flag. */
 .fold {
   grid-column: 5;
   margin: 0 6px;
@@ -360,6 +389,9 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   border: 1px dashed var(--rule);
   border-radius: var(--r-card);
   cursor: pointer;
+}
+.fold[data-col='cancelled'] {
+  grid-column: 6;
 }
 .fold:hover {
   background: var(--raise);

@@ -47,6 +47,25 @@ describe('the status contract', () => {
     expect(ABNORMAL).not.toContain('running')
     expect(ABNORMAL).not.toContain('verifying')
   })
+
+  it('has six columns, with cancellation split out of the failure column', () => {
+    // The board's column count and order are load-bearing: `.grid` hands the
+    // same count to `grid-template-columns`, so a mismatch silently interleaves
+    // every lane. Cancellation is an operator action, not a defect, so it sits
+    // in its own column between done and abnormal.
+    expect(COLUMNS).toHaveLength(6)
+    expect(COLUMNS.map((column) => column.key)).toEqual([
+      'queued',
+      'running',
+      'verifying',
+      'done',
+      'cancelled',
+      'abnormal'
+    ])
+    const cancelled = COLUMNS.find((column) => column.key === 'cancelled')
+    expect(cancelled?.members).toEqual(['cancelled'])
+    expect(ABNORMAL).not.toContain('cancelled')
+  })
 })
 
 describe('never hide a status', () => {

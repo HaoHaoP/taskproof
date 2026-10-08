@@ -88,6 +88,17 @@ describe('column ordering', () => {
     expect(sortColumn('done', tasks).map((t) => t.id)).toEqual(['reborn', 'unfinished', 'old'])
   })
 
+  it('orders cancelled by finished_at too, newest first, falling back to created_at', () => {
+    // Cancellation is a terminal column with the same window as done, so it
+    // uses the same sort key.
+    const rows = [
+      task('old', { status: 'cancelled', created_at: '2026-01-01T00:00:00+08:00', finished_at: '2026-01-02T00:00:00+08:00' }),
+      task('recent', { status: 'cancelled', created_at: '2026-01-01T00:00:00+08:00', finished_at: '2026-10-08T11:59:00+08:00' }),
+      task('unfinished', { status: 'cancelled', created_at: '2026-10-08T11:00:00+08:00', finished_at: null })
+    ]
+    expect(sortColumn('cancelled', rows).map((t) => t.id)).toEqual(['recent', 'unfinished', 'old'])
+  })
+
   it('orders queued oldest-first', () => {
     const queued = [
       task('late', { status: 'queued', created_at: '2026-10-08T11:00:00+08:00' }),
@@ -209,6 +220,16 @@ describe('address-bar filter', () => {
 })
 
 describe('grouping', () => {
+  it('puts cancelled in its own column, not among the failures', () => {
+    const grouped = groupColumns([
+      task('c1', { status: 'cancelled', created_at: '2026-10-08T09:00:00+08:00' }),
+      task('f1', { status: 'failed', created_at: '2026-10-08T10:00:00+08:00' }),
+      task('t1', { status: 'timeout', created_at: '2026-10-08T11:00:00+08:00' })
+    ])
+    expect(grouped.cancelled.map((t) => t.id)).toEqual(['c1'])
+    expect(grouped.abnormal.map((t) => t.id)).toEqual(['t1', 'f1'])
+  })
+
   it('places abnormal terminal states in the last column and orders each', () => {
     const grouped = groupColumns([
       task('f1', { status: 'failed', created_at: '2026-10-08T09:00:00+08:00' }),

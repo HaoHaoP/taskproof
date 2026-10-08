@@ -50,22 +50,27 @@ export const STATUS_META: Record<string, StatusMeta> = {
 }
 
 /**
- * A column is a stage in the pipeline. The reason a task did not pass is not a
- * stage -- it is a property of the card -- so every abnormal terminal state
- * shares the last column and keeps its own colour and glyph.
+ * A column is a stage in the pipeline. A failure reason is not a stage -- it is
+ * a property of the card -- so the failure-like terminal states share the last
+ * column and keep their own colour and glyph. Cancellation is different: it is
+ * an action the operator took, not a defect, so it gets a column of its own
+ * rather than polluting the failure alarm.
  */
 export interface Column {
   key: string
   members: string[]
 }
 
-export const ABNORMAL: string[] = ['failed', 'blocked', 'timeout', 'cancelled']
+/** The failure-like terminal states. Cancellation is deliberately not one of
+ *  them: it has its own column. */
+export const ABNORMAL: string[] = ['failed', 'blocked', 'timeout']
 
 export const COLUMNS: Column[] = [
   { key: 'queued', members: ['queued'] },
   { key: 'running', members: ['running'] },
   { key: 'verifying', members: ['verifying'] },
   { key: 'done', members: ['done'] },
+  { key: 'cancelled', members: ['cancelled'] },
   { key: 'abnormal', members: ABNORMAL }
 ]
 

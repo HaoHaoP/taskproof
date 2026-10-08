@@ -17,8 +17,9 @@
 import type { Task } from './api/client'
 import { COLUMNS, columnFor } from './contract'
 
-/** How many finished cards the window shows before the fold bar. v1 constant,
- *  not a setting: the fold bar exists precisely so this need not be one. */
+/** How many cards a windowed terminal column (done, cancelled) shows before the
+ *  fold bar. v1 constant, not a setting: the fold bar exists precisely so this
+ *  need not be one. */
 export const DONE_WINDOW = 10
 
 /** The fetch budget's floor and ceiling, in rows. */
@@ -122,7 +123,7 @@ function oldestFirst(a: number | null, b: number | null): number {
   return a - b
 }
 
-/** The finished column's sort key: `finished_at`, falling back to `created_at`. */
+/** A terminal card's sort key: `finished_at`, falling back to `created_at`. */
 export function finishedKey(task: Task): string | null {
   return task.finished_at ?? task.created_at
 }
@@ -130,14 +131,15 @@ export function finishedKey(task: Task): string | null {
 /**
  * Order one column's tasks. Queued is the only column where order is meaning --
  * earliest first, so the head of the queue is the next task. Every other
- * column runs newest first; the finished column measures "newest" by its finish
- * time.
+ * column runs newest first; the two terminal columns (done and cancelled)
+ * measure "newest" by their finish time, because that is the head their window
+ * shows.
  */
 export function sortColumn(key: string, tasks: Task[]): Task[] {
   const copy = [...tasks]
   if (key === 'queued') {
     copy.sort((a, b) => oldestFirst(stamp(a.created_at), stamp(b.created_at)))
-  } else if (key === 'done') {
+  } else if (key === 'done' || key === 'cancelled') {
     copy.sort((a, b) => newestFirst(stamp(finishedKey(a)), stamp(finishedKey(b))))
   } else {
     copy.sort((a, b) => newestFirst(stamp(a.created_at), stamp(b.created_at)))
@@ -155,23 +157,23 @@ export function groupColumns(tasks: Task[]): Record<string, Task[]> {
 }
 
 export interface DoneWindow {
-  /** The finished cards to render, already ordered. */
+  /** The cards to render, already ordered. */
   visible: Task[]
   /** `total - visible.length`: the "还有 N 张" number, 0 when everything fits. */
   hidden: number
-  /** Every finished card in hand, before the window. */
+  /** Every card in hand, before the window. */
   total: number
 }
 
 /**
- * Apply the finished column's window. Not expanded, only the first `size`
- * cards survive and the rest are counted; expanded, the whole list passes
- * through. The window is applied *after* filtering, so it is "the ten most
- * recent in the current scope".
+ * Apply a terminal column's window. Not expanded, only the first `size` cards
+ * survive and the rest are counted; expanded, the whole list passes through.
+ * The window is applied *after* filtering, so it is "the ten most recent in the
+ * current scope". Shared verbatim by the done and cancelled columns.
  */
-export function doneWindow(done: Task[], expanded: boolean, size = DONE_WINDOW): DoneWindow {
-  const visible = expanded ? done : done.slice(0, size)
-  return { visible, hidden: done.length - visible.length, total: done.length }
+export function doneWindow(cards: Task[], expanded: boolean, size = DONE_WINDOW): DoneWindow {
+  const visible = expanded ? cards : cards.slice(0, size)
+  return { visible, hidden: cards.length - visible.length, total: cards.length }
 }
 
 /** Millisecond boundary for a range. `all` has no boundary. */
