@@ -105,6 +105,90 @@ project, but hand-editing is fine — the file is read on every run.
 Runtime state never lands here. Tasks, events and verdicts live in the SQLite
 store; the audit stream is JSONL.
 
+## Write protocol
+
+The local API is **read-only by default**. The write surface exists only when
+the server is started explicitly with the flag:
+
+```
+taskproof api --allow-write
+```
+
+With the flag the process generates a random token for this session and prints
+one extra line to stdout, right after the port line:
+
+```
+taskproof api listening on http://127.0.0.1:<port>
+taskproof api token <token>
+```
+
+The token is generated with `secrets.token_urlsafe(32)`, lives only in the
+process's memory, and is never written to a file, never placed in `argv` or the
+environment, never logged, and never returned in an HTTP response. The stdout
+pipe is the only channel: the parent process (the desktop app) is its only
+reader, whereas arguments and environment variables are visible to other
+processes under the same macOS account via `ps`. Without `--allow-write` no
+token is generated and every write verb keeps returning `405`.
+
+Every write request must present the token:
+
+```
+X-Taskproof-Token: <token>
+```
+
+| Endpoint | Body | Success |
+|---|---|---|
+| `GET /api/registry` | — | `200` `{"path", "hash", "mtime"}`; `hash` is the lowercase SHA-256 of the raw bytes |
+| `POST /api/projects/probe` | `{"path"}` | `200` a draft entry; **writes nothing** |
+| `POST /api/projects` | `{"path", "expected_hash", "id"?, "group"?, "aliases"?, "verify"?, "verify_kind"?, "forbidden_paths"?}` | `201 {"project": {…}}` |
+| `PATCH /api/projects/<id>` | `{"expected_hash", …fields}` | `200 {"project": {…}}` |
+| `DELETE /api/projects/<id>` | `{"expected_hash"}` | `200 {"removed": "<id>"}` |
+
+`PATCH` may change `aliases`, `group`, `verify`, `verify_kind`,
+`forbidden_paths` and `result_schema`. `id` and `path` are immutable once a
+project is registered — the id is the value `tasks.project` stores, and a
+changed path is effectively a different project — so asking to change either is
+rejected with `400`.
+
+Status codes:
+
+```
+400  a field is invalid (this includes an attempt to change id or path)
+403  the token is missing or wrong
+404  no project with that id
+409  the registry changed on disk since expected_hash was read (see below)
+405  a write verb while writes are disabled (no --allow-write)
+```
+
+### Conflicts
+
+The registry is human-editable, so a write never silently overwrites. Every
+write first compares the request's `expected_hash` with the file's current
+SHA-256. If they disagree the write is refused with `409` and the current file
+is handed back so the client can choose what to do:
+
+```json
+{"error": "conflict", "hash": "<current>", "content": "<file text>", "projects": [ … ]}
+```
+
+Nothing is written on a conflict. It is the caller's decision to reload the file
+or retry against the fresh hash.
+
+### Surgical rewrite
+
+Writes are done at the byte level, never by re-serialising the parsed TOML —
+that would discard the handwritten comments and any keys `registry.load` does
+not understand. Instead the whole file text is read, `[[project]]` block
+boundaries are found by line, and only lines inside the target block are added,
+changed or removed; every other byte is preserved. Deleting a block also removes
+the comment lines directly above it (no blank line in between) and leaves
+comments that are separated by a blank line, so a neighbouring project's note is
+never taken along. After editing, the candidate is re-parsed with `tomllib` and
+re-loaded, and only then written atomically (a temp file in the same directory
+followed by `os.replace`). A candidate that fails to parse or validate never
+reaches the real file.
+
 ---
+
 
 <sub>Also available in [中文](REGISTRY.zh-CN.md).</sub>

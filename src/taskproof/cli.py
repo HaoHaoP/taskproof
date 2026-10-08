@@ -20,7 +20,6 @@ from . import (
     ledger,
     registry,
     storage,
-    verify,
 )
 from .errors import RegistryError, UsageError
 from .models import TERMINAL_STATUSES
@@ -113,6 +112,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("api", help="serve the local REST API (consumed by the desktop frontend)")
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
+    p.add_argument("--allow-write", action="store_true",
+                   help="enable token-protected registry writes")
 
     sub.add_parser("doctor", help="environment self-check")
     sub.add_parser("gc", help="rotate the audit stream and prune old state")
@@ -175,30 +176,6 @@ def cmd_init(args):
     return 0
 
 
-#: Build file -> (candidate acceptance command, verify_kind). Deliberately a
-#: short, opinionated list, not a general-purpose project detector.
-_BUILD_FILES = (
-    ("package.json", "npm run build", "build"),
-    ("pyproject.toml", "python -m compileall -q .", "build"),
-    ("setup.py", "python -m compileall -q .", "build"),
-    ("pom.xml", "mvn -q -DskipTests compile", "build"),
-    ("Cargo.toml", "cargo check", "build"),
-    ("go.mod", "go build ./...", "build"),
-)
-
-#: The probe runs the candidate command once on a clean tree. Long builds are
-#: allowed but bounded so `register` cannot hang forever.
-_PROBE_TIMEOUT = 600
-
-
-def _infer_verify(path):
-    """Return (command, verify_kind) for the first recognised build file."""
-    for name, command, kind in _BUILD_FILES:
-        if os.path.isfile(os.path.join(path, name)):
-            return command, kind
-    return None, "none"
-
-
 def _toml_string(value) -> str:
     """A minimal TOML basic string (paths/ids are simple, but escape anyway)."""
     text = str(value)
@@ -248,17 +225,13 @@ def cmd_register(args):
     if not os.path.isdir(path):
         raise UsageError(f"not a directory: {args.path}")
 
-    project_id = args.id or os.path.basename(os.path.normpath(path)) or path
-    group = args.group or project_id
-
-    command, kind = _infer_verify(path)
-    probe = None
-    probe_exit = None
-    if command is not None:
-        # ④ probe once, on the clean tree, before writing anything.
-        outcome = verify.run_acceptance(path, command, timeout=_PROBE_TIMEOUT)
-        probe = "passed" if outcome.passed else "failed"
-        probe_exit = outcome.exit_code
+    draft = registry.probe_repository(path)
+    project_id = args.id or draft["id"]
+    group = args.group or draft["group"]
+    command = draft["verify"]
+    kind = draft["verify_kind"]
+    probe = draft["probe"]
+    probe_exit = draft["probe_exit"]
 
     payload = {
         "id": project_id,
@@ -776,7 +749,7 @@ def cmd_board(args):
 def cmd_api(args):
     from .api import server
 
-    return server.serve(args.workspace, args.port)
+    return server.serve(args.workspace, args.port, allow_write=args.allow_write)
 
 
 def _check_workspace(workspace) -> dict:

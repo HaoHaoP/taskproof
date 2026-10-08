@@ -180,7 +180,7 @@ taskproof show <task-id>                single task detail
 taskproof log <task-id>                 event stream
 taskproof verify <task-id>              re-run acceptance
 taskproof board [--open | --serve PORT | --out FILE]
-taskproof api --port N                  local REST (consumed by the stage 2 frontend)
+taskproof api --port N [--allow-write]  local REST (consumed by the stage 2 frontend)
 taskproof doctor                        environment self-check
 taskproof gc                            archive and rotate
 ```
@@ -205,8 +205,10 @@ process and contributor onboarding are designed for two artifacts.
 
 The static dashboard is **frozen**: it keeps working as a `file://` snapshot and
 is not developed further. Stage 2 builds a separate Electron application in
-`desktop/` that consumes the same read-only loopback REST API. The Python
-package gains exactly one change (below); everything else is additive.
+`desktop/` that consumes the same loopback REST API. That API stays read-only by
+default; only an explicit `--allow-write` opens a session-token-gated write
+surface (project create / edit / delete) on top of it. The Python package gains
+only the small changes described below; everything else is additive.
 
 **Stack.** TypeScript, Vue 3 (`<script setup>`), electron-vite
 (main / preload / renderer), Pinia, vue-router (hash mode — production loads
@@ -215,12 +217,15 @@ for v1; no packaged installer yet.
 
 **Process model.** Electron owns the server: it spawns `taskproof api --port 0`,
 reads the bound port from the child's stdout, and terminates the child on exit.
-This is the one Python-side change — today `api` defaults to 8787 and blocks
-without printing the port:
+The Python-side changes are these: today `api` defaults to 8787 and blocks
+without printing the port, and it has no write surface.
 
 ```
 taskproof api --port 0     bind an ephemeral port, print one flushed line with
-                           the actual port, then serve
+                           the actual port, then serve (read-only)
+taskproof api --port 0 --allow-write
+                           also print a second line with a session-only token
+                           and enable token-gated registry writes
 ```
 
 **Matrix column model.** Columns express *which stage of the pipeline a task has
@@ -301,8 +306,6 @@ Automated git writes: never.
 ```
 Positioning / differentiator — "land it first, find the angle later"
 Embedded Python runtime      — after stage 2, driven by demand
-Registry write path          — stage 2 project CRUD needs a write endpoint plus
-   the session-only local write token; the read-only boundary is what ships first
 Multi-user / remote auth     — out of scope for now
 Splitting into several repositories (core / adapters / desktop) — possible later;
    a single repository for now

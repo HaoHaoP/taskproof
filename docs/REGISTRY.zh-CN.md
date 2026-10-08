@@ -93,6 +93,79 @@ result_schema 指定的文件不存在
 
 运行期状态从不落在这里。任务、事件与判定在 SQLite 存储里；审计流是 JSONL。
 
+## 写协议
+
+本地 API **默认只读**。只有显式带上开关启动时，写面才存在：
+
+```
+taskproof api --allow-write
+```
+
+带上开关后，进程会为本次会话生成一个随机令牌，并在端口行之后多刷一行到
+stdout：
+
+```
+taskproof api listening on http://127.0.0.1:<port>
+taskproof api token <token>
+```
+
+令牌由 `secrets.token_urlsafe(32)` 生成，只活在进程内存里：不写文件、不进
+`argv` / 环境变量、不进日志，也绝不出现在任何 HTTP 响应里。stdout 管道是唯一
+通道 —— 只有父进程（桌面应用）能读它；而在 macOS 上，命令行参数与环境变量会被
+同一用户的其它进程从 `ps` 里看到。不加 `--allow-write` 就不生成令牌，所有写动词
+仍然返回 `405`。
+
+每个写请求都必须带上令牌：
+
+```
+X-Taskproof-Token: <token>
+```
+
+| 端点 | 请求体 | 成功 |
+|---|---|---|
+| `GET /api/registry` | — | `200` `{"path", "hash", "mtime"}`；`hash` 是原始字节的 sha256（十六进制小写） |
+| `POST /api/projects/probe` | `{"path"}` | `200` 一份草稿；**不写任何文件** |
+| `POST /api/projects` | `{"path", "expected_hash", "id"?, "group"?, "aliases"?, "verify"?, "verify_kind"?, "forbidden_paths"?}` | `201 {"project": {…}}` |
+| `PATCH /api/projects/<id>` | `{"expected_hash", …要改的字段}` | `200 {"project": {…}}` |
+| `DELETE /api/projects/<id>` | `{"expected_hash"}` | `200 {"removed": "<id>"}` |
+
+`PATCH` 可改 `aliases`、`group`、`verify`、`verify_kind`、`forbidden_paths`
+与 `result_schema`。项目一旦登记，`id` 与 `path` 就不可变 —— id 是
+`tasks.project` 存的值，path 变了等于换了项目 —— 试图改它们会被拒为 `400`。
+
+状态码：
+
+```
+400  字段非法（包含试图改 id 或 path）
+403  缺令牌 / 令牌不对
+404  没有这个 project id
+409  磁盘上的注册表在 expected_hash 读出后变了（见下）
+405  未启用写面时的写动词（没加 --allow-write）
+```
+
+### 冲突
+
+注册表是人可编辑的，所以写入绝不静默覆盖。每次写之前，先把请求里的
+`expected_hash` 与磁盘当下的 sha256 比对。不一致就拒绝为 `409`，并把当前
+文件原样交回，让客户端自己决定怎么办：
+
+```json
+{"error": "conflict", "hash": "<当前>", "content": "<文件文本>", "projects": [ … ]}
+```
+
+冲突时什么都不写。重新载入文件，还是用新的 hash 重试，由调用方取舍。
+
+### 外科式改写
+
+写入按字节进行，绝不把解析后的 TOML 整体重新序列化 —— 那会把
+手写注释、以及 `registry.load` 不认识的键全部冲掉。正确做法是：读整个文件
+文本，按行定位 `[[project]]` 块边界，只在目标块的范围内按行改 / 加 / 删键；
+其它字节一律原样保留。删除块时，紧贴其上、中间没有空行隔开的注释一起删；
+被空行隔开的注释留下，这样邻近项目的手写说明不会被误删。改完先
+用 `tomllib` 回读，再用 `load` 校验，只有通过才原子落盘（同目录临时文件 +
+`os.replace`）。解析或校验不过的候选，绝不会碰到真正的文件。
+
 ---
+
 
 <sub>也可读 [English](REGISTRY.md)。</sub>
