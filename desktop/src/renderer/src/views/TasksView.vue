@@ -68,7 +68,7 @@ function open(id: string): void {
             </template>
           </el-table-column>
 
-          <el-table-column prop="brief" :label="t('tasks.col.brief')" min-width="300" />
+          <el-table-column prop="brief" :label="t('tasks.col.brief')" min-width="300" class-name="tp-clip" />
 
           <el-table-column :label="t('tasks.col.adapter')" width="126">
             <template #default="scope">

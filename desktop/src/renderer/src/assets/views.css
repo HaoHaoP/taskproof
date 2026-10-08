@@ -72,6 +72,16 @@
 }
 
 /* Cell helpers ------------------------------------------------------------ */
+
+/* Single-line ellipsis for a table cell. Element Plus only truncates a cell
+   through show-overflow-tooltip, and that attribute also drags in a hover popup
+   we deliberately do not want (the row's click opens the drawer with the whole
+   brief). So the cell gets this class instead of the attribute. */
+.tp-clip .cell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .mono {
   font-family: var(--mono);
   font-size: 11.5px;
