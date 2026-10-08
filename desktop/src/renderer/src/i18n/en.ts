@@ -29,28 +29,29 @@ export default {
 
   tally: { tasks: 'tasks', flying: 'in progress', failed: 'failed' },
 
-  columns: {
-    id: 'ID',
-    path: 'Path',
-    group: 'Group',
-    verifyKind: 'Verify type',
-    tasks: 'Tasks',
-    inProgress: 'In progress',
-    failed: 'Failed',
-    lastActivity: 'Last activity',
-    project: 'Project',
-    brief: 'Brief',
-    adapter: 'Adapter',
-    duration: 'Duration'
-  },
-
-  matrix: { live: 'live', window: 'in window' },
-
   card: { attempt: 'try', files: 'files' },
 
-  tasks: { all: 'All tasks', sub: 'Pick a row to see the brief, the claim and the evidence.' },
+  tasks: {
+    title: 'All tasks',
+    sub: 'Click any row for detail and the verdict.',
+    col: { brief: 'Task', adapter: 'Adapter', dur: 'Duration' }
+  },
 
-  projects: { sub: 'Every repository in the registry, with its task count.' },
+  projects: {
+    title: 'Projects',
+    sub: 'One row per project. Numbers come from the same aggregate query as the matrix.',
+    col: {
+      id: 'Project',
+      group: 'Group',
+      path: 'Path',
+      tasks: 'Tasks',
+      flying: 'In flight',
+      failed: 'Not passing',
+      last: 'Last activity'
+    }
+  },
+
+  proj: { group: { default: 'default · all serialised' } },
 
   service: {
     local: 'local service',
@@ -77,13 +78,21 @@ export default {
 
   settings: {
     title: 'Settings',
-    appearance: 'Appearance and language',
-    service: 'Service and workspace',
+    sub: 'Settings live in the app userData/settings.json, owned by the main process. Nothing here writes the taskproof registry.',
+    appearance: 'Appearance',
+    service: 'Service and process',
     about: 'About',
     theme: 'Theme',
+    themeDesc: 'Light is a grey-scale mirror of dark: structure, density and accent are unchanged.',
     language: 'Language',
+    poll: 'Polling',
+    pollDesc: 'Off stops the periodic read; the screen keeps the last snapshot.',
+    pollOn: 'every 2s',
+    pollOff: 'off',
     workspace: 'Workspace',
-    taskproof: 'taskproof path',
+    workspaceDesc: 'Where the data lives. Read-only here.',
+    taskproof: 'taskproof executable',
+    taskproofDesc: 'Leave empty to resolve from PATH.',
     version: 'Version',
     contract: 'Contract',
     contractSynced: 'in sync with the Python constants',
@@ -96,18 +105,42 @@ export default {
   },
 
   drawer: {
-    brief: 'Brief',
+    brief: 'Full brief',
     timeline: 'Timeline',
-    claim: 'worker claims',
-    evidence: 'system evidence',
-    claimNone: 'no record',
-    exitCode: 'exit',
+    claim: 'Worker claims',
+    claimNote: 'self-reported, unverified',
+    evidence: 'System evidence',
+    close: 'Close',
+    now: 'now',
+    noClaim: '(no result from the worker)',
+    noTask: 'No such task',
+    verdict: 'Verdict'
+  },
+
+  ev: {
+    exit: 'exit',
     verify: 'verify',
-    duration: 'duration',
-    files: 'files',
+    files: 'files changed',
     adapter: 'adapter',
-    model: 'model',
     group: 'group',
-    close: 'Close'
+    notrun: 'not run'
+  },
+
+  verdict: { passed: 'Acceptance passed', failed: 'Acceptance failed', by: 'independent run' },
+
+  event: {
+    queued: 'queued',
+    started: 'dispatched',
+    claimed: 'claimed',
+    reclaimed: 'reclaimed',
+    result_schema: 'result contract',
+    adapter: 'adapter run',
+    verify: 'verification',
+    done: 'done',
+    failed: 'failed',
+    forbidden: 'protected path touched',
+    blocked: 'blocked',
+    timeout: 'timed out',
+    cancelled: 'cancelled'
   }
 }

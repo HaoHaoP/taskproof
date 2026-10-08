@@ -1,4 +1,13 @@
 <script setup lang="ts">
+/**
+ * Project overview, following the prototype: a page head, then one row per
+ * project.
+ *
+ * Two prototype columns are deliberately absent. The probe pill and the row
+ * actions need data and a write path the frozen REST API does not have -- the
+ * `probe` field is not in the project payload at all, and editing the registry
+ * is the CRUD stage. A column that can only ever render "—" would be a lie.
+ */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TaskDrawer from '../components/TaskDrawer.vue'
@@ -12,30 +21,60 @@ const rows = computed(() => store.projects)
 <template>
   <div class="projects-view">
     <div class="panes">
-      <h2>{{ t('nav.projects') }}</h2>
-      <p class="sub">{{ t('projects.sub') }}</p>
-      <el-table :data="rows" size="small" class="tp-table">
-        <el-table-column :label="t('rail.title')" width="150">
-          <template #default="scope">
-            <span class="mono">{{ scope.row.id }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="path" :label="t('columns.path')" min-width="320" show-overflow-tooltip>
-          <template #default="scope">
-            <span class="mono muted">{{ scope.row.path }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="group" :label="t('columns.group')" width="120" />
-        <el-table-column prop="verify_kind" :label="t('columns.verifyKind')" width="110" />
-        <el-table-column prop="tasks" :label="t('columns.tasks')" width="90" />
-        <el-table-column prop="in_progress" :label="t('columns.inProgress')" width="110" />
-        <el-table-column prop="failed" :label="t('columns.failed')" width="90" />
-        <el-table-column prop="last_activity" :label="t('columns.lastActivity')" min-width="170">
-          <template #default="scope">
-            <span class="mono muted">{{ scope.row.last_activity ?? '—' }}</span>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="pagehead">
+        <div>
+          <h3>{{ t('projects.title') }}</h3>
+          <p class="sub">{{ t('projects.sub') }}</p>
+        </div>
+      </div>
+
+      <div class="tp-table">
+        <el-table :data="rows" style="width: 100%">
+          <el-table-column :label="t('projects.col.id')" min-width="150">
+            <template #default="scope">
+              <span class="mono">{{ scope.row.id }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column :label="t('projects.col.group')" width="136">
+            <template #default="scope">
+              <span class="mono" :class="{ muted: scope.row.group === 'default' }">
+                {{ scope.row.group === 'default' ? t('proj.group.default') : scope.row.group }}
+              </span>
+            </template>
+          </el-table-column>
+
+          <el-table-column :label="t('projects.col.path')" min-width="230">
+            <template #default="scope">
+              <span class="mono muted">{{ scope.row.path }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column :label="t('projects.col.tasks')" width="72" align="right">
+            <template #default="scope">
+              <span class="mono">{{ scope.row.tasks }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column :label="t('projects.col.flying')" width="72" align="right">
+            <template #default="scope">
+              <span class="mono">{{ scope.row.in_progress }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column :label="t('projects.col.failed')" width="72" align="right">
+            <template #default="scope">
+              <span class="mono" :class="{ bad: scope.row.failed > 0 }">{{ scope.row.failed }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column :label="t('projects.col.last')" width="170">
+            <template #default="scope">
+              <span class="mono muted">{{ scope.row.last_activity ?? '—' }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
     </div>
     <TaskDrawer />
   </div>
@@ -48,26 +87,8 @@ const rows = computed(() => store.projects)
   flex: 1;
   min-height: 0;
 }
-.panes {
-  flex: 1;
-  overflow: auto;
-  padding: 22px 26px 40px;
-}
-h2 {
-  margin: 0;
-  font: 600 17px/1.2 var(--sans);
-  color: var(--ink);
-}
-.sub {
-  margin: 6px 0 18px;
-  font-size: 12.5px;
-  color: var(--ink-4);
-}
-.mono {
-  font-family: var(--mono);
-  font-size: 11.5px;
-}
-.muted {
-  color: var(--ink-4);
+.mono.bad {
+  color: var(--c-failed);
+  font-weight: 600;
 }
 </style>

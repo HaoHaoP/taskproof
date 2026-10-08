@@ -1,10 +1,16 @@
 <script setup lang="ts">
-/** A task card. Pure props in, one event out: no store, no fetching. */
+/**
+ * A task card. Pure props in, one event out: no store, no fetching.
+ *
+ * Ported from the prototype's `button.card`: a state lamp, the id, then the
+ * verification stamp and the disclosure chevron on the right. The stamp is the
+ * verification exit code and nothing else -- `✓ 0` or `✗ N` -- and a task that
+ * was never verified gets no stamp at all, because there is no verdict to show.
+ */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import StatusMark from './StatusMark.vue'
 import type { Task } from '../api/client'
-import { EXIT_MEANINGS } from '../contract'
 import { duration } from '../format'
 
 const props = defineProps<{ task: Task; expanded?: boolean }>()
@@ -12,23 +18,12 @@ const emit = defineEmits<{ open: [id: string] }>()
 
 const { t } = useI18n()
 
-const outcome = computed(() => {
-  const task = props.task
-  if (task.verify_exit != null) return task.verify_exit === 0 ? 'good' : 'bad'
-  if (task.exit_code != null) return task.exit_code === 0 ? 'good' : 'bad'
-  return ''
+/** null means "no stamp": the prototype only renders one when verify !== null. */
+const stamp = computed(() => {
+  const exit = props.task.verify_exit
+  if (exit == null) return null
+  return { text: exit === 0 ? '✓ 0' : `✗ ${exit}`, cls: exit === 0 ? 'good' : 'bad' }
 })
-
-const outcomeText = computed(() => {
-  const task = props.task
-  if (task.verify_exit != null) return `verify ${task.verify_exit}`
-  if (task.exit_code != null) return `exit ${task.exit_code}`
-  return ''
-})
-
-const exitMeaning = computed(() =>
-  props.task.exit_code == null ? null : (EXIT_MEANINGS[props.task.exit_code] ?? 'unknown')
-)
 </script>
 
 <template>
@@ -43,9 +38,8 @@ const exitMeaning = computed(() =>
       <StatusMark :status="task.status" />
       <span class="cid">{{ task.id }}</span>
       <span class="tail">
-        <span v-if="outcomeText" class="stamp" :class="outcome" :title="exitMeaning ?? ''">
-          {{ outcomeText }}
-        </span>
+        <span v-if="stamp" class="stamp" :class="stamp.cls">{{ stamp.text }}</span>
+        <span class="chev">▸</span>
       </span>
     </span>
 
@@ -100,6 +94,9 @@ const exitMeaning = computed(() =>
 }
 .tail {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   flex: none;
 }
 .stamp {
@@ -118,6 +115,17 @@ const exitMeaning = computed(() =>
   color: var(--c-failed);
   border-color: transparent;
   background: var(--w-failed);
+}
+/* The chevron is the disclosure affordance: it turns to point down while the
+   drawer is open. */
+.chev {
+  font: 8px/1 var(--sans);
+  color: var(--ink-4);
+  transition: transform 0.15s;
+}
+.tp-card[aria-expanded='true'] .chev {
+  transform: rotate(90deg);
+  color: var(--ink-2);
 }
 .line-2 {
   display: -webkit-box;
@@ -140,5 +148,10 @@ const exitMeaning = computed(() =>
   margin-top: 7px;
   font: 9.5px/1 var(--mono);
   color: var(--ink-4);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chev {
+    transition: none;
+  }
 }
 </style>

@@ -45,10 +45,27 @@ export const useSettingsStore = defineStore('settings', () => {
     setLocale(settings.value.language)
   }
 
+  /**
+   * Writes go through the main process, which is the source of truth, but the
+   * response is a snapshot of the *whole* file at the time it was read. Two
+   * settings changed in quick succession therefore race: the earlier write's
+   * response can land last and put its stale copy of the other field back on
+   * screen (click "light" and then "off", and the theme can snap back to dark
+   * while the file says light). The sequence number makes the newest write the
+   * only one allowed to repaint.
+   */
+  let writeSeq = 0
+
   async function persist(patch: Partial<DesktopSettings>): Promise<void> {
+    const seq = ++writeSeq
     settings.value = { ...settings.value, ...patch }
+    applyTheme(settings.value.theme)
+    setLocale(settings.value.language)
     const tp = window.tp
-    if (tp) settings.value = await tp.settings.set(patch)
+    if (!tp) return
+    const saved = await tp.settings.set(patch)
+    if (seq !== writeSeq) return
+    settings.value = saved
     applyTheme(settings.value.theme)
     setLocale(settings.value.language)
   }

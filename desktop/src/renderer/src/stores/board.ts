@@ -120,6 +120,11 @@ export const useBoardStore = defineStore('board', () => {
       tasks.value = nextTasks
       summary.value = nextSummary
       lastError.value = null
+      // An open drawer is part of the screen too, so it gets the same treatment
+      // as the list: a running task's timeline has to keep growing, otherwise
+      // the "live" indicator next to it would be a lie.
+      const openId = detail.value?.task.id
+      if (openId) await openTask(openId)
     } catch (cause) {
       // Keep the last good snapshot on screen; a dropped poll must not blank it.
       lastError.value = String(cause)
@@ -128,8 +133,13 @@ export const useBoardStore = defineStore('board', () => {
 
   async function openTask(id: string): Promise<void> {
     if (!client) return
-    const body = await client.task(id)
-    detail.value = { task: body.task, events: body.events }
+    try {
+      const body = await client.task(id)
+      detail.value = { task: body.task, events: body.events }
+    } catch {
+      // A task that vanished while its drawer is open: keep what is on screen
+      // rather than blanking the panel under the reader.
+    }
   }
 
   function closeTask(): void {

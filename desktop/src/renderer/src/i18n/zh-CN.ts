@@ -22,28 +22,29 @@ export default {
 
   tally: { tasks: '任务', flying: '处理中', failed: '未通过' },
 
-  columns: {
-    id: 'ID',
-    path: '路径',
-    group: '并发组',
-    verifyKind: '验收类型',
-    tasks: '任务',
-    inProgress: '处理中',
-    failed: '未通过',
-    lastActivity: '最近活动',
-    project: '项目',
-    brief: '任务',
-    adapter: '适配器',
-    duration: '时长'
-  },
-
-  matrix: { live: '实时', window: '窗口内' },
-
   card: { attempt: '尝试', files: '文件' },
 
-  tasks: { all: '全部任务', sub: '点任意一行查看详情与事件。' },
+  tasks: {
+    title: '全部任务',
+    sub: '点任意一行看详情与判定。',
+    col: { brief: '任务', adapter: '适配器', dur: '耗时' }
+  },
 
-  projects: { sub: '注册表里的每个仓库，以及它的任务数。' },
+  projects: {
+    title: '项目总览',
+    sub: '每个项目一行。数字与矩阵同源（同一个聚合查询）。',
+    col: {
+      id: '项目',
+      group: '并发组',
+      path: '路径',
+      tasks: '任务',
+      flying: '处理中',
+      failed: '未通过',
+      last: '最近活动'
+    }
+  },
+
+  proj: { group: { default: 'default · 全部串行' } },
 
   service: {
     local: '本地服务',
@@ -70,13 +71,21 @@ export default {
 
   settings: {
     title: '设置',
-    appearance: '外观与语言',
-    service: '服务与工作区',
+    sub: '设置存在 App 本地 userData/settings.json，主进程持有；这里不写 taskproof 的注册表。',
+    appearance: '外观与交互',
+    service: '服务与进程',
     about: '关于',
     theme: '主题',
+    themeDesc: '浅色是深色的灰阶镜像：结构、密度、强调色都不变。',
     language: '语言',
+    poll: '轮询',
+    pollDesc: '关掉后不再定时读取，界面停在上一次快照。',
+    pollOn: '每 2 秒',
+    pollOff: '关闭',
     workspace: '工作区',
-    taskproof: 'taskproof 路径',
+    workspaceDesc: '数据位置，只读展示。',
+    taskproof: 'taskproof 可执行文件',
+    taskproofDesc: '留空则从 PATH 找。',
     version: '版本',
     contract: '契约',
     contractSynced: '与 Python 常量同步',
@@ -90,17 +99,41 @@ export default {
 
   drawer: {
     brief: '任务全文',
-    timeline: '时间线',
+    timeline: '进度时间线',
     claim: 'worker 声称',
+    claimNote: '自述，未经核实',
     evidence: '系统证据',
-    claimNone: '无记录',
-    exitCode: '退出码',
+    close: '关闭',
+    now: '现在',
+    noClaim: '（worker 未给出结果）',
+    noTask: '没有这个任务',
+    verdict: '验收判定'
+  },
+
+  ev: {
+    exit: '退出码',
     verify: '验收',
-    duration: '时长',
-    files: '文件',
+    files: '改动文件',
     adapter: '适配器',
-    model: '模型',
-    group: '分组',
-    close: '关闭'
+    group: '并发组',
+    notrun: '未跑'
+  },
+
+  verdict: { passed: '验收通过', failed: '验收未通过', by: '独立验收' },
+
+  event: {
+    queued: '排队',
+    started: '已派发',
+    claimed: '已认领',
+    reclaimed: '重新认领',
+    result_schema: '结果契约',
+    adapter: '执行体',
+    verify: '独立验收',
+    done: '完成',
+    failed: '失败',
+    forbidden: '触碰保护路径',
+    blocked: '被阻塞',
+    timeout: '超时',
+    cancelled: '已取消'
   }
 }

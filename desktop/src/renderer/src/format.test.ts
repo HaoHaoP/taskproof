@@ -1,43 +1,72 @@
+/**
+ * The drawer's timeline depends on these two, and both have a failure mode that
+ * is invisible until it is on screen: a long payload burying the event it
+ * belongs to, and a verification that never ran being painted as a failure.
+ */
 import { describe, expect, it } from 'vitest'
-import { duration, payloadLine, shortTime } from './format'
+import { eventSummary, isBadEvent, payloadLine } from './format'
 
-describe('duration', () => {
-  it('formats the way the prototype does', () => {
-    expect(duration('2026-10-08T10:00:00+08:00', '2026-10-08T10:30:00+08:00')).toBe('30m00s')
-    expect(duration('2026-10-08T10:26:00+08:00', '2026-10-08T10:26:48+08:00')).toBe('0m48s')
+describe('eventSummary', () => {
+  it('projects the fields that answer "what happened"', () => {
+    expect(eventSummary('started', { adapter: 'codex', group: 'taskproof' })).toBe(
+      'codex · taskproof'
+    )
+    expect(eventSummary('adapter', { exit_code: 0, degraded: false })).toBe('exit 0')
+    expect(eventSummary('verify', { status: 'PASSED', exit_code: 0 })).toBe('PASSED · exit 0')
+    expect(eventSummary('done', { verify: 'PASSED', files_changed: 5 })).toBe('PASSED · 5')
   })
 
-  it('shows a dash rather than a wrong number when there is no start', () => {
-    expect(duration(null, null)).toBe('—')
-    expect(duration('not a date', '2026-10-08T10:00:00+08:00')).toBe('—')
+  it('does not paste a whole summary into the timeline', () => {
+    // The real `adapter` payload carries the worker's full report -- thousands
+    // of characters. It must not reach the timeline.
+    const huge = 'x'.repeat(4000)
+    const line = eventSummary('adapter', { exit_code: 0, summary: huge })
+    expect(line).toBe('exit 0')
+    expect(line.length).toBeLessThan(200)
+  })
+
+  it('caps an unknown payload instead of printing all of it', () => {
+    const line = eventSummary('something-new', { note: 'y'.repeat(500) })
+    expect(line.length).toBeLessThanOrEqual(161) // 160 + the ellipsis
+    expect(line.endsWith('…')).toBe(true)
+  })
+
+  it('keeps an unrecognised event readable rather than dropping it', () => {
+    expect(eventSummary('brand_new', { a: 1, b: 'two' })).toBe('a 1 · b two')
+  })
+
+  it('names the protected paths a forbidden event reports', () => {
+    expect(eventSummary('forbidden', { paths: ['dist/', '.git/'] })).toBe('dist/, .git/')
   })
 })
 
-describe('shortTime', () => {
-  it('takes the clock part out of an ISO timestamp', () => {
-    expect(shortTime('2026-10-08T10:33:10+08:00')).toBe('10:33:10')
+describe('isBadEvent', () => {
+  it('flags the failure events', () => {
+    for (const name of ['failed', 'forbidden', 'blocked', 'timeout', 'cancelled']) {
+      expect(isBadEvent(name, {})).toBe(true)
+    }
   })
 
-  it('passes through what it cannot parse instead of hiding it', () => {
-    expect(shortTime('whenever')).toBe('whenever')
-    expect(shortTime(null)).toBe('—')
+  it('treats a skipped verification as "did not run", not as a failure', () => {
+    expect(isBadEvent('verify', { status: 'SKIPPED' })).toBe(false)
+    expect(isBadEvent('verify', { status: 'PASSED' })).toBe(false)
+    expect(isBadEvent('verify', { status: 'FAILED' })).toBe(true)
+  })
+
+  it('reads the adapter exit code', () => {
+    expect(isBadEvent('adapter', { exit_code: 0 })).toBe(false)
+    expect(isBadEvent('adapter', { exit_code: 71 })).toBe(true)
+  })
+
+  it('does not call an ordinary event bad', () => {
+    expect(isBadEvent('started', { adapter: 'codex' })).toBe(false)
+    expect(isBadEvent('done', { verify: 'PASSED' })).toBe(false)
   })
 })
 
 describe('payloadLine', () => {
-  it('renders an unrecognised payload key instead of dropping it', () => {
-    // A new field arriving from the Python side must become visible, not vanish.
-    expect(payloadLine({ exit: 75, group: 'svc' })).toBe('exit 75 · group svc')
-    expect(payloadLine({ something_new: 'x' })).toContain('something_new')
-  })
-
-  it('summarises collections and objects', () => {
-    expect(payloadLine({ files: ['a', 'b', 'c'] })).toBe('files 3')
-    expect(payloadLine({ nested: { a: 1 } })).toBe('nested {...}')
-  })
-
-  it('is empty for nothing', () => {
-    expect(payloadLine(null)).toBe('')
-    expect(payloadLine({})).toBe('')
+  it('still shows a field it has never heard of', () => {
+    // How a new Python-side field becomes visible instead of silently ignored.
+    expect(payloadLine({ brand_new_field: 'value' })).toBe('brand_new_field value')
   })
 })

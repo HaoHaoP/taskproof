@@ -1,0 +1,180 @@
+/*
+ * Content pages and tables.
+ *
+ * Ported from the prototype (taskproof-work/prototypes/desktop-app-v3.html).
+ * These rules are shared by more than one view -- projects, tasks and settings
+ * all sit in a `.panes` container and two of them render an Element Plus table
+ * -- so they live here instead of being repeated per component. Every value is
+ * the prototype's.
+ */
+
+/* Content page ------------------------------------------------------------ */
+.panes {
+  flex: 1;
+  overflow: auto;
+  padding: 20px 24px 36px;
+  min-width: 0;
+}
+/* The settings page is the odd one out: grouped list pages get a light grey
+   canvas, the matrix and the tables stay pure. Apple splits them the same way. */
+.panes.grouped {
+  background-color: var(--bg-grouped);
+}
+.panes h3 {
+  margin: 0 0 4px;
+  font: 600 17px/1.3 var(--sans);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.panes .sub {
+  margin: 0 0 18px;
+  font: 12px/1.5 var(--sans);
+  color: var(--ink-3);
+  max-width: 640px;
+}
+.pagehead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.pagehead .sub {
+  margin-bottom: 16px;
+}
+
+/* Tables ------------------------------------------------------------------ */
+.tp-table .el-table {
+  --el-table-border-color: var(--rule-2);
+  --el-table-header-bg-color: transparent;
+  --el-table-row-hover-bg-color: var(--raise);
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  font-size: 12.5px;
+  background: transparent;
+}
+.tp-table .el-table th.el-table__cell {
+  font: 500 11px/1 var(--sans);
+  color: var(--ink-3);
+  background: transparent;
+  border-bottom-color: var(--rule) !important;
+}
+.tp-table .el-table td.el-table__cell {
+  padding: 10px 0;
+  border-bottom-color: var(--rule-2);
+}
+.tp-table .el-table::before,
+.tp-table .el-table__inner-wrapper::before {
+  display: none;
+}
+.tp-table .el-table__inner-wrapper {
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+
+/* Cell helpers ------------------------------------------------------------ */
+.mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.muted {
+  color: var(--ink-4);
+}
+/* Status pill, used by the task table and the drawer header. */
+.sc {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 600 11px/1 var(--sans);
+  padding: 4px 9px;
+  border-radius: var(--r-pill);
+  background: var(--w);
+  color: var(--c);
+  flex: none;
+  white-space: nowrap;
+}
+.probe {
+  font: 600 10.5px/1 var(--sans);
+  padding: 3px 8px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--ink-3);
+}
+.probe.passed {
+  background: var(--w-done);
+  color: var(--ok);
+}
+.probe.failed {
+  background: var(--w-failed);
+  color: var(--c-failed);
+}
+.probe.none {
+  background: var(--sunken);
+  color: var(--ink-4);
+}
+
+/* Settings: grouped cards, the way macOS lays out a settings page. --------- */
+.setwrap {
+  max-width: none;
+}
+.setgroup {
+  margin: 0 0 26px;
+}
+.setgroup > h4 {
+  margin: 0 0 8px;
+  font: 600 12px/1 var(--sans);
+  letter-spacing: 0.01em;
+  color: var(--ink-3);
+}
+.setcard {
+  background: var(--panel);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--rule);
+}
+.setrow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 11px 16px;
+  min-height: 44px;
+}
+/* The hairline between rows is inset from the left, not a full-width border. */
+.setrow + .setrow::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--rule-2);
+}
+.setrow .lab {
+  min-width: 0;
+  flex: 1;
+}
+.setrow .lab .t {
+  font-size: 13px;
+  color: var(--ink);
+}
+.setrow .lab .d {
+  margin-top: 2px;
+  font: 11.5px/1.45 var(--sans);
+  color: var(--ink-3);
+}
+.setrow .ctl {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  justify-content: flex-end;
+}
+.setrow .ctl.wide {
+  width: 340px;
+}
+.setrow .ro {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-4);
+  overflow-wrap: anywhere;
+}
