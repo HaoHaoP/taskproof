@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import FilterBar from './components/FilterBar.vue'
 import { ICONS } from './icons'
+import { shellPlaceholder } from './shell'
 import { useBoardStore } from './stores/board'
 import { useSettingsStore } from './stores/settings'
 
@@ -27,17 +28,26 @@ const rail = ref(true)
 const isDataView = computed(() => ['matrix', 'projects', 'tasks'].includes(String(route.name)))
 
 /**
- * Which full-page state to show, if any.
+ * Which placeholder the matrix body shows, if any.
+ *
+ * The rule lives in `shell.ts` so it can be unit-tested: only the matrix body
+ * ever gives way, the nav stays put in every state, and the projects / tasks /
+ * settings pages keep their real layouts -- which is what lets a first project
+ * be registered out of an empty registry.
  *
  * Not the prototype's `!ready`: there, "ready" was a constant, so the check was
  * really "did we fail". Here the service genuinely takes a moment to come up,
  * and a launch that is merely slow is not an error -- claiming otherwise would
  * flash a full-page failure on every start.
  */
-const blank = computed<'offline' | 'empty' | null>(() => {
-  if (store.connected) return store.projects.length === 0 ? 'empty' : null
-  return store.lastError ? 'offline' : null
-})
+const blank = computed(() =>
+  shellPlaceholder({
+    connected: store.connected,
+    projectCount: store.projects.length,
+    lastError: store.lastError,
+    routeName: route.name == null ? null : String(route.name)
+  })
+)
 
 onMounted(async () => {
   await settings.load()
@@ -74,21 +84,7 @@ onBeforeUnmount(() => store.dispose())
       </div>
     </header>
 
-    <!-- Nothing to show. The whole shell gives way, as in the prototype: with no
-         projects there is nothing to navigate to, so the nav would be a lie. -->
-    <section v-if="blank" class="blank">
-      <div class="big">{{ t(blank === 'offline' ? 'offline.title' : 'empty.projects') }}</div>
-      <p class="hint">{{ t(blank === 'offline' ? 'offline.hint' : 'empty.hint') }}</p>
-      <code>{{
-        blank === 'offline' ? 'taskproof api --port 0' : 'taskproof register <path>'
-      }}</code>
-      <button v-if="blank === 'offline'" class="retry" type="button" @click="store.retry()">
-        {{ t('service.retry') }}
-      </button>
-      <p v-if="blank === 'offline' && store.lastError" class="detail">{{ store.lastError }}</p>
-    </section>
-
-    <div v-else class="shell">
+    <div class="shell">
       <nav v-show="rail" class="nav">
         <template v-for="view in mainViews" :key="view.name">
           <RouterLink custom :to="view.path" v-slot="{ href, navigate, isActive }">
@@ -112,7 +108,7 @@ onBeforeUnmount(() => store.dispose())
 
       <main class="content">
         <FilterBar
-          v-if="isDataView"
+          v-if="isDataView && !blank"
           :projects="store.projects"
           :visible="store.visible"
           :polling="store.polling"
@@ -130,7 +126,22 @@ onBeforeUnmount(() => store.dispose())
           <span>{{ t('drift.hint') }}</span>
         </div>
 
-        <RouterView />
+        <!-- Offline, or a registry with nothing in it yet: this replaces the
+             matrix body only. The nav above never gives way, and the projects
+             page keeps its real layout -- that is where the first project is
+             registered. -->
+        <section v-if="blank" class="blank">
+          <div class="big">{{ t(blank === 'offline' ? 'offline.title' : 'empty.projects') }}</div>
+          <p class="hint">{{ t(blank === 'offline' ? 'offline.hint' : 'empty.hint') }}</p>
+          <code>{{
+            blank === 'offline' ? 'taskproof api --port 0' : 'taskproof register <path>'
+          }}</code>
+          <button v-if="blank === 'offline'" class="retry" type="button" @click="store.retry()">
+            {{ t('service.retry') }}
+          </button>
+          <p v-if="blank === 'offline' && store.lastError" class="detail">{{ store.lastError }}</p>
+        </section>
+        <RouterView v-else />
       </main>
     </div>
   </div>

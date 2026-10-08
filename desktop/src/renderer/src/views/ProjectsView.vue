@@ -65,14 +65,14 @@ function openRemove(row: Project): void {
           <h3>{{ t('projects.title') }}</h3>
           <p class="sub">{{ t('projects.sub') }}</p>
         </div>
-        <el-button class="btn-primary" @click="projects.openAdd()">{{ t('proj.add') }}</el-button>
+        <el-button type="primary" @click="projects.openAdd()">{{ t('proj.add') }}</el-button>
       </div>
 
       <!-- Only while a 409 is in flight: the registry changed under us. -->
       <div class="conflict" v-if="projects.conflict">
         <span>{{ t('proj.conflict') }}</span><span class="sp"></span>
         <el-button size="small" @click="reloadFile">{{ t('proj.reload') }}</el-button>
-        <el-button size="small" class="btn-danger" @click="keepEdits">{{ t('proj.keep') }}</el-button>
+        <el-button size="small" type="danger" @click="keepEdits">{{ t('proj.keep') }}</el-button>
       </div>
 
       <div class="tp-table">
@@ -210,7 +210,7 @@ function openRemove(row: Project): void {
         <el-button size="small" @click="projects.closeAdd()">{{ t('dlg.cancel') }}</el-button>
         <el-button
           size="small"
-          class="btn-primary"
+          type="primary"
           :disabled="!projects.draft.detected || projects.busy"
           @click="register"
         >
@@ -303,7 +303,7 @@ function openRemove(row: Project): void {
       <p class="hint">{{ t('proj.edit.hint') }}</p>
       <template #footer>
         <el-button size="small" @click="projects.closeEdit()">{{ t('dlg.cancel') }}</el-button>
-        <el-button size="small" class="btn-primary" :disabled="projects.busy" @click="save">
+        <el-button size="small" type="primary" :disabled="projects.busy" @click="save">
           {{ projects.busy ? t('proj.writing') : t('dlg.save') }}
         </el-button>
       </template>
@@ -322,7 +322,7 @@ function openRemove(row: Project): void {
       <p class="hint">{{ t('proj.remove.hint') }}</p>
       <template #footer>
         <el-button size="small" @click="projects.closeRemove()">{{ t('dlg.cancel') }}</el-button>
-        <el-button size="small" class="btn-danger" :disabled="projects.busy" @click="remove">
+        <el-button size="small" type="danger" :disabled="projects.busy" @click="remove">
           {{ projects.busy ? t('proj.writing') : t('proj.remove') }}
         </el-button>
       </template>

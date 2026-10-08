@@ -305,22 +305,6 @@
   background: var(--w-failed);
   color: var(--c-failed);
 }
-.btn-primary {
-  --el-button-bg-color: var(--accent) !important;
-  --el-button-border-color: var(--accent) !important;
-  --el-button-text-color: #fff !important;
-  --el-button-hover-bg-color: #2f95ff !important;
-  --el-button-hover-border-color: #2f95ff !important;
-  --el-button-hover-text-color: #fff !important;
-}
-.btn-danger {
-  --el-button-bg-color: var(--c-failed) !important;
-  --el-button-border-color: var(--c-failed) !important;
-  --el-button-text-color: #fff !important;
-  --el-button-hover-bg-color: #ff5f52 !important;
-  --el-button-hover-border-color: #ff5f52 !important;
-  --el-button-hover-text-color: #fff !important;
-}
 
 /* The add / edit / remove sheets ------------------------------------------ */
 /* Apple-framed editor sheets: the prototype's `.sheet` block, ported whole.
