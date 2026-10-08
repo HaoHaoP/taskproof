@@ -10,17 +10,30 @@ import { defineStore } from 'pinia'
 import type {
   DesktopSettings,
   LanguageChoice,
+  LaunchMode,
   PollChoice,
+  PortMode,
   ThemeChoice
 } from '../../../preload/types'
 import { setLocale } from '../i18n'
+
+/** The booleans that back the desktop-integration switches. */
+type FlagKey = 'notifyFail' | 'notifyDone' | 'dockBadge' | 'tray' | 'autostart'
 
 const FALLBACK: DesktopSettings = {
   theme: 'dark',
   language: 'system',
   poll: '2s',
   workspace: '',
-  taskproofPath: ''
+  taskproofPath: '',
+  portMode: 'auto',
+  port: 8787,
+  launch: 'auto',
+  notifyFail: false,
+  notifyDone: false,
+  dockBadge: false,
+  tray: false,
+  autostart: false
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -82,5 +95,46 @@ export const useSettingsStore = defineStore('settings', () => {
     void persist({ poll })
   }
 
-  return { settings, version, load, persist, setTheme, setLanguage, setPoll, applyTheme }
+  function setPortMode(portMode: PortMode): void {
+    void persist({ portMode })
+  }
+
+  function setPort(port: number): void {
+    void persist({ port })
+  }
+
+  function setLaunch(launch: LaunchMode): void {
+    void persist({ launch })
+  }
+
+  function setTaskproofPath(taskproofPath: string): void {
+    void persist({ taskproofPath })
+  }
+
+  /**
+   * The desktop-integration switches. They persist now; the tray, Dock badge,
+   * notifications and login item that read them are a later card -- but a
+   * switch that only lived in memory would be decoration.
+   */
+  function setFlag(key: FlagKey, value: unknown): void {
+    const patch: Partial<DesktopSettings> = {}
+    patch[key] = Boolean(value)
+    void persist(patch)
+  }
+
+  return {
+    settings,
+    version,
+    load,
+    persist,
+    setTheme,
+    setLanguage,
+    setPoll,
+    setPortMode,
+    setPort,
+    setLaunch,
+    setTaskproofPath,
+    setFlag,
+    applyTheme
+  }
 })

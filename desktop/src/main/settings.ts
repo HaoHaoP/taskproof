@@ -20,7 +20,15 @@ function defaults(): DesktopSettings {
     workspace: join(app.getPath('home'), '.taskproof'),
     // Resolved on PATH by default; the from-source workflow points this at a
     // python interpreter script instead.
-    taskproofPath: process.env.TASKPROOF_CMD ?? 'taskproof'
+    taskproofPath: process.env.TASKPROOF_CMD ?? 'taskproof',
+    portMode: 'auto',
+    port: 8787,
+    launch: 'auto',
+    notifyFail: false,
+    notifyDone: false,
+    dockBadge: false,
+    tray: false,
+    autostart: false
   }
 }
 
@@ -31,8 +39,16 @@ function settingsFile(): string {
 export function get(): DesktopSettings {
   if (cached) return cached
   try {
-    const raw = JSON.parse(readFileSync(settingsFile(), 'utf8')) as Partial<DesktopSettings>
-    cached = { ...defaults(), ...raw }
+    const raw: unknown = JSON.parse(readFileSync(settingsFile(), 'utf8'))
+    // Forward-compatible migration: a file written by an earlier build simply
+    // lacks the fields added since. Spreading it over the defaults backfills
+    // every missing field while keeping every value that is already present,
+    // so an old settings.json loads intact instead of resetting.
+    const stored =
+      raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+        ? (raw as Partial<DesktopSettings>)
+        : {}
+    cached = { ...defaults(), ...stored }
   } catch {
     // Missing or unreadable: fall back to defaults rather than failing to boot.
     cached = defaults()

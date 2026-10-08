@@ -36,7 +36,8 @@ const api: TpApi = {
     openPath: (target: string) => ipcRenderer.invoke('tp:shell:open-path', target)
   },
   app: {
-    version: () => ipcRenderer.invoke('tp:app:version')
+    version: () => ipcRenderer.invoke('tp:app:version'),
+    adapters: () => ipcRenderer.invoke('tp:app:adapters')
   },
   projects: {
     registry: () => ipcRenderer.invoke('tp:projects:registry'),

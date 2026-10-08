@@ -1,7 +1,9 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { mkdirSync } from 'fs'
 import { join } from 'path'
 import * as settings from './settings'
 import { ApiService, type LaunchSpec } from './service'
+import { runDoctor } from './doctor'
 import { createProjectsClient, type ProjectsClient } from './projects'
 import type {
   DesktopSettings,
@@ -9,14 +11,26 @@ import type {
   ProjectPatch
 } from '../preload/types'
 
+// The app's display name is now "Taskproof", but Electron derives `userData`
+// from the package name -- so a rename (or a bumped productName) would silently
+// move the directory and orphan the user's settings.json. Pin it to the
+// historical `.../Application Support/taskproof-desktop` path, before anything
+// reads it, so upgrades keep the same file.
+const userDataDir = join(app.getPath('appData'), 'taskproof-desktop')
+mkdirSync(userDataDir, { recursive: true })
+app.setPath('userData', userDataDir)
+
 let mainWindow: BrowserWindow | null = null
+
+/** The taskproof command, split into an executable and its leading arguments
+ *  ("python3 -m taskproof" must not be treated as one file name). */
+function commandParts(): string[] {
+  return (settings.get().taskproofPath || 'taskproof').trim().split(/\s+/)
+}
 
 function launchSpec(): LaunchSpec {
   const current = settings.get()
-  // The path may be a bare executable or a command with arguments
-  // ("python3 -m taskproof"), so split it rather than handing spawn a string
-  // it would look up as a single file name.
-  const parts = (current.taskproofPath || 'taskproof').trim().split(/\s+/)
+  const parts = commandParts()
   return {
     command: parts[0],
     // The global flag precedes the subcommand; `--allow-write` belongs to `api`
@@ -96,6 +110,16 @@ function registerIpc(): void {
     await shell.openPath(String(target))
   })
   ipcMain.handle('tp:app:version', () => app.getVersion())
+  // The About group's adapter lamps. The API has no adapter endpoint, so this
+  // is the CLI's own self-check; it resolves null when it cannot answer.
+  ipcMain.handle('tp:app:adapters', () => {
+    const parts = commandParts()
+    return runDoctor({
+      command: parts[0],
+      prefixArgs: parts.slice(1),
+      workspace: settings.get().workspace
+    })
+  })
 
   // Registry writes. Each answers with a typed result; the token and the
   // expected_hash handshake stay in this process.

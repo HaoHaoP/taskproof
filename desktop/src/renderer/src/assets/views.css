@@ -179,6 +179,80 @@
   overflow-wrap: anywhere;
 }
 
+/* Shared controls ---------------------------------------------------------
+   The prototype restyles Element Plus' controls once, globally, so the
+   settings cards and the editor sheets share one look: a sunken track, the
+   selected segment raised, and rounded control corners. Ported from the
+   `.el-segmented` / `.el-switch` / `.el-input` / `.el-button` rules in
+   desktop-app-v3.html. */
+.el-segmented {
+  --el-segmented-bg-color: var(--sunken);
+  --el-segmented-item-selected-bg-color: var(--raise);
+  --el-segmented-item-selected-color: var(--ink);
+  --el-segmented-color: var(--ink-3);
+  --el-segmented-item-hover-bg-color: var(--raise);
+  font-size: 12px;
+  border-radius: var(--r-ctl);
+}
+.el-segmented .el-segmented__item {
+  padding: 4px 11px;
+}
+.el-switch {
+  --el-switch-on-color: var(--ok);
+  --el-switch-off-color: var(--ink-4);
+}
+.el-input {
+  --el-input-bg-color: var(--sunken);
+  --el-input-border-color: transparent;
+  --el-input-hover-border-color: transparent;
+}
+.el-input__wrapper {
+  background: var(--sunken);
+  border-radius: var(--r-ctl);
+}
+.el-input__inner {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.el-button {
+  --el-button-bg-color: var(--sunken);
+  --el-button-border-color: var(--rule);
+  --el-button-hover-bg-color: var(--raise);
+  --el-button-hover-border-color: var(--rule);
+  --el-button-text-color: var(--ink);
+  border-radius: var(--r-ctl);
+}
+
+/* Adapter lamps: one line, right-aligned, never stacked. */
+.alamps {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+.alamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 11.5px/1 var(--mono);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.alamp i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: none;
+}
+.alamp.bad {
+  color: var(--ink-3);
+}
+.alamp.bad i {
+  background: var(--c-failed);
+}
+
 /* Project row actions and the conflict banner ----------------------------- */
 /* Ported from the prototype. The banner only renders when a write came back
    with a 409 -- it is the "the file changed under you" strip, not decoration. */
@@ -290,32 +364,6 @@ html[data-theme='light'] .sheet {
   color: var(--c-failed);
   background: var(--w-failed);
   border-top: 1px solid var(--rule-2);
-}
-/* Scoped to the sheets so the settings page keeps its own control styling. */
-.sheet .el-input {
-  --el-input-bg-color: var(--sunken);
-  --el-input-border-color: transparent;
-  --el-input-hover-border-color: transparent;
-}
-.sheet .el-input__wrapper {
-  background: var(--sunken);
-  border-radius: var(--r-ctl);
-}
-.sheet .el-input__inner {
-  font-family: var(--mono);
-  font-size: 11.5px;
-}
-.sheet .el-segmented {
-  --el-segmented-bg-color: var(--sunken);
-  --el-segmented-item-selected-bg-color: var(--raise);
-  --el-segmented-item-selected-color: var(--ink);
-  --el-segmented-color: var(--ink-3);
-  --el-segmented-item-hover-bg-color: var(--raise);
-  font-size: 12px;
-  border-radius: var(--r-ctl);
-}
-.sheet .el-segmented .el-segmented__item {
-  padding: 4px 11px;
 }
 body > .el-overlay:has(.sheet) {
   backdrop-filter: blur(3px);

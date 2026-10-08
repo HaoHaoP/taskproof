@@ -21,7 +21,15 @@ const BASE: DesktopSettings = {
   language: 'system',
   poll: '2s',
   workspace: '',
-  taskproofPath: ''
+  taskproofPath: '',
+  portMode: 'auto',
+  port: 8787,
+  launch: 'auto',
+  notifyFail: false,
+  notifyDone: false,
+  dockBadge: false,
+  tray: false,
+  autostart: false
 }
 
 interface Pending {
@@ -107,5 +115,28 @@ describe('settings persist ordering', () => {
     pending[0].resolve({ ...BASE, theme: 'light', workspace: '/Users/someone/.taskproof' })
     await settle()
     expect(store.settings.workspace).toBe('/Users/someone/.taskproof')
+  })
+
+  it('writes a desktop-integration switch through to the main process', async () => {
+    const store = useSettingsStore()
+    // Every switch must reach settings.json -- a switch that only repaints here
+    // would look alive while doing nothing. The patch carries just that field.
+    store.setFlag('notifyFail', true)
+    store.setFlag('tray', true)
+    await settle()
+    expect(pending.map((p) => p.patch)).toEqual([{ notifyFail: true }, { tray: true }])
+    // And it shows on screen without waiting for the write to come back.
+    expect(store.settings.notifyFail).toBe(true)
+    expect(store.settings.tray).toBe(true)
+  })
+
+  it('coerces a switch payload to a boolean before it hits the patch', async () => {
+    const store = useSettingsStore()
+    // Element Plus' switch emits `boolean | string | number`; the store must not
+    // leak a truthy string into settings.json.
+    store.setFlag('dockBadge', 'false')
+    await settle()
+    expect(pending[0].patch).toEqual({ dockBadge: true })
+    expect(store.settings.dockBadge).toBe(true)
   })
 })

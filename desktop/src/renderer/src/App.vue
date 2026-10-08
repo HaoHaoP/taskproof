@@ -60,7 +60,7 @@ onBeforeUnmount(() => store.dispose())
         v-html="rail ? ICONS.collapse : ICONS.expand"
         @click="rail = !rail"
       ></button>
-      <div class="id">taskproof <em>· {{ t('app.subtitle') }}</em></div>
+      <div class="id">Taskproof <em>· {{ t('app.subtitle') }}</em></div>
       <div class="spacer"></div>
       <div class="tally">
         <span>{{ t('tally.tasks') }}<b>{{ store.tasks.length }}</b></span>

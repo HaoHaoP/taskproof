@@ -26,6 +26,10 @@ export type ThemeChoice = 'system' | 'dark' | 'light'
 export type LanguageChoice = 'system' | 'zh-CN' | 'en'
 /** How often the renderer re-reads the local API; 'off' means only on demand. */
 export type PollChoice = '2s' | 'off'
+/** 'auto' lets the OS pick a free port; 'fixed' pins `port`. */
+export type PortMode = 'auto' | 'fixed'
+/** Whether the app spawns the local API itself on open ('auto') or not. */
+export type LaunchMode = 'auto' | 'manual'
 
 export interface DesktopSettings {
   theme: ThemeChoice
@@ -35,6 +39,16 @@ export interface DesktopSettings {
   workspace: string
   /** Path to the taskproof executable (or a python it can be run with). */
   taskproofPath: string
+  portMode: PortMode
+  /** Only consulted while `portMode` is 'fixed'. */
+  port: number
+  /** 'auto' spawns the API on open; 'manual' waits for the user. */
+  launch: LaunchMode
+  notifyFail: boolean
+  notifyDone: boolean
+  dockBadge: boolean
+  tray: boolean
+  autostart: boolean
 }
 
 // -- registry --------------------------------------------------------------
@@ -146,6 +160,13 @@ export interface ProjectsApi {
   remove(id: string): Promise<RegistryResult<{ removed: string }>>
 }
 
+/** One adapter's verdict from `taskproof doctor`: installed, or why not. */
+export interface AdapterStatus {
+  name: string
+  installed: boolean
+  detail: string
+}
+
 export interface TpApi {
   service: {
     status(): Promise<ServiceStatus>
@@ -163,6 +184,12 @@ export interface TpApi {
   }
   app: {
     version(): Promise<string>
+    /**
+     * The adapter lamps for the About section: `taskproof doctor --json`'s
+     * adapter list, or null when the check could not run. The renderer shows
+     * an em dash for null rather than inventing a verdict.
+     */
+    adapters(): Promise<AdapterStatus[] | null>
   }
   /**
    * Registry writes. Every method answers with a `RegistryResult`, never
