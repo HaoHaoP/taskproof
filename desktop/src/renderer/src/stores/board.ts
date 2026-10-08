@@ -10,10 +10,19 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { createClient, type BoardClient, type Project, type Summary, type Task } from '../api/client'
 import { columnFor, unknownStatuses } from '../contract'
+import {
+  DEFAULT_RANGE,
+  MAX_BUDGET,
+  MIN_BUDGET,
+  needsMoreBudget,
+  type RangeChoice
+} from '../matrix'
 import type { PollChoice, ServiceStatus } from '../../../preload/types'
 
 const DEFAULT_PORT = 8787
 const POLL_MS = 2000
+/** The adaptive fetch never loops more than this many times per refresh. */
+const MAX_GROW_STEPS = 8
 
 function initialService(): ServiceStatus {
   return { state: 'starting', port: null, workspace: '', detail: '' }
@@ -39,6 +48,15 @@ export const useBoardStore = defineStore('board', () => {
   const tasks = ref<Task[]>([])
   const projects = ref<Project[]>([])
   const summary = ref<Summary>({})
+  /** The board's time range; the view mirrors it from the address bar. It
+   *  drives the *fetch budget*, not the filtering (which the view does). */
+  const range = ref<RangeChoice>(DEFAULT_RANGE)
+  /** How many rows the client currently asks for. Raised by the range needing
+   *  older data (up to the cap) and by the tasks page's "take more". */
+  const fetchBudget = ref(MIN_BUDGET)
+  /** True when the last fetch filled the budget right up to the cap -- there
+   *  may be older rows we could not reach, so the UI must say so. */
+  const capped = ref(false)
   const detail = ref<{ task: Task; events: { ts: string; event: string; payload: unknown }[] } | null>(
     null
   )
@@ -74,6 +92,12 @@ export const useBoardStore = defineStore('board', () => {
     tasks.value.filter((task) => task.status === 'running' || task.status === 'verifying').length
   )
 
+  /** Every task the service knows about, summed from the by-status summary --
+   *  the denominator the "taken M of N" readouts compare against. */
+  const total = computed(() =>
+    Object.values(summary.value).reduce((sum, count) => sum + (count || 0), 0)
+  )
+
   function isVisible(id: string): boolean {
     return visible.value[id] !== false
   }
@@ -101,6 +125,25 @@ export const useBoardStore = defineStore('board', () => {
     connected.value = true
   }
 
+  /**
+   * Pull the task list, growing the budget while the current range still needs
+   * older rows and the budget has room to grow. The service returns
+   * newest-created first, so we compare the oldest row in hand against the
+   * range boundary; `all` keeps growing to the cap by design.
+   */
+  async function fetchTasks(): Promise<Task[]> {
+    let budget = fetchBudget.value
+    let rows = await client!.tasks({ limit: budget })
+    for (let step = 0; step < MAX_GROW_STEPS; step += 1) {
+      if (!needsMoreBudget(range.value, rows, budget, Date.now())) break
+      budget = Math.min(budget * 2, MAX_BUDGET)
+      rows = await client!.tasks({ limit: budget })
+    }
+    fetchBudget.value = budget
+    capped.value = rows.length >= MAX_BUDGET && budget >= MAX_BUDGET
+    return rows
+  }
+
   async function refresh(): Promise<void> {
     if (!client) {
       try {
@@ -113,7 +156,7 @@ export const useBoardStore = defineStore('board', () => {
     try {
       const [nextProjects, nextTasks, nextSummary] = await Promise.all([
         client!.projects(),
-        client!.tasks({ limit: 200 }),
+        fetchTasks(),
         client!.summary()
       ])
       projects.value = nextProjects
@@ -129,6 +172,23 @@ export const useBoardStore = defineStore('board', () => {
       // Keep the last good snapshot on screen; a dropped poll must not blank it.
       lastError.value = String(cause)
     }
+  }
+
+  /** Follow the address bar's range. A change resets the budget to the floor so
+   *  a narrower range cannot inherit the wider fetch a previous range grew to. */
+  function setRange(next: RangeChoice): void {
+    if (next === range.value) return
+    range.value = next
+    fetchBudget.value = MIN_BUDGET
+    capped.value = false
+    void refresh()
+  }
+
+  /** The tasks page's "take more": raise the budget one step, up to the cap. */
+  function growBudget(): void {
+    if (fetchBudget.value >= MAX_BUDGET) return
+    fetchBudget.value = Math.min(fetchBudget.value * 2, MAX_BUDGET)
+    void refresh()
   }
 
   async function openTask(id: string): Promise<void> {
@@ -199,6 +259,10 @@ export const useBoardStore = defineStore('board', () => {
     tasks,
     projects,
     summary,
+    total,
+    range,
+    fetchBudget,
+    capped,
     detail,
     visible,
     poll,
@@ -217,6 +281,8 @@ export const useBoardStore = defineStore('board', () => {
     start,
     stop,
     setPoll,
+    setRange,
+    growBudget,
     retry,
     dispose,
     watchService

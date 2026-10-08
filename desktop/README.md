@@ -2,7 +2,10 @@
 
 The Electron console. It replaces the stage-1 static board's **rendering layer
 only**; the static board stays as a frozen `file://` snapshot, and the read-only
-loopback REST API is unchanged.
+loopback REST API is unchanged. The matrix narrows its finished column to the
+ten most recent cards by default (a fold bar reveals the rest) and the whole
+board can be filtered by project and by time range, both held in the address
+bar's query string.
 
 ## Run it
 

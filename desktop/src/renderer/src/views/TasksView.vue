@@ -28,6 +28,20 @@ function open(id: string): void {
       <h3>{{ t('tasks.title') }}</h3>
       <p class="sub">{{ t('tasks.sub') }}</p>
 
+      <!-- The list is bounded by a fetch budget, and that must never be silent:
+           say how many rows are in hand against how many exist, and let the
+           reader pull more. -->
+      <div class="taken">
+        <span>{{ t('board.taken', { n: store.tasks.length, m: store.total }) }}</span>
+        <button
+          v-if="store.tasks.length < store.total"
+          type="button"
+          @click="store.growBudget()"
+        >
+          {{ t('board.takeMore') }}
+        </button>
+      </div>
+
       <div class="tp-table">
         <el-table
           :data="rows"
@@ -83,5 +97,25 @@ function open(id: string): void {
 }
 .tp-table :deep(.el-table__row) {
   cursor: pointer;
+}
+.taken {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 10px;
+  font: 11.5px/1 var(--mono);
+  color: var(--ink-3);
+}
+.taken button {
+  font: 11.5px/1 var(--sans);
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.taken button:hover {
+  background: var(--raise);
 }
 </style>

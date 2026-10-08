@@ -12,6 +12,20 @@ export default {
 
   rail: { title: 'Projects', all: 'All', none: 'None', tasks: 'tasks' },
 
+  /* The matrix's board-level filter and its finished-column window. */
+  board: {
+    range: 'Range',
+    project: 'Project',
+    allProjects: 'All projects',
+    ranges: { today: 'Today', '7d': 'Last 7 days', '30d': 'Last 30 days', all: 'All' },
+    fetched: 'taken {n}',
+    capped: 'hit the cap of {n} — older rows may not be shown',
+    expand: '{n} more · expand',
+    collapse: 'collapse',
+    taken: 'taken {n} of {m}',
+    takeMore: 'Take more'
+  },
+
   live: { on: 'live', off: 'polling paused' },
 
   status: {

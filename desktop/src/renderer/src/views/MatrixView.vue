@@ -4,8 +4,14 @@
  *
  * Columns are pipeline stages; the last one collects every abnormal terminal
  * state. Cards are presentational and know nothing about the store.
+ *
+ * The board's *reasoning* -- the finished column's window, each column's
+ * ordering, the range / project narrowing, and the fetch budget the range
+ * needs -- lives in `matrix.ts`. This file only reads the filter off the
+ * address bar, mirrors it into the store (which owns the fetch), and wires the
+ * answers to markup.
  */
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import StatusMark from '../components/StatusMark.vue'
@@ -13,6 +19,18 @@ import TaskCard from '../components/TaskCard.vue'
 import TaskDrawer from '../components/TaskDrawer.vue'
 import type { Task } from '../api/client'
 import { COLUMNS } from '../contract'
+import {
+  DONE_WINDOW,
+  MAX_BUDGET,
+  RANGES,
+  boardQuery,
+  doneWindow,
+  filterBoard,
+  groupColumns,
+  parseBoardFilter,
+  type BoardFilter,
+  type RangeChoice
+} from '../matrix'
 import { useBoardStore } from '../stores/board'
 
 const store = useBoardStore()
@@ -20,15 +38,40 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 
-const projects = computed(() => store.projects.filter((project) => store.isVisible(project.id)))
+/** The board's filter, read straight off the address bar. */
+const filter = computed(() => parseBoardFilter(route.query))
 
-function tasksIn(projectId: string, columnKey: string): Task[] {
-  const grouped = store.tasksByColumn[columnKey] ?? []
-  return grouped.filter((task) => task.project === projectId)
-}
+/** Every project the matrix draws a lane for: visible in the toolbar, and, when
+ *  a board-level project is chosen, that one alone. */
+const projects = computed(() =>
+  store.projects.filter(
+    (project) =>
+      store.isVisible(project.id) &&
+      (filter.value.project === null || project.id === filter.value.project)
+  )
+)
+
+/** The narrowed board, grouped and ordered -- the source of every cell. */
+const columns = computed(() => groupColumns(filterBoard(store.tasks, filter.value, Date.now())))
+
+/** The finished column's window. The fold bar reads `hidden`; the cell reads
+ *  `visible`. */
+const done = computed(() => doneWindow(columns.value.done ?? [], filter.value.expanded))
+
+/** Header counts and cell contents, with the finished column already windowed. */
+const shown = computed<Record<string, Task[]>>(() => ({
+  ...columns.value,
+  done: done.value.visible
+}))
 
 function countIn(columnKey: string): number {
-  return (store.tasksByColumn[columnKey] ?? []).length
+  // The header tallies the whole scope, not the window: a folded column still
+  // says how many cards it actually holds.
+  return (columns.value[columnKey] ?? []).length
+}
+
+function tasksIn(projectId: string, columnKey: string): Task[] {
+  return (shown.value[columnKey] ?? []).filter((task) => task.project === projectId)
 }
 
 function isExpanded(id: string): boolean {
@@ -38,10 +81,63 @@ function isExpanded(id: string): boolean {
 function openTask(id: string): void {
   void router.push(`/matrix/${id}`)
 }
+
+/** Rewrite the board's query, dropping defaults so a default board is `/matrix`
+ *  with no query. `push` (not `replace`): the back button has to undo filter
+ *  changes, which is the whole point of putting them in the address bar. */
+function applyFilter(patch: Partial<BoardFilter>): void {
+  const next = { ...filter.value, ...patch }
+  void router.push({ query: Object.fromEntries(new URLSearchParams(boardQuery(next))) })
+}
+
+function onRange(value: string): void {
+  applyFilter({ range: value as RangeChoice })
+}
+
+function onProject(value: string): void {
+  applyFilter({ project: value || null })
+}
+
+// Keep the store's fetch budget in step with the address bar's range. A change
+// resets the budget, so a narrower range never inherits a wider fetch.
+watch(filter, (next) => store.setRange(next.range), { immediate: true })
 </script>
 
 <template>
   <div class="matrix-view">
+    <div class="boardbar">
+      <label class="fld">
+        <span>{{ t('board.range') }}</span>
+        <el-select
+          class="sel"
+          size="small"
+          :model-value="filter.range"
+          @change="onRange"
+        >
+          <el-option v-for="r in RANGES" :key="r" :value="r" :label="t(`board.ranges.${r}`)" />
+        </el-select>
+      </label>
+      <label class="fld">
+        <span>{{ t('board.project') }}</span>
+        <el-select
+          class="sel"
+          size="small"
+          :model-value="filter.project ?? ''"
+          @change="onProject"
+        >
+          <el-option value="" :label="t('board.allProjects')" />
+          <el-option
+            v-for="project in store.projects"
+            :key="project.id"
+            :value="project.id"
+            :label="project.id"
+          />
+        </el-select>
+      </label>
+      <span class="fetched">{{ t('board.fetched', { n: store.tasks.length }) }}</span>
+      <span v-if="store.capped" class="cap">{{ t('board.capped', { n: MAX_BUDGET }) }}</span>
+    </div>
+
     <div class="matrix">
       <div class="grid">
         <div class="hd corner">{{ t('rail.title') }}</div>
@@ -85,6 +181,25 @@ function openTask(id: string): void {
             <div v-if="!tasksIn(project.id, column.key).length" class="dash">—</div>
           </div>
         </template>
+
+        <!-- The finished column's fold bar: its own trailing grid row, pinned to
+             the done column so it reads as the foot of that column. -->
+        <button
+          v-if="done.hidden > 0"
+          type="button"
+          class="fold"
+          @click="applyFilter({ expanded: true })"
+        >
+          {{ t('board.expand', { n: done.hidden }) }}
+        </button>
+        <button
+          v-else-if="filter.expanded && done.total > DONE_WINDOW"
+          type="button"
+          class="fold collapse"
+          @click="applyFilter({ expanded: false })"
+        >
+          {{ t('board.collapse') }}
+        </button>
       </div>
     </div>
     <TaskDrawer />
@@ -97,6 +212,34 @@ function openTask(id: string): void {
   flex-direction: column;
   min-height: 0;
   flex: 1;
+}
+/* The board filter: the two dimensions (project, time range) plus the honest
+   fetch readout. It scopes the whole board, five columns at once. */
+.boardbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--rule-2);
+  font: 12px/1 var(--sans);
+  color: var(--ink-3);
+}
+.boardbar .fld {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.boardbar .sel {
+  width: 128px;
+}
+.boardbar .fetched {
+  font: 11.5px/1 var(--mono);
+  color: var(--ink-2);
+}
+.boardbar .cap {
+  font: 11.5px/1 var(--sans);
+  color: var(--c-failed);
 }
 .matrix {
   flex: 1;
@@ -203,5 +346,25 @@ function openTask(id: string): void {
   font: 11px/1 var(--mono);
   color: var(--ink-4);
   opacity: 0.4;
+}
+/* The fold bar sits in its own row, in the finished column only (grid column 5:
+   the lane is 1, then the five status columns 2..6). */
+.fold {
+  grid-column: 5;
+  margin: 0 6px;
+  padding: 9px 10px;
+  text-align: left;
+  font: 11.5px/1 var(--sans);
+  color: var(--accent);
+  background: transparent;
+  border: 1px dashed var(--rule);
+  border-radius: var(--r-card);
+  cursor: pointer;
+}
+.fold:hover {
+  background: var(--raise);
+}
+.fold.collapse {
+  color: var(--ink-4);
 }
 </style>
