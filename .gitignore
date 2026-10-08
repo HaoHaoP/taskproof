@@ -29,6 +29,7 @@ desktop/build/*
 
 # Editors / OS
 .DS_Store
+._*
 .idea/
 .vscode/
 *.swp
