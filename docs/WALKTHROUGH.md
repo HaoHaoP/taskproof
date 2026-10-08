@@ -28,20 +28,21 @@ taskproof init
 
 ```
 initialised workspace: /tmp/tp-walkthrough/workspace
-  registry: /tmp/tp-walkthrough/workspace/projects.toml
+  registry: /tmp/tp-walkthrough/workspace/projects.toml  (no projects yet)
 next:
   taskproof register <path>         # probe and register a repository
   taskproof run <project> "<task>"  # dispatch, verify, record
   taskproof board --open            # live dashboard (serves + opens a browser)
   taskproof board --out board.html  # static snapshot (does not auto-refresh)
+  registry format                   # examples/projects.example.toml
 ```
 
 The workspace defaults to `~/.taskproof`; `--workspace` (or `TASKPROOF_HOME`)
 moves it.
 
-`init` also writes a sample `[[project]]` block for `my-app`, pointing at
-`/absolute/path/to/my-app`. It is a shape reference: delete it or replace it, or
-`taskproof projects` will keep listing a repository that does not exist.
+The registry is created with the `[defaults]` table and no projects. Nothing here
+is a placeholder pointing at a path that does not exist -- entries arrive through
+`register` (next section), so `taskproof projects` is empty until you add one.
 
 ## 3. Register a repository
 

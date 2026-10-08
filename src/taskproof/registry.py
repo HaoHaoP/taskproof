@@ -267,22 +267,24 @@ def workspace_registry_path(workspace: str) -> str:
     return os.path.join(workspace, DEFAULT_REGISTRY_NAME)
 
 
+#: What a brand-new workspace starts from. Deliberately holds no projects.
+#:
+#: An example entry used to be seeded here, pointing at `/absolute/path/to/my-app`.
+#: Its path was a placeholder, so `taskproof projects` -- and the dashboard --
+#: listed a repository that did not exist until someone deleted the block. A
+#: fresh registry that is honestly empty is better than one that lies.
+#: The format lives in `examples/projects.example.toml` and `docs/REGISTRY.md`.
 SAMPLE_REGISTRY = """\
 # taskproof project registry
 #
 # One [[project]] block per repository. Paths are absolute.
 # `group` controls serialisation: only one task per group runs at a time.
+#
+# No projects yet: `taskproof register <path>` appends one.
+# A commented, complete example: examples/projects.example.toml
+# Field reference: docs/REGISTRY.md
 
 [defaults]
 concurrency = 3   # global cap on simultaneous tasks
 timeout = 1800    # seconds before a task is judged stuck
-
-[[project]]
-id = "my-app"
-path = "/absolute/path/to/my-app"
-group = "my-app"
-aliases = ["app"]
-verify = "npm run build"
-verify_kind = "build"
-forbidden_paths = [".git/"]
 """

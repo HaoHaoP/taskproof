@@ -12,7 +12,7 @@ import unittest
 import urllib.error
 import urllib.request
 
-from taskproof import dispatch, storage
+from taskproof import dispatch, registry, storage
 from taskproof.api import server
 from taskproof.models import Task
 
@@ -23,6 +23,21 @@ class ApiTest(unittest.TestCase):
         cls._tmp = tempfile.TemporaryDirectory()
         cls.ws = os.path.join(cls._tmp.name, "workspace")
         dispatch.prepare_workspace(cls.ws)
+
+        # The project the task below belongs to, written explicitly. This used to
+        # be implicit: a fresh workspace held a placeholder project, so the
+        # `/api/projects` assertion passed against a repository that did not
+        # exist. Once the placeholder went away the assertion failed -- which is
+        # the assertion doing its job for the first time.
+        with open(registry.workspace_registry_path(cls.ws), "w", encoding="utf-8") as fh:
+            fh.write(
+                "[[project]]\n"
+                'id = "proj"\n'
+                f'path = "{cls._tmp.name}"\n'
+                'group = "proj"\n'
+                'verify = "exit 0"\n'
+                'verify_kind = "check"\n'
+            )
 
         conn = storage.connect(storage.db_path(cls.ws))
         try:
@@ -90,8 +105,7 @@ class ApiTest(unittest.TestCase):
         status, body = self._request("/api/projects")
         self.assertEqual(status, 200)
         self.assertIsInstance(body["projects"], list)
-        self.assertTrue(body["projects"])
-        self.assertIn("id", body["projects"][0])
+        self.assertEqual([p["id"] for p in body["projects"]], ["proj"])
 
     def test_tasks_list_and_filters(self):
         status, body = self._request("/api/tasks")

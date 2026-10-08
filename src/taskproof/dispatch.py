@@ -67,8 +67,9 @@ VERIFY_SKIPPED = "SKIPPED"
 def prepare_workspace(workspace: str) -> None:
     """Create the workspace, database and audit directory if missing.
 
-    A brand-new workspace also gets a copy of `registry.SAMPLE_REGISTRY` so a
-    first-time user can see the file format without reading the docs.
+    A brand-new workspace gets a registry holding the `[defaults]` table and no
+    projects: `register` is how entries arrive. Seeding an example project here
+    meant the dashboard listed a placeholder repository until someone deleted it.
     """
     os.makedirs(workspace, exist_ok=True)
     # The audit stream (`events-<month>.jsonl`) and per-task logs live beside the

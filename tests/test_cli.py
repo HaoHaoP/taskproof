@@ -12,7 +12,7 @@ import os
 import tempfile
 import unittest
 
-from taskproof import cli
+from taskproof import cli, registry
 
 
 def _q(value) -> str:
@@ -68,7 +68,14 @@ class ChainTest(CliBase):
         self.assertEqual(code, 0)
         payload = json.loads(out)
         self.assertEqual(payload["workspace"], self.ws)
+        self.assertEqual(payload["projects"], 0)
         self.assertTrue(os.path.exists(os.path.join(self.ws, "projects.toml")))
+        # The registry starts with no projects at all. An entry seeded here would
+        # be a project whose path does not exist, and `projects` -- plus the live
+        # dashboard -- would list it until someone deleted the block. Asserted on
+        # the parsed registry, not the raw text: the header comment mentions
+        # `[[project]]` on purpose, to show what an entry looks like.
+        self.assertEqual(registry.load(os.path.join(self.ws, "projects.toml")).projects, [])
         # Idempotent: a second init must not fail.
         self.assertEqual(self.run_cli("--workspace", self.ws, "init")[0], 0)
 
@@ -208,7 +215,9 @@ class RegisterTest(CliBase):
 
         with open(os.path.join(self.ws, "projects.toml"), encoding="utf-8") as fh:
             text = fh.read()
-        self.assertIn('id = "my-app"', text)  # sample entry untouched
+        # A fresh workspace starts with no projects. The placeholder entry that
+        # used to be seeded here showed up as a repository that did not exist.
+        self.assertNotIn('id = "my-app"', text)
         self.assertIn('id = "app"', text)
         self.assertIn('probe = "passed"', text)
 

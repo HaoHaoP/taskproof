@@ -26,19 +26,19 @@ taskproof init
 
 ```
 initialised workspace: /tmp/tp-walkthrough/workspace
-  registry: /tmp/tp-walkthrough/workspace/projects.toml
+  registry: /tmp/tp-walkthrough/workspace/projects.toml  (no projects yet)
 next:
   taskproof register <path>         # probe and register a repository
   taskproof run <project> "<task>"  # dispatch, verify, record
   taskproof board --open            # live dashboard (serves + opens a browser)
   taskproof board --out board.html  # static snapshot (does not auto-refresh)
+  registry format                   # examples/projects.example.toml
 ```
 
 工作区默认在 `~/.taskproof`；`--workspace`（或环境变量 `TASKPROOF_HOME`）可以换地方。
 
-`init` 还会写一条示例 `[[project]]`，id 是 `my-app`，路径指向
-`/absolute/path/to/my-app`。它只是个形状参考：删掉或改掉它，否则 `taskproof projects`
-会一直在列一个并不存在的仓库。
+注册表建出来只有 `[defaults]` 表、没有项目。这里不留任何指向不存在路径的占位条目 ——
+条目由 `register` 写入（见下一节），所以在你添加之前，`taskproof projects` 就是空的。
 
 ## 3. 登记一个仓库
 

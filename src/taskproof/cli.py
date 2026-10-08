@@ -154,6 +154,7 @@ def cmd_init(args):
     payload = {
         "workspace": args.workspace,
         "registry": registry_path,
+        "projects": 0,
         "next": [
             "taskproof register <path>",
             'taskproof run <project> "<task>"',
@@ -162,12 +163,13 @@ def cmd_init(args):
     }
     human = (
         f"initialised workspace: {args.workspace}\n"
-        f"  registry: {registry_path}\n"
+        f"  registry: {registry_path}  (no projects yet)\n"
         "next:\n"
         "  taskproof register <path>         # probe and register a repository\n"
         '  taskproof run <project> "<task>"  # dispatch, verify, record\n'
         "  taskproof board --open            # live dashboard (serves + opens a browser)\n"
-        "  taskproof board --out board.html  # static snapshot (does not auto-refresh)"
+        "  taskproof board --out board.html  # static snapshot (does not auto-refresh)\n"
+        "  registry format                   # examples/projects.example.toml"
     )
     emit(args, payload, human)
     return 0
