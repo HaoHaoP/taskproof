@@ -64,6 +64,21 @@ its own work counts as evidence.
 not exist stops the run instead of silently falling back to the default —
 falling back would change the result contract behind your back.
 
+**Forbidden paths are checked after the run, and not only via git.** A rule
+ending in `/` covers the directory and everything below it; a rule without the
+trailing slash must match that exact path. A violation fails the task even when
+the agent reported success.
+
+The check deliberately does not rest on the `git status` change list alone. git
+reports nothing inside `.git/`, and it omits every ignored path — which is what
+build output and dependency directories are. Measured: with
+`forbidden_paths = ["dist/"]` and `dist/` in `.gitignore`, an adapter wrote
+`dist/app.js` and the run was recorded as `done`. So the declared paths are also
+fingerprinted before and after the run, which covers `.git/`, ignored paths and
+everything else. One limit worth knowing: a protected tree larger than 20000
+entries is sampled, and the audit event records `snapshot_truncated: true` when
+that happens.
+
 ## Hard errors
 
 Each of these stops the run with exit code 2:

@@ -268,7 +268,14 @@ data and are never translated.
 Employer asset hygiene (hard constraint)
   No internal project names, no internal hostnames or IPs, no acceptance commands
   from private repositories, no credential fragments — including in examples.
-  A keyword scan runs before every push.
+
+  The scan is tools/scan_assets.py. Enable the gate once per clone:
+      git config core.hooksPath .githooks
+
+  The organisation-specific words live OUTSIDE the repository
+  (~/.taskproof/asset-patterns.txt, or $TASKPROOF_ASSET_PATTERNS): a scanner that
+  shipped them would leak exactly what it is meant to protect. The rules that do
+  ship describe shapes only, so the scan is never a no-op.
 
 Automated git writes: never.
 ```

@@ -277,6 +277,13 @@ def _execute(
         )
 
     # ⑤ run the agent CLI, teeing its output to `log_path` as it goes.
+    #
+    # Fingerprint the protected paths first. The git change list consulted below
+    # cannot see inside `.git/` and omits ignored paths, so this snapshot is what
+    # actually covers `forbidden_paths`.
+    forbidden_before, forbidden_truncated = verify.snapshot_forbidden(
+        run_dir, project.forbidden_paths
+    )
     try:
         exit_code, out, err = _run_adapter(
             adapter_obj,
@@ -301,6 +308,12 @@ def _execute(
             conn, task_id, "failed", {"stage": "adapter", "reason": str(exc)}
         )
         raise
+
+    # Snapshot the protected paths again here — immediately after the agent
+    # exits, and BEFORE our own change detection runs. `git status` refreshes the
+    # index and takes a lock file, so snapshotting after it would attribute our
+    # own housekeeping to the agent: with a `.git/` rule that made every run fail.
+    forbidden_after, _ = verify.snapshot_forbidden(run_dir, project.forbidden_paths)
 
     # ⑤ (cont.) parse the adapter's result. A parse failure is an adapter failure
     # (exit 70) — it must never be rounded up to success.
@@ -350,7 +363,13 @@ def _execute(
     # ⑥ change + forbidden-path check, on the PROJECT workdir (or its worktree).
     changed = verify.changed_files(run_dir)
     files_changed = verify.detect_changes(run_dir)
-    violations = verify.check_forbidden(run_dir, project.forbidden_paths, changed)
+    # Two signals, unioned: the git change list (cheap, good for tracked edits)
+    # and the before/after snapshot of the protected paths themselves (the only
+    # one that can see `.git/` and ignored paths).
+    violations = sorted(
+        set(verify.check_forbidden(run_dir, project.forbidden_paths, changed))
+        | set(verify.diff_snapshots(forbidden_before, forbidden_after))
+    )
     if violations:
         # A protected path was touched: fail outright, even though the adapter
         # reported success. The offending paths go into the audit stream.
@@ -367,7 +386,13 @@ def _execute(
             conn,
             task_id,
             "forbidden",
-            {"paths": violations, "rules": list(project.forbidden_paths)},
+            {
+                "paths": violations,
+                "rules": list(project.forbidden_paths),
+                # True when a protected tree was too large to walk fully, so the
+                # guarantee for that rule was partial.
+                "snapshot_truncated": forbidden_truncated,
+            },
         )
         storage.append_event(
             conn, task_id, "failed", {"stage": "forbidden", "paths": violations}

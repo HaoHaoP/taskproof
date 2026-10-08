@@ -16,6 +16,11 @@ jobs:
       - name: unit tests
         run: PYTHONPATH=src python -m unittest discover -s tests
 
+      # The generic rules only: the organisation-specific words live outside the
+      # repository on purpose (a scanner that listed them would be the leak).
+      - name: employer-asset scan
+        run: python3 tools/scan_assets.py
+
       # The frontend must never hand-copy the status words. This fails the build
       # if contract/enums.json and the Python constants have drifted apart --
       # drift here means tasks silently vanish from the board.

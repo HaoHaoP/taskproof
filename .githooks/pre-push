@@ -1,0 +1,13 @@
+#!/bin/sh
+# Refuse a push that would publish an internal name, hostname or credential.
+#
+# Enable it once per clone:
+#
+#     git config core.hooksPath .githooks
+#
+# The organisation-specific words live OUTSIDE the repository (see
+# tools/scan_assets.py): a scanner that hardcoded them would leak what it is
+# meant to protect. Without a pattern file the generic rules still run.
+set -e
+root=$(git rev-parse --show-toplevel)
+python3 "$root/tools/scan_assets.py"

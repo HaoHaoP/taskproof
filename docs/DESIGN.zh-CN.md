@@ -242,7 +242,13 @@ Dock 角标、开机自启）与渲染层项（主题、语言）同在一个文
 ```
 雇主资产卫生（硬约束）
   不含内部项目名、内部主机名或 IP、私有仓库的验收命令、凭据片段 —— 示例里也不行。
-  每次推送前跑一遍关键词扫描。
+
+  扫描器是 tools/scan_assets.py。每个克隆启用一次推送闸门：
+      git config core.hooksPath .githooks
+
+  机构专属词库放在仓库**外部**（~/.taskproof/asset-patterns.txt，或
+  $TASKPROOF_ASSET_PATTERNS）：一个把词库打包进去的扫描器，泄漏的恰好是它要保护
+  的东西。仓库里随附的规则只描述形态，所以扫描永远不会变成空转。
 
 自动化 git 写操作：永不。
 ```

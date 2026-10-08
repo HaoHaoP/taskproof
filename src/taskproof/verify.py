@@ -9,13 +9,15 @@ Rules
    inspected to confirm it. (One observed failure mode: an agent reported
    success while the tree was untouched.)
 4. Forbidden paths are checked AFTER the run — a violation fails the task even
-   if the agent reported success.
+   if the agent reported success. The check does not rely on the git change list
+   alone: git cannot see inside `.git/` and omits every ignored path, so the
+   declared paths are fingerprinted before and after the run as well.
 """
 
 import os
 import subprocess
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -229,3 +231,88 @@ def check_forbidden(workdir: str, forbidden_paths: List[str],
                     violations.append(original)
                     break
     return violations
+
+
+# ---------------------------------------------------------------------------
+# Forbidden paths, part two: watching what git cannot see.
+#
+# `check_forbidden` matches against the `git status` change list, which is a
+# cheap and good change detector but a blind one for two whole classes of path:
+#
+#   * nothing inside `.git/` is ever reported -- git does not list its own
+#     directory;
+#   * every ignored path is omitted -- and build output and dependency
+#     directories are exactly the ignored ones.
+#
+# This was measured, not assumed. With `forbidden_paths = ["dist/"]` and `dist/`
+# in `.gitignore`, an adapter wrote `dist/app.js` and the run was recorded as
+# `done`. The same happened for `.git/`. Those rules, and `node_modules/`, are
+# what the shipped example declares -- so the guard was inert for the three
+# paths people most expect it to cover.
+#
+# So the declared paths are also fingerprinted before and after the run. That
+# costs one walk of the declared set and nothing else.
+# ---------------------------------------------------------------------------
+
+#: Above this many entries a rule's walk stops and only its root is compared.
+#: Reported in the audit event when it happens, so a partial guarantee is
+#: visible rather than implied.
+SNAPSHOT_LIMIT = 20000
+
+
+def _fingerprint(path: str) -> str:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return "gone"
+    return f"{stat.st_size}:{stat.st_mtime_ns}"
+
+
+def snapshot_forbidden(
+    workdir: str, forbidden_paths: List[str]
+) -> Tuple[Dict[str, str], bool]:
+    """Fingerprint everything at or under each forbidden rule.
+
+    Returns `(entries, truncated)`. A rule whose path does not exist yet is
+    skipped rather than recorded: if the run creates it, that shows up as an
+    addition in the diff, which is the point.
+    """
+    entries: Dict[str, str] = {}
+    truncated = False
+
+    for raw in forbidden_paths or []:
+        if raw is None:
+            continue
+        rule_path = _normalise(workdir, str(raw))
+        if not rule_path:
+            continue
+        target = os.path.join(workdir, rule_path)
+
+        if os.path.isfile(target):
+            entries[rule_path] = _fingerprint(target)
+            continue
+        if not os.path.isdir(target):
+            continue
+
+        for root, dirs, names in os.walk(target):
+            dirs.sort()
+            for name in sorted(names):
+                if len(entries) >= SNAPSHOT_LIMIT:
+                    truncated = True
+                    return entries, truncated
+                full = os.path.join(root, name)
+                entries[_normalise(workdir, full)] = _fingerprint(full)
+
+    return entries, truncated
+
+
+def diff_snapshots(before: Dict[str, str], after: Dict[str, str]) -> List[str]:
+    """Paths under a protected rule that appeared, changed or disappeared."""
+    changed = set()
+    for key, fingerprint in after.items():
+        if before.get(key) != fingerprint:
+            changed.add(key)
+    for key in before:
+        if key not in after:
+            changed.add(key)
+    return sorted(changed)
