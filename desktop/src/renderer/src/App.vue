@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import FilterBar from './components/FilterBar.vue'
+import { ICONS } from './icons'
 import { useBoardStore } from './stores/board'
 import { useSettingsStore } from './stores/settings'
 
@@ -11,12 +12,16 @@ const settings = useSettingsStore()
 const route = useRoute()
 const { t } = useI18n()
 
-const views = [
+/** The three data views. Settings sits below a separator, as in the prototype. */
+const mainViews = [
   { name: 'matrix', key: 'nav.matrix', path: '/matrix' },
   { name: 'projects', key: 'nav.projects', path: '/projects' },
-  { name: 'tasks', key: 'nav.tasks', path: '/tasks' },
-  { name: 'settings', key: 'nav.settings', path: '/settings' }
-]
+  { name: 'tasks', key: 'nav.tasks', path: '/tasks' }
+] as const
+const settingsView = { name: 'settings', key: 'nav.settings', path: '/settings' } as const
+
+/** The rail collapses the whole nav away; shown by default. */
+const rail = ref(true)
 
 //: The toolbar belongs to the three data views; settings has nothing to filter.
 const isDataView = computed(() => ['matrix', 'projects', 'tasks'].includes(String(route.name)))
@@ -45,19 +50,28 @@ onBeforeUnmount(() => store.dispose())
 
 <template>
   <div class="app">
+    <!-- The whole mast is draggable; the one interactive control opts back out. -->
     <header class="mast">
-      <span class="title">{{ t('app.title') }}</span>
-      <span class="stats">
-        <span>{{ store.tasks.length }} {{ t('tally.tasks') }}</span>
-        <span>{{ store.inFlightCount }} {{ t('tally.flying') }}</span>
-        <span :class="{ bad: store.abnormalCount > 0 }">
-          {{ store.abnormalCount }} {{ t('tally.failed') }}
-        </span>
-        <span class="live" :class="{ on: store.connected }">
-          <i />
-          {{ t('service.local') }} · {{ store.service.port ?? '—' }}
-        </span>
-      </span>
+      <button
+        class="mastbtn"
+        type="button"
+        :aria-label="t(rail ? 'nav.collapse' : 'nav.expand')"
+        :title="t(rail ? 'nav.collapse' : 'nav.expand')"
+        v-html="rail ? ICONS.collapse : ICONS.expand"
+        @click="rail = !rail"
+      ></button>
+      <div class="id">taskproof <em>· {{ t('app.subtitle') }}</em></div>
+      <div class="spacer"></div>
+      <div class="tally">
+        <span>{{ t('tally.tasks') }}<b>{{ store.tasks.length }}</b></span>
+        <span>{{ t('tally.flying') }}<b>{{ store.inFlightCount }}</b></span>
+        <span class="alarm">{{ t('tally.failed') }}<b>{{ store.abnormalCount }}</b></span>
+      </div>
+      <div class="svc" :data-state="store.connected ? 'on' : 'off'">
+        <i></i>
+        <span v-if="store.connected">{{ t('service.local') }} :{{ store.service.port ?? '—' }}</span>
+        <span v-else>{{ t('service.offline') }}</span>
+      </div>
     </header>
 
     <!-- Nothing to show. The whole shell gives way, as in the prototype: with no
@@ -75,9 +89,24 @@ onBeforeUnmount(() => store.dispose())
     </section>
 
     <div v-else class="shell">
-      <nav class="nav">
-        <RouterLink v-for="view in views" :key="view.name" class="nitem" :to="view.path">
-          {{ t(view.key) }}
+      <nav v-show="rail" class="nav">
+        <template v-for="view in mainViews" :key="view.name">
+          <RouterLink custom :to="view.path" v-slot="{ href, navigate, isActive }">
+            <a
+              class="nitem"
+              :href="href"
+              :aria-current="isActive ? 'page' : undefined"
+              @click="navigate"
+            >
+              <span v-html="ICONS[view.name]"></span>{{ t(view.key) }}
+            </a>
+          </RouterLink>
+        </template>
+        <div class="nsep"></div>
+        <RouterLink custom :to="settingsView.path" v-slot="{ href, navigate, isActive }">
+          <a class="nitem" :href="href" :aria-current="isActive ? 'page' : undefined" @click="navigate">
+            <span v-html="ICONS[settingsView.name]"></span>{{ t(settingsView.key) }}
+          </a>
         </RouterLink>
       </nav>
 
@@ -116,44 +145,94 @@ onBeforeUnmount(() => store.dispose())
   color: var(--ink);
   font-family: var(--sans);
 }
+/* Title bar. Copied from the prototype's `.mast` -- including the 78px left
+   inset, which reserves room for the OS traffic lights (titleBarStyle:
+   hiddenInset). `-webkit-app-region: drag` lets the window be dragged by it. */
 .mast {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: var(--mast);
-  flex: none;
-  padding: 0 14px;
-  background: var(--side);
-  border-bottom: 1px solid var(--rule);
-  backdrop-filter: saturate(180%) blur(20px);
-}
-.title {
-  font: 600 13px/1 var(--sans);
-}
-.stats {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
-  font: 11px/1 var(--mono);
+  height: var(--mast);
+  flex: none;
+  padding: 0 14px 0 78px;
+  background: var(--side);
+  border-bottom: 1px solid var(--rule);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  -webkit-app-region: drag;
+}
+.mastbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--ink-3);
+  -webkit-app-region: no-drag;
+}
+.mastbtn:hover {
+  background: var(--rule-2);
+  color: var(--ink);
+}
+.id {
+  font: 600 14px/1 var(--sans);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.id em {
+  font-style: normal;
+  font-weight: 400;
   color: var(--ink-3);
 }
-.stats .bad {
-  color: var(--c-failed);
-  font-weight: 600;
+.spacer {
+  flex: 1;
 }
-.live {
-  display: inline-flex;
+.tally {
+  display: flex;
+  gap: 16px;
+  font: 12px/1 var(--sans);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.tally b {
+  color: var(--ink);
+  font-weight: 600;
+  margin-left: 5px;
+}
+.tally .alarm b {
+  color: var(--c-failed);
+}
+.svc {
+  display: flex;
   align-items: center;
   gap: 6px;
+  font: 11.5px/1 var(--mono);
+  color: var(--ink-2);
+  padding: 5px 9px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-pill);
+  background: var(--sunken);
 }
-.live i {
+.svc i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--ink-4);
-}
-.live.on i {
   background: var(--ok);
+  flex: none;
+}
+.svc[data-state='on'] i {
+  box-shadow: 0 0 6px var(--ok);
+}
+.svc[data-state='off'] {
+  color: var(--c-failed);
+  border-color: transparent;
+  background: var(--w-failed);
+}
+.svc[data-state='off'] i {
+  background: var(--c-failed);
+  box-shadow: none;
 }
 .shell {
   display: flex;
@@ -165,25 +244,49 @@ onBeforeUnmount(() => store.dispose())
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 10px 8px;
+  padding: 8px 10px 10px;
   background: var(--side);
   border-right: 1px solid var(--rule);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
 }
 .nitem {
-  display: block;
-  padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 30px;
+  padding: 0 9px;
   border-radius: var(--r-ctl);
-  font-size: 13px;
+  font: 13px/1 var(--sans);
   color: var(--ink-2);
   text-decoration: none;
 }
+/* The icon is injected with v-html, so it carries no scope attribute -- reach
+   into it explicitly. */
+.nitem :deep(svg) {
+  flex: none;
+  opacity: 0.85;
+}
 .nitem:hover {
   background: var(--rule-2);
+  color: var(--ink);
 }
-.nitem.router-link-active {
-  background: var(--accent);
-  color: #fff;
+.nitem[aria-current='page'] {
+  background: rgba(10, 132, 255, 0.22);
+  color: var(--accent);
+  font-weight: 500;
+}
+.nitem[aria-current='page'] :deep(svg) {
+  opacity: 1;
+}
+html[data-theme='light'] .nitem[aria-current='page'] {
+  background: rgba(0, 122, 255, 0.14);
+}
+.nsep {
+  height: 1px;
+  background: var(--rule);
+  margin: 8px 9px;
 }
 .content {
   flex: 1;

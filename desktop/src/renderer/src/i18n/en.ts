@@ -1,7 +1,14 @@
 export default {
-  app: { title: 'taskproof console' },
+  app: { title: 'taskproof console', subtitle: 'dispatch console' },
 
-  nav: { matrix: 'Matrix', projects: 'Projects', tasks: 'Tasks', settings: 'Settings' },
+  nav: {
+    matrix: 'Matrix',
+    projects: 'Projects',
+    tasks: 'Tasks',
+    settings: 'Settings',
+    collapse: 'Hide sidebar',
+    expand: 'Show sidebar'
+  },
 
   rail: { title: 'Projects', all: 'All', none: 'None', tasks: 'tasks' },
 

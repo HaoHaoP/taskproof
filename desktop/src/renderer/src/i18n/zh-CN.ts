@@ -1,7 +1,7 @@
 export default {
-  app: { title: 'taskproof 调度台' },
+  app: { title: 'taskproof 调度台', subtitle: '调度台' },
 
-  nav: { matrix: '矩阵', projects: '项目', tasks: '任务', settings: '设置' },
+  nav: { matrix: '矩阵', projects: '项目', tasks: '任务', settings: '设置', collapse: '收起侧栏', expand: '展开侧栏' },
 
   rail: { title: '项目', all: '全选', none: '清空', tasks: '个任务' },
 

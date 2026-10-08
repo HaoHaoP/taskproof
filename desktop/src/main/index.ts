@@ -30,6 +30,10 @@ function createWindow(): void {
     minHeight: 700,
     show: false,
     autoHideMenuBar: true,
+    // Keep the OS traffic lights and inset them over our own mast, which
+    // reserves 78px on the left for them. The prototype's three dots are a
+    // browser mockup, so they are deliberately not ported.
+    titleBarStyle: 'hiddenInset',
     // Matches the dark canvas, so there is no white flash before the renderer
     // paints.
     backgroundColor: '#1c1c1e',
