@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: unit tests
+        run: PYTHONPATH=src python -m unittest discover -s tests
+
+      # The frontend must never hand-copy the status words. This fails the build
+      # if contract/enums.json and the Python constants have drifted apart --
+      # drift here means tasks silently vanish from the board.
+      - name: enum contract is in sync with the Python constants
+        run: PYTHONPATH=src python tools/gen_contract.py --check
+
+  desktop:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
