@@ -135,5 +135,27 @@ class ApiTest(unittest.TestCase):
             self.assertIn("error", body)
 
 
+class ListeningLineTest(unittest.TestCase):
+    """A parent that spawns `api --port 0` learns the port from this one line.
+
+    If the line carried the requested port (0) instead of the bound one, the
+    desktop app would have nothing to connect to.
+    """
+
+    def test_line_carries_the_bound_port(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = os.path.join(tmp, "workspace")
+            dispatch.prepare_workspace(ws)
+            httpd = server.make_server(ws, port=0)
+            try:
+                bound = httpd.server_address[1]
+                self.assertNotEqual(bound, 0, "port=0 must resolve to a free port")
+                line = server.listening_line(httpd)
+                self.assertIn(f"127.0.0.1:{bound}", line)
+                self.assertNotIn(":0", line)
+            finally:
+                httpd.server_close()
+
+
 if __name__ == "__main__":
     unittest.main()

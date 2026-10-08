@@ -191,9 +191,21 @@ def make_server(workspace: str, port: int = DEFAULT_PORT, host: str = HOST):
         )
 
 
+def listening_line(httpd) -> str:
+    """The one line ``serve`` prints so a parent process can learn the port.
+
+    A caller that passes ``port=0`` cannot know the port in advance; the desktop
+    app spawns the API that way and reads the bound port back from this line.
+    """
+    host, port = httpd.server_address[0], httpd.server_address[1]
+    return f"taskproof api listening on http://{host}:{port}"
+
+
 def serve(workspace: str, port: int = DEFAULT_PORT):
     """Serve until interrupted. Blocks; returns 0 on a clean shutdown."""
     httpd = make_server(workspace, port)
+    # Flush before serve_forever blocks, or the parent never sees the port.
+    print(listening_line(httpd), flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
