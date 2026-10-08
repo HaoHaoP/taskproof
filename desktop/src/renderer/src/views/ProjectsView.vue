@@ -11,6 +11,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TaskDrawer from '../components/TaskDrawer.vue'
+import { SHEET_TRANSITION } from '../components/sheetTransition'
 import { ICONS } from '../icons'
 import { useBoardStore } from '../stores/board'
 import { useProjectsStore } from '../stores/projects'
@@ -153,7 +154,7 @@ function openRemove(row: Project): void {
     </div>
 
     <!-- 新增项目：路径 → 探测（等价 taskproof register --dry-run）→ 登记 -->
-    <el-dialog v-model="projects.addOpen" class="sheet" width="580" append-to-body>
+    <el-dialog v-model="projects.addOpen" :transition="SHEET_TRANSITION" class="sheet" width="580" append-to-body>
       <template #header><span>{{ t('proj.add') }}</span></template>
       <div class="setrow">
         <div class="lab">
@@ -219,7 +220,7 @@ function openRemove(row: Project): void {
     </el-dialog>
 
     <!-- 编辑项目：id 与路径不可改（改了等于换了项目，历史任务会挂空） -->
-    <el-dialog v-model="projects.editOpen" class="sheet" width="640">
+    <el-dialog v-model="projects.editOpen" :transition="SHEET_TRANSITION" class="sheet" width="640">
       <template #header><span>{{ t('proj.edit') }} · {{ projects.draft.id }}</span></template>
       <div class="setrow">
         <div class="lab">
@@ -309,7 +310,7 @@ function openRemove(row: Project): void {
     </el-dialog>
 
     <!-- 移除：只从注册表里去掉，不碰仓库文件；但要提醒任务记录会失去对应项目 -->
-    <el-dialog v-model="projects.removeOpen" class="sheet" width="500">
+    <el-dialog v-model="projects.removeOpen" :transition="SHEET_TRANSITION" class="sheet" width="500">
       <template #header><span>{{ t('proj.remove') }}</span></template>
       <div class="setrow">
         <div class="lab">
