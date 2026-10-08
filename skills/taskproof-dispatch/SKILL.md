@@ -3,24 +3,24 @@ name: taskproof-dispatch
 description: Use when a main agent dispatches coding cards to worker agents through taskproof and must follow the dispatch discipline — register projects, fire cards in parallel by default, read status and logs, kill by PID, and re-verify results objectively instead of trusting the worker.
 ---
 
-# 用 taskproof 派活
+# Dispatch work with taskproof
 
-`taskproof` 不决定*做什么*，只保证派出去的活被**独立验收**、**留痕**。
-本 skill 是**主智能体**（派活的那一个）的操作手册：一次一张卡，卡里有根因、有验收，发车后自己复核，不认 worker 的自述。
+`taskproof` does not decide *what* to do; it only guarantees that work it dispatched is **independently verified** and **recorded**.
+This skill is the operating manual for the **main agent** (the one that dispatches): one card at a time, every card carries a root cause and acceptance criteria, and after firing you re-verify yourself instead of trusting the worker's self-report.
 
-命令一律是可直接复制的一整行。示例路径统一写 `/absolute/path/to/repo`。
+Commands are always a single copy-pasteable line. Example paths are always written `/absolute/path/to/repo`.
 
-## 0. 铁律
+## 0. Iron rules
 
-1. 一张卡只做一件事；卡正文必须指名**文件:行号**的根因，不写"你自己找找"。
-2. 验收命令写进卡正文，并与注册表里的 `verify` 保持一致。
-3. worker 只做实现，**不提交**；`git add` / commit / push 由主智能体做。
-4. 同 group 串行、异 group 并行的判据见第 6 节；除此之外**默认并行**。
-5. **按 PID 杀进程**，不要 `pkill -f`（见第 7 节）。
-6. UI 验证只用 `/tmp` 下的一次性 profile + 一次性工作区，**绝不写真实注册表**（见第 8 节）。
-7. 主智能体**自己重跑验收**、自己做客观断言，不把 worker 的自述当结论（见第 9 节）。
+1. One card does one thing; the card body must name the root cause as **file:line**, never "go find it yourself".
+2. Put the acceptance command in the card body, and keep it consistent with `verify` in the registry.
+3. The worker only implements and **does not commit**; `git add` / commit / push are the main agent's job.
+4. Same group is serial, different groups are parallel — the criteria are in section 6; everything else is **parallel by default**.
+5. **Kill by PID**, never `pkill -f` (section 7).
+6. For UI verification use only a one-off profile under `/tmp` plus a one-off workspace; **never write to the real registry** (section 8).
+7. The main agent **re-runs acceptance itself** and makes its own objective assertions; the worker's self-report is not a conclusion (section 9).
 
-## 1. 注册项目
+## 1. Register a project
 
 ```bash
 taskproof init
@@ -29,31 +29,31 @@ taskproof register /absolute/path/to/repo --id my-repo --group my-repo
 taskproof --json register /absolute/path/to/repo --dry-run
 ```
 
-`register` 会探测仓库并追加一条 `[[project]]`（`--dry-run` 只探测、不落盘；`--json` 是根级开关，必须放在子命令**之前**）。注册表默认在 `~/.taskproof/projects.toml`，也可用 `--workspace <dir>` 指向别处。
+`register` probes the repository and appends a `[[project]]` entry (`--dry-run` probes only and writes nothing; `--json` is a root-level switch and must come **before** the subcommand). The registry defaults to `~/.taskproof/projects.toml`; `--workspace <dir>` points it elsewhere.
 
-字段以 `docs/REGISTRY.md` 为准：
+Fields are defined by `docs/REGISTRY.md`:
 
-| 字段 | 必填 | 默认 | 说明 |
+| Field | Required | Default | Notes |
 |---|---|---|---|
-| `id` | 是 | — | 唯一；重复是硬错误 |
-| `path` | 是 | — | 必须绝对路径 |
-| `group` | 否 | `"default"` | 并发组，见第 6 节 |
-| `aliases` | 否 | `[]` | 别名，凡接受 id 处都接受 |
-| `verify` | 否 | — | 验收命令，agent 退出后由 taskproof 跑 |
-| `verify_kind` | 否 | `"none"` | `check` / `build` / `none` |
-| `forbidden_paths` | 否 | `[]` | 禁改路径前缀；末尾带 `/` 覆盖整棵目录 |
-| `result_schema` | 否 | `"default"` | `default` / `none` / 绝对路径 JSON Schema |
+| `id` | yes | — | Unique; a duplicate is a hard error |
+| `path` | yes | — | Must be an absolute path |
+| `group` | no | `"default"` | Concurrency group, see section 6 |
+| `aliases` | no | `[]` | Aliases, accepted wherever an id is accepted |
+| `verify` | no | — | Acceptance command, run by taskproof after the agent exits |
+| `verify_kind` | no | `"none"` | `check` / `build` / `none` |
+| `forbidden_paths` | no | `[]` | Prefixes the agent must not touch; a trailing `/` covers the whole directory tree |
+| `result_schema` | no | `"default"` | `default` / `none` / an absolute path to a JSON Schema |
 
-要记住的语义：
+Semantics to remember:
 
-- `group` 是**串行 key，不是标签**。同 group 一次只跑一个；不同 group 可并行到 `[defaults] concurrency`。省略 `group` 会落到 `default`，于是所有省略者挤在同一条道。
-- 没有 `verify` 不是"通过"，是 **SKIPPED**。
-- `forbidden_paths` 在跑完后检查，且不只靠 `git status`——`.git/` 与被 ignore 的构建产物也算，改了就判失败。
-- 一个仓库可以注册多条：例如 `taskproof` 指向仓库根、`taskproof-desktop` 指向 `desktop/` 子目录，就是为了让不同目录的卡同时发车。
+- `group` is a **serialisation key, not a label**. One task per group runs at a time; different groups run in parallel up to `[defaults] concurrency`. Omitting `group` lands you in `default`, so everything that omits it piles into one lane.
+- A missing `verify` is not "passed", it is **SKIPPED**.
+- `forbidden_paths` is checked after the run, and does not rest on `git status` alone — `.git/` and ignored build output count too; touching them fails the task.
+- One repository can be registered under several entries: e.g. `taskproof` pointing at the repository root and `taskproof-desktop` at the `desktop/` subdirectory, so cards in different directories can fire at the same time.
 
-## 2. 把卡写进文件
+## 2. Write the card to a file
 
-卡正文放在文件里，发车时用 `$(cat ...)` 传入——避免 shell 转义，也让卡可复用、可归档。
+The card body lives in a file and is passed with `$(cat ...)` at fire time — this avoids shell escaping and keeps the card reusable and archivable.
 
 ````bash
 mkdir -p /tmp/cards
@@ -79,26 +79,26 @@ cd /absolute/path/to/repo && python -m pytest -q
 CARD
 ````
 
-## 3. 发车前先看并发现状
+## 3. Look at in-flight state before firing
 
 ```bash
 taskproof tasks --all
 taskproof --json tasks --all
 ```
 
-`tasks --all` 忽略 cwd 作用域、列出所有项目；`--json` 给机器读。发车前先看现在几个在跑，在并发上限内就把独立工作一起发出去。
+`tasks --all` ignores the cwd scope and lists every project; `--json` is for machines. Before firing, check how many are running; if you are within the concurrency cap, send the independent work out together.
 
-## 4. 发车
+## 4. Fire
 
 ```bash
 taskproof run my-repo --adapter codex --timeout 1800 "$(cat /tmp/cards/tp-card19.md)"
 ```
 
-- `--adapter`：`codex` / `claude` / `gemini` / `opencode` / `custom:<cmd>`。
-- `--timeout`：秒；覆盖注册表 `[defaults] timeout`。
-- 卡放文件、`$(cat ...)` 传入：省去转义，也方便备份与重跑。
+- `--adapter`: `codex` / `claude` / `gemini` / `opencode` / `custom:<cmd>`.
+- `--timeout`: seconds; overrides `[defaults] timeout` in the registry.
+- Card in a file, passed with `$(cat ...)`: saves escaping, and makes backup and re-runs easy.
 
-## 5. 查状态与读日志
+## 5. Check status and read logs
 
 ```bash
 taskproof tasks --all
@@ -108,52 +108,52 @@ taskproof log <task-id>
 taskproof log <task-id> --follow
 ```
 
-`log` 打印该任务的完整事件流；`--follow` 会一直跟到终态。
+`log` prints the task's full event stream; `--follow` follows it all the way to the terminal state.
 
-## 6. 并行调度：默认并行
+## 6. Parallel scheduling: parallel by default
 
-**默认就该并行，不要习惯性串行。** 发车前：
+**Parallel is the default — do not serialise out of habit.** Before firing:
 
-1. 先看 `group`：**不同 group 的任务应当同时发**。同一仓库注册多个条目本来就是为了这件事——只要文件范围不重叠，同时派发安全，也是压缩整体时间的主要手段。
-2. `[defaults] concurrency` 是**全局上限**（本机为 3）。先 `taskproof tasks --all` 数一下在跑几个，在 cap 之内就把独立工作一起发，别盲目发到槽满。
-3. **同一 group 同一时刻只允许一个任务**，工具用 `group:<name>` 互斥强制，命令直接 **exit 75**（不排队）。
-4. 同 group 内确实要并行的唯一合法做法：另注册一个指向 **worktree** 的项目条目、给它不同的 group 名，运行时加 `--worktree`；且**只对文件范围不重叠的卡**这么做——两边 diff 事后由主智能体批量合并回主树。
-5. 因此**串行的判据只有一条：同一 group 且文件范围重叠**。其余情况都该并行。
-6. 主智能体自己的节拍也要批量：复核与提交攒起来一起做，别让"等我提交"变成整条链的节拍器。
+1. Look at `group` first: **tasks in different groups should be fired at the same time**. Registering one repository under several entries exists for exactly this — as long as the file ranges do not overlap, dispatching them together is safe and is the main lever for cutting total time.
+2. `[defaults] concurrency` is a **global cap** (3 on this machine). Count how many are running with `taskproof tasks --all` first; if you are within the cap, fire the independent work together, and do not blindly fire until the slots are full.
+3. **One group runs at most one task at any moment**; the tool enforces this with a `group:<name>` mutex and the command simply **exits 75** (no queueing).
+4. The only legitimate way to run within one group in parallel: register another project entry pointing at a **worktree**, give it a different group name, and pass `--worktree` at run time; do this **only for cards whose file ranges do not overlap** — the main agent merges both diffs back into the main tree afterwards in one batch.
+5. Therefore **there is exactly one criterion for serialising: the same group and overlapping file ranges**. Every other case should run in parallel.
+6. Batch the main agent's own rhythm too: collect reviews and commits and do them together; do not let "wait for me to commit" become the metronome for the whole chain.
 
-## 7. 杀进程：按 PID
+## 7. Killing processes: by PID
 
 ```bash
-taskproof --json tasks --all      # 找到任务的 pid
+taskproof --json tasks --all      # find the task's pid
 kill <pid>
 ```
 
-**不要 `pkill -f`。** 卡正文是作为 argv 传给 `taskproof run` 的，卡里出现的任何字符串（比如 `--remote-debugging-port=9333`）都在发车进程自己的命令行里，`pkill -f` 会连发车一起杀掉——表现为 exit -15、不建任务、日志空。
+**Never `pkill -f`.** The card body is passed to `taskproof run` as argv, so any string that appears in the card (for example `--remote-debugging-port=9333`) is on the firing process's own command line, and `pkill -f` kills the fire along with it — the symptom is exit -15, no task created, an empty log.
 
-## 8. UI 验证：一次性 profile + 一次性工作区
+## 8. UI verification: a one-off profile + a one-off workspace
 
-派出去的 UI 卡，验证时必须开一次性环境，把状态写到 `/tmp`，别落到真实注册表：
+A dispatched UI card must be verified in a one-off environment that writes state to `/tmp`, never to the real registry:
 
 ```bash
 taskproof --workspace /tmp/tp-verify-$$ init
 taskproof --workspace /tmp/tp-verify-$$ register /absolute/path/to/repo --id verify-repo --group verify-repo
 ```
 
-**绝不写 `~/.taskproof/projects.toml`。** 真删/真改测试会毁掉用户的注册项——本次开发里就有一次 worker 在真注册表上做删除测试，删掉了用户的一个项目。
+**Never write `~/.taskproof/projects.toml`.** A real delete/change test destroys the user's registry entries — in this development a worker once ran a delete test against the real registry and removed one of the user's projects.
 
-## 9. 主智能体复核清单
+## 9. Main agent review checklist
 
-worker 报 done、验收显示 PASSED，都不算数。主智能体逐条自己走：
+A worker reporting done, or verification showing PASSED, does not count. The main agent walks every line itself:
 
-- [ ] **自己重跑验收命令**，贴真实输出（与卡正文里那条对齐）。
-- [ ] **自己做客观断言**：真窗口用 `document.elementFromPoint(...)` 之类；真文件用 `ls -l`、`python -c "from PIL import Image; ..."`；不要采信 worker 的文字结论。
-- [ ] 只 `git add` **本卡点名的文件**，不要把无关改动裹进来。
-- [ ] 确认 worker 没有提交（提交由主智能体做）。
-- [ ] 复核与提交批量做，别做成每个任务的同步点。
+- [ ] **Re-run the acceptance command yourself** and paste the real output (aligned with the one in the card body).
+- [ ] **Make your own objective assertions**: for a real window use something like `document.elementFromPoint(...)`; for a real file use `ls -l`, `python -c "from PIL import Image; ..."`; never accept the worker's written conclusion.
+- [ ] `git add` **only the files this card names**; do not wrap unrelated changes in.
+- [ ] Confirm the worker did not commit (commits are the main agent's job).
+- [ ] Batch reviews and commits; do not turn them into a synchronisation point per task.
 
-## 10. 参考
+## 10. References
 
-- 注册表字段与硬错误：[`docs/REGISTRY.md`](../../docs/REGISTRY.md)
-- 设计决策：[`docs/DESIGN.md`](../../docs/DESIGN.md)
-- 从零到一次派发的完整走查：[`docs/WALKTHROUGH.md`](../../docs/WALKTHROUGH.md)
-- 退出码：0 成功 / 2 注册表问题 / 64 用法错误 / 70 适配器失败 / 71 验收失败 / 75 并发受限
+- Registry fields and hard errors: [`docs/REGISTRY.md`](../../docs/REGISTRY.md)
+- Design decisions: [`docs/DESIGN.md`](../../docs/DESIGN.md)
+- A full from-zero-to-one-dispatch walkthrough: [`docs/WALKTHROUGH.md`](../../docs/WALKTHROUGH.md)
+- Exit codes: 0 success / 2 registry problem / 64 usage error / 70 adapter failure / 71 verification failure / 75 concurrency limit
