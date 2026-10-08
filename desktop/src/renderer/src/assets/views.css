@@ -196,6 +196,11 @@
 }
 .el-segmented .el-segmented__item {
   padding: 4px 11px;
+  /* Element Plus leaves the item at 1px in this build, so the selected pill reads
+     as a square block inside an otherwise rounded container. The prototype
+     renders 4px (measured in its own window, not read off a stylesheet), so match
+     that rather than inventing a value. */
+  border-radius: 4px;
 }
 .el-switch {
   --el-switch-on-color: var(--ok);
