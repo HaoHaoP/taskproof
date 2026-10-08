@@ -201,6 +201,67 @@ later    whether to embed the Python runtime in the Electron bundle is a pure
 After Electron, the repository is bilingual (Python + TypeScript); CI, release
 process and contributor onboarding are designed for two artifacts.
 
+### Stage 2: the desktop app
+
+The static dashboard is **frozen**: it keeps working as a `file://` snapshot and
+is not developed further. Stage 2 builds a separate Electron application in
+`desktop/` that consumes the same read-only loopback REST API. The Python
+package gains exactly one change (below); everything else is additive.
+
+**Stack.** TypeScript, Vue 3 (`<script setup>`), electron-vite
+(main / preload / renderer), Pinia, vue-router (hash mode — production loads
+over `file://`), Element Plus, UnoCSS, vue-i18n, electron-builder. Dev-run only
+for v1; no packaged installer yet.
+
+**Process model.** Electron owns the server: it spawns `taskproof api --port 0`,
+reads the bound port from the child's stdout, and terminates the child on exit.
+This is the one Python-side change — today `api` defaults to 8787 and blocks
+without printing the port:
+
+```
+taskproof api --port 0     bind an ephemeral port, print one flushed line with
+                           the actual port, then serve
+```
+
+**Matrix column model.** Columns express *which stage of the pipeline a task has
+reached*; the reason a task did not pass is a property of the card, not a stage.
+The board therefore has five columns — queued, running, verifying, done, and
+*not passing* — where the last one holds every abnormal terminal state
+(`failed`, `blocked`, `timeout`, `cancelled`), each keeping its own colour and
+glyph.
+
+Hard rule, inherited from the Python board: **an unknown status is always
+rendered, never dropped.** The Python board already folds unknown statuses into
+`failed` for the same reason ("a new lifecycle state can never silently hide a
+task"); the frontend carries the equivalent guard.
+
+**Enum contract.** Status words, `verify_kind` values and exit-code meanings are
+one artefact in the repository (`contract/enums.json`, generated from the Python
+constants and checked in). TypeScript imports it; CI regenerates and diffs, so
+the two languages cannot drift.
+
+**Component boundaries.** Route components are containers — they own fetching
+(polling the REST API) and state; presentational components take props and emit
+events, and never touch a store or the network. The task drawer is part of the
+route (`/matrix/:taskId`), so it is owned by the page container instead of
+being rendered at app level.
+
+**Cross-process boundary.** Preload exposes a small, named API (`window.tp`:
+settings / service / projects / shell) — not a generic
+`invoke(channel, payload)`. Writes to the registry go through the main process,
+so the **local write token never reaches the renderer**; the main process also
+performs the compare-before-save (mtime/hash) that detects external edits.
+
+**Settings.** A single `settings.json` in Electron's `userData`, held by the
+main process as the source of truth and exposed to the renderer over IPC.
+Main-process items (port, taskproof path, workspace, launch, tray,
+notifications, dock badge, autostart) and renderer items (theme, language) live
+in the same file.
+
+**Internationalisation.** zh-CN + en, following the system locale and falling
+back to **en**. Only UI chrome is translated; task briefs and summaries are user
+data and are never translated.
+
 ## Repository and compliance
 
 ```
@@ -232,8 +293,9 @@ Automated git writes: never.
 
 ```
 Positioning / differentiator — "land it first, find the angle later"
-Dashboard visual design      — stage 2
 Embedded Python runtime      — after stage 2, driven by demand
+Registry write path          — stage 2 project CRUD needs a write endpoint plus
+   the session-only local write token; the read-only boundary is what ships first
 Multi-user / remote auth     — out of scope for now
 Splitting into several repositories (core / adapters / desktop) — possible later;
    a single repository for now

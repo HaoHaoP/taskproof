@@ -64,13 +64,34 @@ discipline:
 ```
 taskproof run <project> "<task>"     # dispatch, then verify, then record
 taskproof tasks / show / log         # inspect state
-taskproof board                      # dashboard
+taskproof board                      # static dashboard snapshot
+taskproof api --port 8787            # local read-only REST API for clients
 ```
 
 - Python, standard library only, `pipx install`-able
 - SQLite for state (transactional claims, not lock files)
 - JSONL audit stream, write-only, rotated monthly
 - Pluggable adapters (codex / claude / gemini / opencode + any command)
+
+## Registry
+
+Everything taskproof may dispatch is declared in one TOML file in the workspace
+(`~/.taskproof/projects.toml`): the path, the concurrency group, and the
+acceptance command that has to pass afterwards.
+
+```toml
+[[project]]
+id   = "my-app"
+path = "/absolute/path/to/my-app"
+group = "my-app"
+verify = "npm run build"    # run by taskproof, after the agent exits
+verify_kind = "build"       # check | build | none
+```
+
+`taskproof register <path>` appends an entry. See
+[`examples/projects.example.toml`](examples/projects.example.toml) for a
+commented starting point, and [`docs/REGISTRY.md`](docs/REGISTRY.md) for the
+field reference and the list of hard errors.
 
 ## Non-goals
 

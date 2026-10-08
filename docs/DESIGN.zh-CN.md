@@ -189,6 +189,54 @@ stage 2  Vue 3 + Vite 前端 → Electron 薄壳（不内嵌 Python 运行时）
 采用 Electron 之后仓库变为双语言（Python + TypeScript）；CI、发布流程与
 贡献者上手路径都按双产物设计。
 
+### stage 2：桌面应用
+
+静态看板**冻结**：它继续作为 `file://` 快照可用，但不再往下开发。stage 2 在
+`desktop/` 里另做一款 Electron 应用，消费同一个只读回环 REST API。Python 侧
+只增加一处改动（见下），其余全是加法。
+
+**技术选型。** TypeScript、Vue 3（`<script setup>`）、electron-vite
+（main / preload / renderer）、Pinia、vue-router（hash 模式 —— 生产走
+`file://`）、Element Plus、UnoCSS、vue-i18n、electron-builder。v1 只做开发期
+运行，暂不出安装包。
+
+**进程模型。** Electron 持有服务：它拉起 `taskproof api --port 0`，从子进程
+stdout 读出实际端口，退出时杀掉子进程。这就是 Python 侧唯一的改动 —— 目前
+`api` 默认 8787 且阻塞、不打印端口：
+
+```
+taskproof api --port 0     绑定临时端口，刷出一行实际端口，然后开始服务
+```
+
+**矩阵列模型。** 列表示*任务走到了流水线的哪一步*；任务没通过的原因属于卡片
+自身的属性，不是一个阶段。所以看板是五列 —— 排队、进行中、验收中、完成、
+未通过 —— 最后一列收纳全部异常终态（`failed`、`blocked`、`timeout`、
+`cancelled`），各自保留自己的颜色与字形。
+
+从 Python 看板继承下来的硬规矩：**未知状态一律渲染，绝不丢弃。** Python 看板
+早已把未知状态折叠进 `failed`，理由相同（"新的生命周期状态绝不能悄悄藏掉一个
+任务"）；前端保同等的兜底。
+
+**枚举契约。** 状态词、`verify_kind` 取值、退出码语义在仓库里是同一份产物
+（`contract/enums.json`，由 Python 常量生成并签入）。TypeScript 直接 import；
+CI 重新生成并 diff，两语言因此不可能漂移。
+
+**组件边界。** 路由页面是容器 —— 取数（轮询 REST）与状态归它们；展示组件
+props 进、events 出，不碰 store、不发请求。任务抽屉属于路由的一部分
+（`/matrix/:taskId`），因此由该页容器持有，而不是在应用级渲染。
+
+**跨进程边界。** preload 只暴露一组具名 API（`window.tp`：settings /
+service / projects / shell），不暴露通用的 `invoke(channel, payload)`。
+写注册表走主进程，**本地写令牌永不到达渲染层**；保存前的比对（mtime/hash）
+也在主进程完成，用于发现外部编辑。
+
+**设置。** Electron `userData` 下单一 `settings.json`，以主进程为事实源，经
+IPC 暴露给渲染层。主进程项（端口、taskproof 路径、工作区、启动、托盘、通知、
+Dock 角标、开机自启）与渲染层项（主题、语言）同在一个文件里。
+
+**国际化。** zh-CN + en，跟随系统 locale，兜底 **en**。只翻译界面外壳；任务
+全文与小结属于用户数据，永不翻译。
+
 ## 仓库与合规
 
 ```
@@ -218,8 +266,9 @@ stage 2  Vue 3 + Vite 前端 → Electron 薄壳（不内嵌 Python 运行时）
 
 ```
 定位（卖点）—— "先落地再想卖点"
-看板视觉设计 —— stage 2
 是否内嵌 Python 运行时 —— stage 2 之后按需求定
+注册表写入路径 —— stage 2 的项目增删改需要写端点与「仅本次会话」的本地写令牌；
+   先交付的是只读边界
 多用户 / 远程鉴权 —— 暂不在范围内
 拆成多个仓库（内核 / 适配器 / 桌面端）—— 以后可以，当前单仓
 ```

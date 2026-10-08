@@ -54,13 +54,32 @@ GitHub 上的编排类项目都在卷同一件事：**能同时跑多少 agent�
 ```
 taskproof run <项目> "<任务>"     # 派发 → 验收 → 记账
 taskproof tasks / show / log     # 查状态
-taskproof board                  # 看板
+taskproof board                  # 静态看板快照
+taskproof api --port 8787        # 给客户端用的本地只读 REST API
 ```
 
 - Python，纯标准库，`pipx install` 可装
 - SQLite 存状态（事务认领，不用锁文件）
 - JSONL 审计流水，只写不查，按月轮转
 - 可插拔适配器（codex / claude / gemini / opencode + 任意命令）
+
+## 注册表
+
+taskproof 能派活的东西全写在工作区的一个 TOML 文件里
+（`~/.taskproof/projects.toml`）：路径、并发组、以及事后必须通过的验收命令。
+
+```toml
+[[project]]
+id   = "my-app"
+path = "/absolute/path/to/my-app"
+group = "my-app"
+verify = "npm run build"    # 由 taskproof 在智能体退出后执行
+verify_kind = "build"       # check | build | none
+```
+
+`taskproof register <路径>` 会追加一条。带注释的起点见
+[`examples/projects.example.toml`](examples/projects.example.toml)，字段参考与
+硬错误清单见 [`docs/REGISTRY.zh-CN.md`](docs/REGISTRY.zh-CN.md)。
 
 ## 不做什么
 
