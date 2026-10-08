@@ -65,6 +65,14 @@ function projects(): ProjectsClient {
 }
 
 function createWindow(): void {
+  // In dev the running bundle is Electron's own, so the Dock shows Electron's icon
+  // and name unless we say otherwise. Packaged builds pick up build/icon.icns on
+  // their own (electron-builder); this line is what makes the dev window show the
+  // real mark. macOS only -- there is no app.dock on the other platforms.
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.setIcon(join(app.getAppPath(), 'build', 'icon.png'))
+  }
+
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
