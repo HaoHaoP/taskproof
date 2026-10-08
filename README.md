@@ -20,6 +20,10 @@ taskproof run your-repo "fix the failing test"
 taskproof board --open
 ```
 
+[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) runs that end to end on a throwaway
+example — including the case where the agent reports success and the acceptance
+command disagrees.
+
 ---
 
 ## The problem

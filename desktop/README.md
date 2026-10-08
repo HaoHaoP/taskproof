@@ -27,6 +27,12 @@ cd ~/Documents/Projects/GitHub/taskproof
 PYTHONPATH=src TASKPROOF_CMD="python3 -m taskproof" npm --prefix desktop run dev
 ```
 
+The installed command has to be a build that prints its bound port (the `api`
+change that comes with stage 2). If `taskproof api --port 0` prints nothing, the
+app waits ten seconds, reports `no port reported within 10000ms` and shows the
+offline banner — which looks like a frontend bug but is a stale install.
+Reinstall it (`pipx reinstall taskproof`) or use the `TASKPROOF_CMD` form above.
+
 ## Checks
 
 ```bash

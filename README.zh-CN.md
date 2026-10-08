@@ -18,6 +18,9 @@ taskproof run your-repo "修掉那个挂掉的测试"
 taskproof board --open
 ```
 
+[`docs/WALKTHROUGH.zh-CN.md`](docs/WALKTHROUGH.zh-CN.md) 把上面这条链在一个临时示例上从头跑到尾
+—— 包括"智能体报告成功、而验收命令不同意"的那种情形。
+
 ---
 
 ## 问题
