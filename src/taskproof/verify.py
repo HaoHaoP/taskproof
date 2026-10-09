@@ -11,7 +11,11 @@ Rules
 4. Forbidden paths are checked AFTER the run — a violation fails the task even
    if the agent reported success. The check does not rely on the git change list
    alone: git cannot see inside `.git/` and omits every ignored path, so the
-   declared paths are fingerprinted before and after the run as well.
+   declared paths are fingerprinted before and after the run as well. The one
+   special case is a rule that targets the repository's `.git` directory:
+   `.git` state (HEAD, refs, and stash) is compared instead of its bookkeeping
+   files, so `git status` refreshing `.git/index` is not mistaken for a
+   forbidden change.
 """
 
 import os
@@ -198,6 +202,85 @@ def _normalise(workdir: str, path: str) -> str:
     return normalised
 
 
+def _git_output(workdir: str, args: List[str]) -> Optional[Tuple[int, str]]:
+    """Run one read-only git probe; None when git cannot be executed."""
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=workdir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return proc.returncode, proc.stdout or ""
+
+
+def is_git_forbidden_rule(workdir: str, raw_rule) -> bool:
+    """Whether a forbidden rule targets the repository's `.git` entry.
+
+    Both ``.git`` and ``.git/`` resolve to the same protected target. A more
+    specific rule such as ``.git/config`` intentionally stays on the file
+    fingerprint path.
+    """
+    if raw_rule is None:
+        return False
+    rule_path = _normalise(workdir, str(raw_rule)).rstrip("/")
+    return rule_path == ".git"
+
+
+def git_state_snapshot(workdir: str) -> Dict[str, str]:
+    """Read the repository state guarded by a forbidden ``.git`` rule.
+
+    The probe is deliberately about *history state*, not git's bookkeeping
+    files: HEAD, the symbolic branch, all refs, and stashed commits. Commits,
+    amends, resets, checkouts, branch/tag changes, and stash changes move one of
+    these values; a ``git status`` index refresh does not.
+
+    Returns ``{}`` when ``workdir`` is not a repository, git is not on PATH, or
+    git cannot be executed. In that case there is no state to claim changed, so
+    the caller must not treat absence as a violation.
+    """
+    repo = _git_output(workdir, ["rev-parse", "--git-dir"])
+    if repo is None or repo[0] != 0:
+        return {}
+
+    state: Dict[str, str] = {"HEAD": "", "symbolic-ref": "", "stash": ""}
+
+    head = _git_output(workdir, ["rev-parse", "--verify", "HEAD"])
+    if head is not None and head[0] == 0:
+        state["HEAD"] = head[1].strip()
+
+    symbolic = _git_output(workdir, ["symbolic-ref", "-q", "HEAD"])
+    if symbolic is not None and symbolic[0] == 0:
+        state["symbolic-ref"] = symbolic[1].strip()
+
+    refs = _git_output(
+        workdir,
+        [
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        ],
+    )
+    if refs is not None and refs[0] == 0:
+        for line in refs[1].splitlines():
+            fields = line.strip().split(None, 1)
+            if len(fields) == 2:
+                state[fields[0]] = fields[1]
+
+    stashes = _git_output(workdir, ["stash", "list", "--format=%H"])
+    if stashes is not None and stashes[0] == 0:
+        state["stash"] = "\n".join(
+            line.strip() for line in stashes[1].splitlines() if line.strip()
+        )
+
+    return state
+
+
 def check_forbidden(workdir: str, forbidden_paths: List[str],
                     changed_files: List[str]) -> List[str]:
     """Return the subset of `changed_files` that violates `forbidden_paths`.
@@ -252,6 +335,11 @@ def check_forbidden(workdir: str, forbidden_paths: List[str],
 #
 # So the declared paths are also fingerprinted before and after the run. That
 # costs one walk of the declared set and nothing else.
+#
+# `.git/` is the exception: git's index/logs/object files are bookkeeping that a
+# read-only `git status` (or a worker's commit) can refresh, while the useful
+# signal is history state. That rule is compared with `git_state_snapshot`
+# instead; every other rule continues through the fingerprint path below.
 # ---------------------------------------------------------------------------
 
 #: Above this many entries a rule's walk stops and only its root is compared.

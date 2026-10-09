@@ -232,6 +232,138 @@ class ForbiddenPathTest(DispatchBase):
         self.assertEqual(self.active_claims(), 0)
 
 
+class GitStateForbiddenTest(DispatchBase):
+    def _init_repo(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "probe@example.invalid"],
+            cwd=self.proj,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "probe"],
+            cwd=self.proj,
+            check=True,
+        )
+
+    def _forbidden_payload(self, task_id):
+        detail = task_detail(self.ws, task_id)
+        event = next(e for e in detail["events"] if e["event"] == "forbidden")
+        return event["payload"]
+
+    def test_read_only_status_is_not_a_forbidden_change(self):
+        self._init_repo()
+        tracked = os.path.join(self.proj, "tracked.txt")
+        with open(tracked, "w") as handle:
+            handle.write("seed\n")
+        subprocess.run(["git", "add", "tracked.txt"], cwd=self.proj, check=True)
+        subprocess.run(
+            ["git", "commit", "-qm", "seed"], cwd=self.proj, check=True
+        )
+        # Force `git status` to refresh the index during the adapter run.
+        os.utime(tracked, None)
+        self.write_registry(verify="exit 0", forbidden=[".git/"])
+
+        task_id = dispatch(
+            self.ws,
+            "proj",
+            "x",
+            adapter=(
+                "custom:sh -c 'git status --porcelain && "
+                "git diff --quiet || true; echo ok'"
+            ),
+        )
+
+        detail = task_detail(self.ws, task_id)
+        self.assertEqual(detail["task"]["status"], STATUS_DONE)
+        self.assertIn("verify", [e["event"] for e in detail["events"]])
+
+    def test_no_op_in_repo_is_not_a_forbidden_change(self):
+        self._init_repo()
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-qm", "seed"],
+            cwd=self.proj,
+            check=True,
+        )
+        self.write_registry(verify="exit 0", forbidden=[".git/"])
+        task_id = dispatch(
+            self.ws, "proj", "x", adapter="custom:sh -c 'echo ok'"
+        )
+        detail = task_detail(self.ws, task_id)
+        self.assertEqual(detail["task"]["status"], STATUS_DONE)
+        self.assertIn("verify", [e["event"] for e in detail["events"]])
+
+    def test_commit_is_a_git_state_violation(self):
+        self._init_repo()
+        self.write_registry(verify="exit 0", forbidden=[".git/"])
+        with self.assertRaises(VerifyError) as ctx:
+            dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter=(
+                    "custom:sh -c 'git -C {workdir} commit --allow-empty "
+                    "-qm probe && echo ok'"
+                ),
+            )
+        self.assertEqual(ctx.exception.exit_code, 71)
+
+        payload = self._forbidden_payload(self.latest_task_id())
+        git_violation = next(v for v in payload["violations"] if v["kind"] == "git-state")
+        self.assertIn("HEAD", git_violation["changed"])
+
+    def test_branch_change_is_a_git_state_violation(self):
+        self._init_repo()
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-qm", "seed"],
+            cwd=self.proj,
+            check=True,
+        )
+        self.write_registry(verify="exit 0", forbidden=[".git/"])
+        with self.assertRaises(VerifyError) as ctx:
+            dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter=(
+                    "custom:sh -c 'git -C {workdir} checkout -q -b probe-branch "
+                    "&& echo ok'"
+                ),
+            )
+        self.assertEqual(ctx.exception.exit_code, 71)
+        payload = self._forbidden_payload(self.latest_task_id())
+        self.assertEqual(payload["violations"][0]["kind"], "git-state")
+
+    def test_non_git_rule_stays_a_file_violation(self):
+        self._init_repo()
+        self.write_registry(verify="exit 0", forbidden=["protected/"])
+        with self.assertRaises(VerifyError) as ctx:
+            dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter=(
+                    "custom:sh -c 'mkdir -p protected && echo x > protected/x "
+                    "&& echo ok'"
+                ),
+            )
+        self.assertEqual(ctx.exception.exit_code, 71)
+
+        payload = self._forbidden_payload(self.latest_task_id())
+        file_violation = next(v for v in payload["violations"] if v["kind"] == "file")
+        self.assertEqual(file_violation["rule"], "protected/")
+        self.assertIn("protected/x", file_violation["paths"])
+
+    def test_git_rule_with_no_repo_is_not_a_violation(self):
+        self.write_registry(verify="exit 0", forbidden=[".git/"])
+        task_id = dispatch(
+            self.ws, "proj", "x", adapter="custom:sh -c 'echo ok'"
+        )
+        self.assertEqual(
+            task_detail(self.ws, task_id)["task"]["status"], STATUS_DONE
+        )
+
+
 class AdapterFailureTest(DispatchBase):
     def test_nonzero_exit_raises_and_releases(self):
         self.write_registry(verify="exit 0")

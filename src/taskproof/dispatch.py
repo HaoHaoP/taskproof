@@ -517,12 +517,21 @@ def _execute(
 
     # ⑤ run the agent CLI, teeing its output to `log_path` as it goes.
     #
-    # Fingerprint the protected paths first. The git change list consulted below
+    # Snapshot the protected paths first. The git change list consulted below
     # cannot see inside `.git/` and omits ignored paths, so this snapshot is what
-    # actually covers `forbidden_paths`.
+    # actually covers `forbidden_paths`. A rule targeting `.git` itself is the
+    # exception: compare git state (HEAD/refs/stash), not its bookkeeping files.
+    git_rules = []
+    file_rules = []
+    for raw in project.forbidden_paths or []:
+        if verify.is_git_forbidden_rule(run_dir, raw):
+            git_rules.append(raw)
+        else:
+            file_rules.append(raw)
     forbidden_before, forbidden_truncated = verify.snapshot_forbidden(
-        run_dir, project.forbidden_paths
+        run_dir, file_rules
     )
+    git_state_before = verify.git_state_snapshot(run_dir) if git_rules else {}
 
     def _record_pgid(proc) -> None:
         """Persist the adapter's own group id the moment it exists.
@@ -584,7 +593,8 @@ def _execute(
     # exits, and BEFORE our own change detection runs. `git status` refreshes the
     # index and takes a lock file, so snapshotting after it would attribute our
     # own housekeeping to the agent: with a `.git/` rule that made every run fail.
-    forbidden_after, _ = verify.snapshot_forbidden(run_dir, project.forbidden_paths)
+    forbidden_after, _ = verify.snapshot_forbidden(run_dir, file_rules)
+    git_state_after = verify.git_state_snapshot(run_dir) if git_rules else {}
 
     # ⑤ (cont.) parse the adapter's result. A parse failure is an adapter failure
     # (exit 70) — it must never be rounded up to success.
@@ -634,12 +644,40 @@ def _execute(
     # ⑥ change + forbidden-path check, on the PROJECT workdir (or its worktree).
     changed = verify.changed_files(run_dir)
     files_changed = verify.detect_changes(run_dir)
-    # Two signals, unioned: the git change list (cheap, good for tracked edits)
-    # and the before/after snapshot of the protected paths themselves (the only
-    # one that can see `.git/` and ignored paths).
-    violations = sorted(
-        set(verify.check_forbidden(run_dir, project.forbidden_paths, changed))
+    # Two signals: the git change list plus the before/after fingerprint of the
+    # protected paths. A `.git` rule uses a third, state-only signal instead of
+    # the fingerprint, so index refreshes do not look like forbidden edits.
+    file_changes = sorted(
+        set(verify.check_forbidden(run_dir, file_rules, changed))
         | set(verify.diff_snapshots(forbidden_before, forbidden_after))
+    )
+    git_state_changes = (
+        verify.diff_snapshots(git_state_before, git_state_after) if git_rules else []
+    )
+
+    violations = []
+    if git_state_changes:
+        violations.append(
+            {"rule": ".git", "kind": "git-state", "changed": git_state_changes}
+        )
+    for raw in file_rules:
+        if raw is None:
+            continue
+        rule_paths = sorted(
+            set(verify.check_forbidden(run_dir, [raw], changed))
+            | set(verify.check_forbidden(run_dir, [raw], file_changes))
+        )
+        if rule_paths:
+            violations.append(
+                {"rule": str(raw), "kind": "file", "paths": rule_paths}
+            )
+
+    violation_paths = sorted(
+        {
+            path
+            for entry in violations
+            for path in (entry.get("changed") or entry.get("paths") or [])
+        }
     )
     if violations:
         # A protected path was touched: fail outright, even though the adapter
@@ -658,7 +696,9 @@ def _execute(
             task_id,
             "forbidden",
             {
-                "paths": violations,
+                "violations": violations,
+                # Flat, backwards-compatible list for older boards/callers.
+                "paths": violation_paths,
                 "rules": list(project.forbidden_paths),
                 # True when a protected tree was too large to walk fully, so the
                 # guarantee for that rule was partial.
@@ -666,10 +706,13 @@ def _execute(
             },
         )
         storage.append_event(
-            conn, task_id, "failed", {"stage": "forbidden", "paths": violations}
+            conn,
+            task_id,
+            "failed",
+            {"stage": "forbidden", "violations": violations, "paths": violation_paths},
         )
         raise VerifyError(
-            f"forbidden path(s) changed: {', '.join(violations)}",
+            f"forbidden path(s) changed: {', '.join(violation_paths)}",
             hint="the task touched a path the registry protects",
         )
 

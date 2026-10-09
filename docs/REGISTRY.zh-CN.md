@@ -66,8 +66,11 @@ verify_kind = "build"
 而且会漏掉全部被忽略的路径 —— 而构建产物与依赖目录恰好就是被忽略的那些。这是实测
 的：`forbidden_paths = ["dist/"]` 且 `dist/` 写在 `.gitignore` 里时，一个适配器写了
 `dist/app.js`，任务却被记为 `done`。所以声明的路径还会在运行前后各取一次指纹，从而
-覆盖 `.git/`、被忽略的路径以及其它一切。一个需要知道的边界：受保护目录超过 20000 个
-条目时只做抽样，此时审计事件里会记 `snapshot_truncated: true`。
+覆盖被忽略的路径以及其它一切。若规则指向仓库的 `.git` 目录，则特殊处理：比较
+HEAD、refs 与 stash 状态，而不是 git 的记账文件；因此只读的 `git status` 刷新 index
+不算违规，而提交、reset、切换/建立分支、打标签和 stash 仍会被抓住。一个需要知道的
+边界：受保护目录超过 20000 个条目时只做抽样，此时审计事件里会记
+`snapshot_truncated: true`。
 
 ## 硬错误
 

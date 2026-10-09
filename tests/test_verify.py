@@ -5,8 +5,10 @@ skipped acceptance is NOT a pass.
 """
 
 import os
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from taskproof import verify
 
@@ -112,6 +114,82 @@ class ForbiddenSnapshotTest(unittest.TestCase):
             verify.SNAPSHOT_LIMIT = original
         self.assertTrue(truncated)
         self.assertLessEqual(len(entries), 3)
+
+
+class GitStateSnapshotTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.workdir = self._tmp.name
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _git(self, *args):
+        return subprocess.run(
+            ["git", *args],
+            cwd=self.workdir,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def _init_repo(self):
+        self._git("init", "-q")
+        self._git("config", "user.email", "probe@example.invalid")
+        self._git("config", "user.name", "probe")
+
+    def test_non_repo_is_empty(self):
+        self.assertEqual(verify.git_state_snapshot(self.workdir), {})
+
+    def test_git_missing_from_path_is_empty(self):
+        with mock.patch.dict(os.environ, {"PATH": ""}):
+            self.assertEqual(verify.git_state_snapshot(self.workdir), {})
+
+    def test_commit_changes_head(self):
+        self._init_repo()
+        before = verify.git_state_snapshot(self.workdir)
+        self._git("commit", "--allow-empty", "-qm", "probe")
+        after = verify.git_state_snapshot(self.workdir)
+        self.assertIn("HEAD", verify.diff_snapshots(before, after))
+
+    def test_branch_change_is_visible(self):
+        self._init_repo()
+        self._git("commit", "--allow-empty", "-qm", "seed")
+        before = verify.git_state_snapshot(self.workdir)
+        self._git("checkout", "-q", "-b", "probe-branch")
+        after = verify.git_state_snapshot(self.workdir)
+        changed = verify.diff_snapshots(before, after)
+        self.assertIn("symbolic-ref", changed)
+        self.assertIn("refs/heads/probe-branch", changed)
+
+    def test_status_index_refresh_is_not_state_change(self):
+        self._init_repo()
+        tracked = os.path.join(self.workdir, "tracked.txt")
+        with open(tracked, "w") as handle:
+            handle.write("seed\n")
+        self._git("add", "tracked.txt")
+        self._git("commit", "-qm", "seed")
+        # Leave stale stat data so `git status` refreshes `.git/index`.
+        os.utime(tracked, None)
+        before = verify.git_state_snapshot(self.workdir)
+        self._git("status", "--porcelain")
+        after = verify.git_state_snapshot(self.workdir)
+        self.assertEqual(verify.diff_snapshots(before, after), [])
+
+    def test_stash_is_visible(self):
+        self._init_repo()
+        tracked = os.path.join(self.workdir, "tracked.txt")
+        with open(tracked, "w") as handle:
+            handle.write("seed\n")
+        self._git("add", "tracked.txt")
+        self._git("commit", "-qm", "seed")
+        with open(tracked, "w") as handle:
+            handle.write("changed\n")
+        before = verify.git_state_snapshot(self.workdir)
+        self._git("stash", "push", "-qm", "probe")
+        after = verify.git_state_snapshot(self.workdir)
+        self.assertIn("stash", verify.diff_snapshots(before, after))
 
 
 class AcceptanceTest(unittest.TestCase):

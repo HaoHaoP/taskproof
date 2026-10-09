@@ -74,10 +74,13 @@ reports nothing inside `.git/`, and it omits every ignored path — which is wha
 build output and dependency directories are. Measured: with
 `forbidden_paths = ["dist/"]` and `dist/` in `.gitignore`, an adapter wrote
 `dist/app.js` and the run was recorded as `done`. So the declared paths are also
-fingerprinted before and after the run, which covers `.git/`, ignored paths and
-everything else. One limit worth knowing: a protected tree larger than 20000
-entries is sampled, and the audit event records `snapshot_truncated: true` when
-that happens.
+fingerprinted before and after the run, which covers ignored paths and
+everything else. A rule that targets the repository's `.git` directory is
+special-cased: its state (HEAD, refs and stash) is compared instead of its
+bookkeeping files, so a read-only `git status` index refresh is not a violation
+while commits, resets, branch/tag changes and stashes still are. One limit worth
+knowing: a protected tree larger than 20000 entries is sampled, and the audit
+event records `snapshot_truncated: true` when that happens.
 
 ## Hard errors
 
