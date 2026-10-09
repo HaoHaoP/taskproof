@@ -60,6 +60,21 @@ function resourcesPath(): string {
 }
 
 /**
+ * The OS the OS-integration paths (Dock badge, login item) branch on. Normally
+ * this is exactly `process.platform`.
+ *
+ * TEST SEAM, *not* a user setting: the acceptance harness points
+ * `TP_DESKTOP_PLATFORM` at another OS so the non-native branches really execute
+ * on a machine of any OS -- CI runs Linux, and a macOS dev can drive the
+ * linux/win32 branches without a second box. A shipped app sets no such
+ * variable and reads the real `process.platform`. Read live (not cached) so the
+ * harness can flip it mid-run.
+ */
+function platform(): NodeJS.Platform {
+  return (process.env.TP_DESKTOP_PLATFORM as NodeJS.Platform | undefined) ?? process.platform
+}
+
+/**
  * Resolve the child's command for a given settings snapshot, from the live
  * environment. Kept per-snapshot so a settings change can compare its before
  * and after argv without the cached `settings.get()` having already moved on.
@@ -257,7 +272,13 @@ function syncTray(): void {
  * and the switch being off) all clear it, so a badge never outlives its facts.
  */
 function applyBadge(): void {
-  if (process.platform !== 'darwin' || !app.dock) return
+  // The Dock badge is macOS-only. Anywhere else there is no Dock to paint, so
+  // say so out loud rather than returning silently -- a user who wonders why the
+  // badge never appears gets a clue, and the skip is assertable on any host.
+  if (platform() !== 'darwin' || !app.dock) {
+    diag('dock badge skipped: unsupported on this platform')
+    return
+  }
   if (!settings.get().dockBadge || lastSummary === null) {
     app.dock.setBadge('')
     return
@@ -268,7 +289,17 @@ function applyBadge(): void {
 }
 
 /**
- * Align the login item with the switch. macOS is the platform this is for.
+ * `app.setLoginItemSettings` is a macOS + Windows API; every other platform has
+ * no login-item mechanism to align with, so the switch is a no-op there.
+ */
+function supportsLoginItems(): boolean {
+  const p = platform()
+  return p === 'darwin' || p === 'win32'
+}
+
+/**
+ * Align the login item with the switch. macOS and Windows are the platforms
+ * this is for.
  *
  * Only a *packaged* build may touch the OS login items. In a dev run
  * (`app.isPackaged === false`) the executable is `node_modules/electron`, so
@@ -278,7 +309,12 @@ function applyBadge(): void {
  * app is packaged. The diagnostic output says so, too.
  */
 function syncAutostart(): void {
-  if (process.platform !== 'darwin') return
+  // No login-item mechanism here: leave the OS strictly alone and say why, so
+  // the skip is observable instead of silent.
+  if (!supportsLoginItems()) {
+    diag('autostart skipped: unsupported platform')
+    return
+  }
   if (!app.isPackaged) {
     diag('autostart skipped: not packaged (takes effect only in a packaged build)')
     return
@@ -609,7 +645,7 @@ function registerIpc(): void {
     ipcMain.handle('tp:diag:state', () => ({
       tray: tray !== null,
       trayTemplate,
-      badge: process.platform === 'darwin' && app.dock ? app.dock.getBadge() : '',
+      badge: platform() === 'darwin' && app.dock ? app.dock.getBadge() : '',
       windowVisible: Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible())
     }))
     ipcMain.handle('tp:diag:tray-click', () => {

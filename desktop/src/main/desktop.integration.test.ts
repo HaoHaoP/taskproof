@@ -10,12 +10,21 @@
  * and assert the calls the main process actually makes:
  *
  *   - `new Tray(...)` on the switch going on, `.destroy()` when it goes off;
- *   - `app.dock.setBadge('2')` for failed + blocked + timeout, ignoring cancelled;
+ *   - `app.dock.setBadge('2')` for failed + blocked + timeout, ignoring
+ *     cancelled -- *on macOS only*. The Dock exists there and nowhere else, so
+ *     the other platforms assert the honest non-native fact instead: the OS is
+ *     never touched and a `[diag] ... skipped` line says why;
  *   - the first poll only seeds the backlog (no retrospective notice); a card
  *     that appears afterwards raises one `new Notification(...)`, never more;
  *   - `close` is prevented and the window hidden only while `tray` is on;
- *   - a dev build never calls `app.setLoginItemSettings`, while a packaged one
- *     still aligns the login item with the switch on toggle.
+ *   - `app.setLoginItemSettings` is macOS + Windows only: there a dev build
+ *     still logs "not packaged" and a packaged one aligns the login item with
+ *     the switch, while elsewhere no login item is ever created or modified.
+ *
+ * The OS-integration branches are chosen by a *platform seam* (`platform()` in
+ * `index.ts`, read from `TP_DESKTOP_PLATFORM`). The suite drives that seam with
+ * `usePlatform(...)`, so the linux/win32 branches really execute even on this
+ * macOS box -- the same code paths the ubuntu CI runs for real.
  */
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -64,7 +73,10 @@ const H = vi.hoisted(() => {
     tasksFile: '',
     isPackaged: false,
     diag: [] as string[],
-    ready: false
+    ready: false,
+    // The platform the main process is currently branched on. Real by default;
+    // `usePlatform` overrides both this and `TP_DESKTOP_PLATFORM`.
+    platform: process.platform as NodeJS.Platform
   }
 })
 
@@ -263,9 +275,50 @@ async function childUp(): Promise<{ pid: number; port: number }> {
 
 const set = (patch: Record<string, unknown>): unknown => H.ipc['tp:settings:set']({}, patch)
 
+// The exact diagnostic lines the unsupported paths now emit. Asserting on them
+// (rather than on silence) is what makes a *skip* observable on any platform.
+const DOCK_SKIP_DIAG = '[diag] dock badge skipped: unsupported on this platform'
+const AUTOSTART_UNSUPPORTED_DIAG = '[diag] autostart skipped: unsupported platform'
+const AUTOSTART_UNPACKAGED_DIAG =
+  '[diag] autostart skipped: not packaged (takes effect only in a packaged build)'
+
+/** `app.setLoginItemSettings` is a macOS + Windows API, and nothing else. */
+const loginItemsSupported = (p: NodeJS.Platform): boolean => p === 'darwin' || p === 'win32'
+
+/**
+ * The platform seam. `index.ts` reads `TP_DESKTOP_PLATFORM` live, so pointing it
+ * at 'linux'/'win32' makes the *non-native* branches really execute on this
+ * macOS host -- the exact code ubuntu CI runs. `H.platform` mirrors it so the
+ * assertions can branch on the same value the main process used.
+ */
+function usePlatform(p: NodeJS.Platform): void {
+  H.platform = p
+  process.env.TP_DESKTOP_PLATFORM = p
+}
+/** Restore the host's real platform; always called from a `finally`. */
+function resetPlatform(): void {
+  H.platform = process.platform
+  delete process.env.TP_DESKTOP_PLATFORM
+}
+
+/**
+ * Wait until a summary poll has landed. macOS paints the Dock badge; the other
+ * platforms log the Dock skip. Either way the poll that reads `summary` (and
+ * seeds the backlog) has happened, which the seeding assertions depend on.
+ */
+async function waitForSummaryPoll(): Promise<void> {
+  if (H.platform === 'darwin') {
+    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 15_000 })
+  } else {
+    await vi.waitFor(() => expect(H.diag).toContain(DOCK_SKIP_DIAG), { timeout: 15_000 })
+  }
+}
+
 afterAll(async () => {
   // Put stdout back so vitest's own reporting is untouched after this file.
   process.stdout.write = originalStdoutWrite
+  // Drop any injected platform so nothing downstream is left pointed at a fake OS.
+  resetPlatform()
   // Quiet the poller and stop the stub child so the worker can exit cleanly.
   set({ dockBadge: false, notifyFail: false })
   try {
@@ -295,16 +348,24 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
 
   it('paints the Dock badge from failed + blocked + timeout, never cancelled', async () => {
     await childUp()
-    // summary { failed: 2, cancelled: 1 } -> the badge must read "2", not "3".
-    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 15_000 })
-    expect(H.badge).not.toContain('3')
+    // summary { failed: 2, cancelled: 1 }. On macOS the badge must read "2",
+    // never "3". Anywhere else there is no Dock to paint: the OS is left alone,
+    // and the poller logs the honest skip instead of doing nothing silently.
+    if (H.platform === 'darwin') {
+      await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 15_000 })
+      expect(H.badge).not.toContain('3')
+    } else {
+      await vi.waitFor(() => expect(H.diag).toContain(DOCK_SKIP_DIAG), { timeout: 15_000 })
+      expect(H.badge).toEqual([])
+    }
   })
 
   it('seeds the whole backlog on the first poll, then fires once for a new id', async () => {
     await childUp()
-    // One successful poll paints the badge; that same poll seeded the seven
-    // historical cards (four not-passing + three done) the stub starts with.
-    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 15_000 })
+    // One successful summary poll primes the badge (macOS) or logs the Dock
+    // skip (elsewhere); that same poll seeded the seven historical cards (four
+    // not-passing + three done) the stub starts with.
+    await waitForSummaryPoll()
     // (1) A fresh launch onto a full backlog raises nothing, and the main-process
     // trace carries no `notify` line at all.
     expect(H.notifications).toEqual([])
@@ -354,18 +415,31 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
     set({ autostart: true })
     await new Promise((r) => setTimeout(r, 300))
     expect(H.loginItems).toEqual([])
+    // darwin/win32 have the mechanism (and log "not packaged"); linux and the
+    // rest have none and log the unsupported skip. Either way: nothing written.
     expect(H.diag).toContain(
-      '[diag] autostart skipped: not packaged (takes effect only in a packaged build)'
+      loginItemsSupported(H.platform) ? AUTOSTART_UNPACKAGED_DIAG : AUTOSTART_UNSUPPORTED_DIAG
     )
   })
 
-  it('a packaged build still aligns the login item with the switch', async () => {
+  it('a packaged build aligns the login item with the switch where the OS has one', async () => {
     H.isPackaged = true
     try {
-      set({ autostart: false })
-      await vi.waitFor(() => expect(H.loginItems.some((s) => s.openAtLogin === false)).toBe(true))
-      set({ autostart: true })
-      await vi.waitFor(() => expect(H.loginItems.some((s) => s.openAtLogin === true)).toBe(true))
+      if (loginItemsSupported(H.platform)) {
+        // macOS / Windows: a packaged toggle is a real login item, on and off.
+        set({ autostart: false })
+        await vi.waitFor(() => expect(H.loginItems.some((s) => s.openAtLogin === false)).toBe(true))
+        set({ autostart: true })
+        await vi.waitFor(() => expect(H.loginItems.some((s) => s.openAtLogin === true)).toBe(true))
+      } else {
+        // No login-item mechanism: even packaged and switched on, the OS is
+        // left strictly alone and the skip is logged.
+        H.loginItems = []
+        set({ autostart: true })
+        await new Promise((r) => setTimeout(r, 300))
+        expect(H.loginItems).toEqual([])
+        expect(H.diag).toContain(AUTOSTART_UNSUPPORTED_DIAG)
+      }
     } finally {
       H.isPackaged = false
     }
@@ -374,10 +448,114 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
   it('reports tray + template + real badge over the diagnostic IPC', async () => {
     await childUp()
     set({ tray: true })
-    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 15_000 })
-    const state = (await H.ipc['tp:diag:state']()) as { tray: boolean; trayTemplate: boolean; badge: string }
+    // Let a poll land, then read the same state the diagnostics page reads. A
+    // real Dock badge exists on macOS only; everywhere else it is honestly ''
+    // (the poller says why).
+    await waitForSummaryPoll()
+    const state = (await H.ipc['tp:diag:state']()) as {
+      tray: boolean
+      trayTemplate: boolean
+      badge: string
+    }
     expect(state.tray).toBe(true)
     expect(state.trayTemplate).toBe(true)
-    expect(state.badge).toBe('2')
+    expect(state.badge).toBe(H.platform === 'darwin' ? '2' : '')
+  })
+
+  // ---- Platform seam: run the non-native branches on this host --------------
+  //
+  // ubuntu CI exercises these for real; a macOS box normally never would, so
+  // they would be dead assertions here. `usePlatform` points `index.ts` (via
+  // `TP_DESKTOP_PLATFORM`) at another OS so the linux/win32 branches really
+  // execute and are actually asserted. Each test restores the real platform.
+  describe('OS-integration branches with an injected platform', () => {
+    it('linux: the Dock is never touched and the skip is logged', async () => {
+      usePlatform('linux')
+      try {
+        await childUp()
+        // Clear what macOS painted before the switch, then prove *this* run
+        // logs a fresh skip and still never calls setBadge.
+        H.badge = []
+        H.diag = []
+        await vi.waitFor(() => expect(H.diag).toContain(DOCK_SKIP_DIAG), { timeout: 15_000 })
+        set({ dockBadge: false })
+        set({ dockBadge: true })
+        await new Promise((r) => setTimeout(r, 300))
+        expect(H.badge).toEqual([])
+      } finally {
+        resetPlatform()
+      }
+    })
+
+    it('win32: there is no Dock either, so it skips the badge the same way', async () => {
+      usePlatform('win32')
+      try {
+        await childUp()
+        H.badge = []
+        H.diag = []
+        await vi.waitFor(() => expect(H.diag).toContain(DOCK_SKIP_DIAG), { timeout: 15_000 })
+        await new Promise((r) => setTimeout(r, 300))
+        expect(H.badge).toEqual([])
+      } finally {
+        resetPlatform()
+      }
+    })
+
+    it('linux: no login-item mechanism -- nothing is written, and it says so', async () => {
+      usePlatform('linux')
+      H.isPackaged = true
+      try {
+        await childUp()
+        H.loginItems = []
+        H.diag = []
+        set({ autostart: false })
+        set({ autostart: true })
+        await new Promise((r) => setTimeout(r, 300))
+        expect(H.loginItems).toEqual([])
+        expect(H.diag).toContain(AUTOSTART_UNSUPPORTED_DIAG)
+      } finally {
+        H.isPackaged = false
+        resetPlatform()
+      }
+    })
+
+    it('win32 unpackaged: leaves the OS alone and says why', async () => {
+      usePlatform('win32')
+      try {
+        await childUp()
+        H.loginItems = []
+        H.diag = []
+        expect(H.isPackaged).toBe(false)
+        set({ autostart: false })
+        set({ autostart: true })
+        await new Promise((r) => setTimeout(r, 300))
+        expect(H.loginItems).toEqual([])
+        expect(H.diag).toContain(AUTOSTART_UNPACKAGED_DIAG)
+      } finally {
+        resetPlatform()
+      }
+    })
+
+    it('win32 packaged: the switch and the login item stay aligned', async () => {
+      usePlatform('win32')
+      H.isPackaged = true
+      try {
+        await childUp()
+        H.loginItems = []
+        H.diag = []
+        set({ autostart: false })
+        await vi.waitFor(() =>
+          expect(H.loginItems.some((s) => s.openAtLogin === false)).toBe(true)
+        )
+        set({ autostart: true })
+        await vi.waitFor(() =>
+          expect(H.loginItems.some((s) => s.openAtLogin === true)).toBe(true)
+        )
+        expect(H.diag).toContain('[diag] autostart true')
+      } finally {
+        H.isPackaged = false
+        resetPlatform()
+      }
+    })
   })
 })
