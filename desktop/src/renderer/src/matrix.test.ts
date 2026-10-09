@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import type { Project, Task } from './api/client'
+import { COLUMNS, type Column } from './contract'
 import {
   DEFAULT_FILTER,
   DONE_WINDOW,
   boardQuery,
   doneWindow,
   filterBoard,
+  gridTracks,
   groupColumns,
+  hiddenTally,
   inRange,
   needsMoreBudget,
   parseBoardFilter,
   sortColumn,
+  visibleColumns,
   visibleProjects
 } from './matrix'
 
@@ -213,10 +217,11 @@ describe('fetch budget coverage', () => {
 
 describe('address-bar filter', () => {
   it('reads a full query, projects comma-separated', () => {
-    expect(parseBoardFilter('range=7d&projects=core,web&done=expanded')).toEqual({
+    expect(parseBoardFilter('range=7d&projects=core,web&done=expanded&hide=done')).toEqual({
       range: '7d',
       projects: ['core', 'web'],
-      expanded: true
+      expanded: true,
+      hidden: ['done']
     })
   })
 
@@ -243,17 +248,22 @@ describe('address-bar filter', () => {
 
   it('writes only the non-default pieces, never the legacy key', () => {
     expect(boardQuery(DEFAULT_FILTER)).toBe('')
-    expect(boardQuery({ range: '7d', projects: ['core', 'web'], expanded: true })).toBe(
-      'range=7d&projects=core,web&done=expanded'
-    )
+    expect(
+      boardQuery({ range: '7d', projects: ['core', 'web'], expanded: true, hidden: ['done'] })
+    ).toBe('range=7d&projects=core,web&done=expanded&hide=done')
     // All-selected is the default and writes nothing.
-    expect(boardQuery({ range: 'all', projects: null, expanded: false })).toBe('')
+    expect(boardQuery({ range: 'all', projects: null, expanded: false, hidden: [] })).toBe('')
     // None-selected is a real (non-default) narrowing, so it is written.
-    expect(boardQuery({ range: 'all', projects: [], expanded: false })).toBe('projects=')
+    expect(boardQuery({ range: 'all', projects: [], expanded: false, hidden: [] })).toBe('projects=')
   })
 
   it('round-trips the project set', () => {
-    const filter = { range: '30d' as const, projects: ['x y', 'web'], expanded: true }
+    const filter = {
+      range: '30d' as const,
+      projects: ['x y', 'web'],
+      expanded: true,
+      hidden: ['done']
+    }
     expect(parseBoardFilter(boardQuery(filter))).toEqual(filter)
   })
 })
@@ -325,5 +335,126 @@ describe('grouping', () => {
     expect(grouped.abnormal.map((t) => t.id)).toEqual(['t1', 'f1'])
     expect(grouped.queued.map((t) => t.id)).toEqual(['q1'])
     expect(grouped.done).toEqual([])
+  })
+})
+
+describe('visible status columns (泳道 显隐)', () => {
+  it('defaults to every contract column when nothing is hidden', () => {
+    expect(visibleColumns(DEFAULT_FILTER).map((c) => c.key)).toEqual(COLUMNS.map((c) => c.key))
+  })
+
+  it('drops exactly the hidden keys, keeping contract order', () => {
+    // Toggled in one order, rendered in contract order -- the header row never
+    // reshuffles just because a column was hidden before another.
+    const filter = { ...DEFAULT_FILTER, hidden: ['done', 'queued'] }
+    expect(visibleColumns(filter).map((c) => c.key)).toEqual([
+      'running',
+      'verifying',
+      'cancelled',
+      'abnormal'
+    ])
+  })
+
+  it('reads ?hide= as a set, dropping unknown and duplicate keys', () => {
+    expect(parseBoardFilter('hide=done').hidden).toEqual(['done'])
+    expect(parseBoardFilter('hide=done,cancelled').hidden).toEqual(['done', 'cancelled'])
+    // duplicates collapse, and a key the contract does not declare is ignored
+    expect(parseBoardFilter('hide=done,done,nope').hidden).toEqual(['done'])
+    // absent -> the default, which shows every column
+    expect(parseBoardFilter('').hidden).toEqual([])
+    expect(parseBoardFilter(undefined).hidden).toEqual([])
+  })
+
+  it('writes ?hide= in contract order and leaves the default empty', () => {
+    expect(
+      boardQuery({ range: 'all', projects: null, expanded: false, hidden: ['cancelled', 'done'] })
+    ).toBe('hide=done,cancelled')
+    // A default board (nothing hidden) writes no query at all.
+    expect(boardQuery(DEFAULT_FILTER)).toBe('')
+  })
+
+  it('counts hidden columns and the cards in hand inside them', () => {
+    const groups = groupColumns([
+      task('q', { status: 'queued' }),
+      task('d1', { status: 'done' }),
+      task('d2', { status: 'done' }),
+      task('f', { status: 'failed' })
+    ])
+    expect(hiddenTally({ ...DEFAULT_FILTER, hidden: ['done'] }, groups)).toEqual({
+      count: 1,
+      cards: 2
+    })
+    expect(hiddenTally(DEFAULT_FILTER, groups)).toEqual({ count: 0, cards: 0 })
+    // A hidden column with no cards still counts as a hidden column.
+    expect(hiddenTally({ ...DEFAULT_FILTER, hidden: ['cancelled'] }, groups)).toEqual({
+      count: 1,
+      cards: 0
+    })
+  })
+
+  it('derives the grid track list from the visible count, never a literal', () => {
+    expect(gridTracks(6)).toBe('var(--lane) repeat(6, minmax(var(--col), 1fr))')
+    expect(gridTracks(5)).toBe('var(--lane) repeat(5, minmax(var(--col), 1fr))')
+    // All hidden: `repeat(0, ...)` is an invalid track list, so keep the lane.
+    expect(gridTracks(0)).toBe('var(--lane)')
+  })
+})
+
+describe('a wider contract does not cross the lanes', () => {
+  // The card's real worry: a 7th (or 8th) column arrives and the track count,
+  // the header order and the member assignment drift apart -- pushing a
+  // project's cells into a neighbour's column, silently. These pin order +
+  // membership against an injected list, so the invariant is checked without a
+  // browser (the real-window numbers live in the delivery notes).
+  const seven: Column[] = [
+    { key: 'queued', members: ['queued'] },
+    { key: 'running', members: ['running'] },
+    { key: 'verifying', members: ['verifying'] },
+    { key: 'blocked', members: ['blocked'] },
+    { key: 'done', members: ['done'] },
+    { key: 'cancelled', members: ['cancelled'] },
+    { key: 'abnormal', members: ['failed', 'timeout'] }
+  ]
+  const eight: Column[] = [
+    { key: 'queued', members: ['queued'] },
+    { key: 'running', members: ['running'] },
+    { key: 'verifying', members: ['verifying'] },
+    { key: 'blocked', members: ['blocked'] },
+    { key: 'parked', members: ['parked'] },
+    { key: 'done', members: ['done'] },
+    { key: 'cancelled', members: ['cancelled'] },
+    { key: 'abnormal', members: ['failed', 'timeout'] }
+  ]
+
+  /** One card per column, parked in that column's own status. */
+  function onePerColumn(columns: Column[]): Task[] {
+    return columns.map((column, i) => task(`t${i}`, { status: column.members[0] }))
+  }
+
+  it('keeps the visible-column order of a 7-column contract', () => {
+    const keys = visibleColumns(DEFAULT_FILTER, seven).map((column) => column.key)
+    expect(keys).toEqual(seven.map((column) => column.key))
+    // and the grid asks for exactly lane + 7 tracks
+    expect(gridTracks(keys.length)).toBe('var(--lane) repeat(7, minmax(var(--col), 1fr))')
+  })
+
+  it('assigns each card to its own column of a 7-column contract', () => {
+    const grouped = groupColumns(onePerColumn(seven), seven)
+    seven.forEach((column, i) => {
+      // exactly the card whose status lives in this column -- nothing bled over
+      expect(grouped[column.key].map((t) => t.id)).toEqual([`t${i}`])
+    })
+  })
+
+  it('hiding one of eight leaves the other seven in order, no track for it', () => {
+    const filter = { ...DEFAULT_FILTER, hidden: ['blocked'] }
+    const keys = visibleColumns(filter, eight).map((column) => column.key)
+    expect(keys).toEqual(['queued', 'running', 'verifying', 'parked', 'done', 'cancelled', 'abnormal'])
+    expect(gridTracks(keys.length)).toBe('var(--lane) repeat(7, minmax(var(--col), 1fr))')
+    // membership is unchanged by hiding: each card is still in its own column.
+    const grouped = groupColumns(onePerColumn(eight), eight)
+    eight.forEach((column, i) => {
+      expect(grouped[column.key].map((t) => t.id)).toEqual([`t${i}`])
+    })
   })
 })

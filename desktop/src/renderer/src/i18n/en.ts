@@ -22,7 +22,10 @@ export default {
     expand: '{n} more · expand',
     collapse: 'collapse',
     taken: 'taken {n} of {m}',
-    takeMore: 'Take more'
+    takeMore: 'Take more',
+    hideLane: 'Hide the “{name}” column',
+    hiddenLanes: '{n} column(s) hidden · {m} card(s) · show all',
+    showAllLanes: 'Show all columns'
   },
 
   live: { on: 'live', off: 'polling paused' },

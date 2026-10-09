@@ -19,15 +19,18 @@ import StatusMark from '../components/StatusMark.vue'
 import TaskCard from '../components/TaskCard.vue'
 import TaskDrawer from '../components/TaskDrawer.vue'
 import type { Task } from '../api/client'
-import { COLUMNS } from '../contract'
+import { ICONS } from '../icons'
 import {
   DONE_WINDOW,
   RANGES,
   boardQuery,
   doneWindow,
   filterBoard,
+  gridTracks,
   groupColumns,
+  hiddenTally,
   parseBoardFilter,
+  visibleColumns,
   visibleProjects,
   type BoardFilter,
   type RangeChoice
@@ -50,6 +53,20 @@ const filter = computed(() => parseBoardFilter(route.query))
  *  drops loses its row and its cards together, never one without the other. */
 const projects = computed(() => visibleProjects(store.projects, filter.value))
 
+/**
+ * The status columns (泳道) the board shows: every contract column the address
+ * bar has not hidden, in contract order. This is the ONE list the header row,
+ * every project's cells and the grid's track count all read, so a hidden column
+ * cannot leak cards into a neighbour -- header order and member assignment come
+ * from the same array by construction.
+ */
+const lanes = computed(() => visibleColumns(filter.value))
+
+/** The grid's track list: one lane track, then one per *visible* column. The
+ *  count is the visible count -- never a fixed six -- so hiding a column widens
+ *  the rest and no hidden column claims a track. */
+const gridStyle = computed(() => ({ gridTemplateColumns: gridTracks(lanes.value.length) }))
+
 /** The registry's ids, in order: what "all selected" means. `filter.projects`
  *  is null in that default state, so the multi-select model falls back to this
  *  full list rather than to an empty selection. */
@@ -71,6 +88,11 @@ const done = computed(() => doneWindow(columns.value.done ?? [], filter.value.ex
  *  fold-bar toggle (`?done=expanded`). Same pure function, not a second copy. */
 const cancelled = computed(() => doneWindow(columns.value.cancelled ?? [], filter.value.expanded))
 
+/** How many columns are hidden and how many cards (in hand) went with them --
+ *  the number the board row's hint reports. Read from the fetched, filtered
+ *  cards, never from a summary: we only ever claim what we actually hold. */
+const hidden = computed(() => hiddenTally(filter.value, columns.value))
+
 /** Header counts and cell contents, with the terminal columns already windowed. */
 const shown = computed<Record<string, Task[]>>(() => ({
   ...columns.value,
@@ -86,6 +108,14 @@ function countIn(columnKey: string): number {
 
 function tasksIn(projectId: string, columnKey: string): Task[] {
   return (shown.value[columnKey] ?? []).filter((task) => task.project === projectId)
+}
+
+/** The 1-based grid column a status lane occupies, or null when it is hidden.
+ *  The lane track is 1, so the first visible status column is 2. The fold bars
+ *  read this so they follow the visible set rather than a hard-coded 5 / 6. */
+function laneColumn(key: string): string | null {
+  const index = lanes.value.findIndex((column) => column.key === key)
+  return index < 0 ? null : String(index + 2)
 }
 
 function isExpanded(id: string): boolean {
@@ -124,6 +154,18 @@ function applyFilter(patch: Partial<BoardFilter>): void {
 
 function onRange(value: string): void {
   applyFilter({ range: value as RangeChoice })
+}
+
+/** Hide one status column. The switch lives in that column's own header, so
+ *  "which column" needs no menu -- it is the header you clicked. */
+function hideLane(key: string): void {
+  applyFilter({ hidden: [...filter.value.hidden, key] })
+}
+
+/** Bring every hidden column back. The board row carries this, so a column the
+ *  operator swept away is never stranded off-screen. */
+function showAllLanes(): void {
+  applyFilter({ hidden: [] })
 }
 
 /**
@@ -179,14 +221,31 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
         </el-select>
       </label>
 
-      <!-- Only when the fetch was cut off by the budget: say so, and offer to
-           pull an older window rather than leave the reader thinking this is
-           all there is. -->
-      <div v-if="store.capped" class="cap">
-        <span>{{ t('board.capped', { n: store.tasks.length }) }}</span>
-        <button type="button" class="grow" @click="store.growBudget()">
-          {{ t('board.continue') }}
+      <!-- The non-silent half of hiding: a column you swept off the board is
+           never silently gone. The hint says how many columns are hidden and
+           how many cards went with them, and one click brings them all back.
+           It sits in this row, apart from the per-column switches in the
+           headers -- it is the undo for the columns, not another filter. -->
+      <div class="rest">
+        <button
+          v-if="hidden.count > 0"
+          type="button"
+          class="hidden-lanes"
+          :title="t('board.showAllLanes')"
+          @click="showAllLanes"
+        >
+          {{ t('board.hiddenLanes', { n: hidden.count, m: hidden.cards }) }}
         </button>
+
+        <!-- Only when the fetch was cut off by the budget: say so, and offer to
+             pull an older window rather than leave the reader thinking this is
+             all there is. -->
+        <div v-if="store.capped" class="cap">
+          <span>{{ t('board.capped', { n: store.tasks.length }) }}</span>
+          <button type="button" class="grow" @click="store.growBudget()">
+            {{ t('board.continue') }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -200,10 +259,10 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
     </div>
 
     <div class="matrix">
-      <div class="grid">
+      <div class="grid" :style="gridStyle">
         <div class="hd corner">{{ t('rail.title') }}</div>
         <div
-          v-for="(column, index) in COLUMNS"
+          v-for="(column, index) in lanes"
           :key="column.key"
           class="hd"
           :class="{ zcol: index % 2 === 1 }"
@@ -213,7 +272,20 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
             <StatusMark :status="column.key" shape="dot" />
             {{ t(`status.${column.key}`) }}
           </span>
-          <span class="n">{{ countIn(column.key) }}</span>
+          <span class="rt">
+            <span class="n">{{ countIn(column.key) }}</span>
+            <!-- The lane switch: one per header, same shape on every one. It
+                 hides *this* column and lives in the header for that reason. -->
+            <button
+              type="button"
+              class="lane-hide"
+              :title="t('board.hideLane', { name: t(`status.${column.key}`) })"
+              :aria-label="t('board.hideLane', { name: t(`status.${column.key}`) })"
+              @click="hideLane(column.key)"
+            >
+              <span v-html="ICONS.eyeOff" />
+            </button>
+          </span>
         </div>
 
         <template v-for="project in projects" :key="project.id">
@@ -227,7 +299,7 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
             </div>
           </div>
           <div
-            v-for="(column, index) in COLUMNS"
+            v-for="(column, index) in lanes"
             :key="column.key"
             class="mcell"
             :class="{ zcol: index % 2 === 1 }"
@@ -249,36 +321,40 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
              the done column and under the cancelled column so each reads as the
              foot of its own lane. Both drive the board's single fold toggle. -->
         <button
-          v-if="done.hidden > 0"
+          v-if="laneColumn('done') && done.hidden > 0"
           type="button"
           class="fold"
+          :style="{ gridColumn: laneColumn('done') || undefined }"
           data-col="done"
           @click="applyFilter({ expanded: true })"
         >
           {{ t('board.expand', { n: done.hidden }) }}
         </button>
         <button
-          v-else-if="filter.expanded && done.total > DONE_WINDOW"
+          v-else-if="laneColumn('done') && filter.expanded && done.total > DONE_WINDOW"
           type="button"
           class="fold collapse"
+          :style="{ gridColumn: laneColumn('done') || undefined }"
           data-col="done"
           @click="applyFilter({ expanded: false })"
         >
           {{ t('board.collapse') }}
         </button>
         <button
-          v-if="cancelled.hidden > 0"
+          v-if="laneColumn('cancelled') && cancelled.hidden > 0"
           type="button"
           class="fold"
+          :style="{ gridColumn: laneColumn('cancelled') || undefined }"
           data-col="cancelled"
           @click="applyFilter({ expanded: true })"
         >
           {{ t('board.expand', { n: cancelled.hidden }) }}
         </button>
         <button
-          v-else-if="filter.expanded && cancelled.total > DONE_WINDOW"
+          v-else-if="laneColumn('cancelled') && filter.expanded && cancelled.total > DONE_WINDOW"
           type="button"
           class="fold collapse"
+          :style="{ gridColumn: laneColumn('cancelled') || undefined }"
           data-col="cancelled"
           @click="applyFilter({ expanded: false })"
         >
@@ -321,6 +397,31 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
 .boardbar .sel-projects {
   width: 240px;
 }
+/* The right-hand cluster: the hidden-column undo, then the capped warning.
+   Both are notes, not filters, so they ride at the far end of the row rather
+   than sitting inline with the two scoping controls. */
+.boardbar .rest {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+}
+/* The undo for hidden columns: not a filter, an escape hatch. It reads as a
+   button because clicking it brings every hidden column back. */
+.boardbar .hidden-lanes {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  color: var(--ink-2);
+  font: 11.5px/1 var(--sans);
+  cursor: pointer;
+}
+.boardbar .hidden-lanes:hover {
+  background: var(--raise);
+}
 /* The capped warning is a note, not an alarm: the amber of "incomplete", not
    the red of "failed". It carries its own "继续取回" so the reader can pull the
    older window rather than only being told it is missing. */
@@ -328,7 +429,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  margin-left: auto;
   font: 11.5px/1.2 var(--sans);
   color: var(--c-timeout);
 }
@@ -379,12 +479,13 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   min-width: 0;
   padding: 10px 0 24px;
 }
-/* The column count here must equal COLUMNS.length -- if it does not, each
-   project's lane gets pushed into the next column and the rows interleave,
-   silently. */
+/* The column count is the *visible* column count -- `grid-template-columns`
+   is written from `lanes` (see `gridTracks`), so it rises and falls with the
+   show/hide switches. This must never be re-pinned to a literal: a track count
+   that disagrees with the header/cell loop pushes each project's lane into the
+   next column and the rows interleave, silently. 列数 = 可见列数. */
 .grid {
   display: grid;
-  grid-template-columns: var(--lane) repeat(6, minmax(var(--col), 1fr));
   align-content: start;
   min-height: 100%;
   padding: 0 10px;
@@ -408,9 +509,35 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   align-items: center;
   gap: 7px;
 }
+.hd .rt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .hd .n {
   font: 11px/1 var(--mono);
   color: var(--ink-4);
+}
+/* The per-column hide switch. Same shape in every header, so the row reads as
+   one control repeated, not a menu. It is the header's own column it hides. */
+.hd .lane-hide {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+.hd .lane-hide:hover {
+  border-color: var(--rule);
+  background: var(--panel);
+  color: var(--ink-2);
 }
 /* The corner is the lane column's own header, so it is sticky on BOTH axes:
    it rides with the header row vertically and with the lane column
@@ -479,11 +606,11 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   color: var(--ink-4);
   opacity: 0.4;
 }
-/* The fold bars sit in their own trailing row: the done lane is grid column 5
-   and the cancelled lane is 6 (the lane is 1, then the six status columns
-   2..7). Both drive the same `expanded` flag. */
+/* The fold bars sit in their own trailing row, pinned under their own lane.
+   Their grid column is written from the visible set (see `laneColumn`) rather
+   than a literal, so hiding a column ahead of them slides them along with the
+   column they belong to. Both drive the same `expanded` flag. */
 .fold {
-  grid-column: 5;
   margin: 0 6px;
   padding: 9px 10px;
   text-align: left;
@@ -493,9 +620,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   border: 1px dashed var(--rule);
   border-radius: var(--r-card);
   cursor: pointer;
-}
-.fold[data-col='cancelled'] {
-  grid-column: 6;
 }
 .fold:hover {
   background: var(--raise);

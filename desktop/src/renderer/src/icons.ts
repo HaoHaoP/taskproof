@@ -22,7 +22,11 @@ export const ICONS = {
   pencil:
     '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M11.2 2.5l2.3 2.3-8.1 8.1-3 .7.7-3 8.1-8.1z"/><path d="M9.7 4l2.3 2.3"/></svg>',
   trash:
-    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 4.4h10.8"/><path d="M6.2 4.4V2.9h3.6v1.5"/><path d="M4.1 4.4l.7 8.1c0 .5.4.9.9.9h4.6c.5 0 .9-.4.9-.9l.7-8.1"/></svg>'
+    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 4.4h10.8"/><path d="M6.2 4.4V2.9h3.6v1.5"/><path d="M4.1 4.4l.7 8.1c0 .5.4.9.9.9h4.6c.5 0 .9-.4.9-.9l.7-8.1"/></svg>',
+  /* A struck-through eye: the column header's hide switch. The eye sees the
+     lane; the slash is what clicking it does. */
+  eyeOff:
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6.3 3.5c.5-.1 1.1-.2 1.7-.2 3 0 5.2 2.7 5.2 4.7 0 .7-.2 1.4-.6 2.1"/><path d="M3.9 4.6C2.5 5.7 1.8 7.1 1.8 8c0 2 2.2 4.7 5.2 4.7 1 0 1.9-.3 2.7-.8"/><path d="M2.4 2.4l11.2 11.2"/><path d="M6.5 6.6a2 2 0 0 0 2.8 2.8"/></svg>'
 } as const
 
 export type IconName = keyof typeof ICONS

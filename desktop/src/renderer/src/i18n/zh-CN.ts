@@ -15,7 +15,10 @@ export default {
     expand: '还有 {n} 张 · 展开',
     collapse: '收起',
     taken: '已取回 {n} / 共 {m}',
-    takeMore: '取更多'
+    takeMore: '取更多',
+    hideLane: '隐藏「{name}」列',
+    hiddenLanes: '已隐藏 {n} 列（其中 {m} 张卡）',
+    showAllLanes: '全部显示'
   },
 
   live: { on: '实时', off: '已暂停轮询' },

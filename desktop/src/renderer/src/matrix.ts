@@ -15,7 +15,7 @@
  *    "older" means.
  */
 import type { Project, Task } from './api/client'
-import { COLUMNS, columnFor } from './contract'
+import { COLUMNS, type Column } from './contract'
 
 /** How many cards a windowed terminal column (done, cancelled) shows before the
  *  fold bar. v1 constant, not a setting: the fold bar exists precisely so this
@@ -34,6 +34,9 @@ export const DEFAULT_RANGE: RangeChoice = 'all'
 /** The one value `?done=` accepts; anything else (or absent) means collapsed. */
 export const DONE_EXPANDED = 'expanded'
 
+/** The canonical key for the hidden status columns. Absent means "none hidden". */
+export const HIDE_KEY = 'hide'
+
 export interface BoardFilter {
   range: RangeChoice
   /**
@@ -46,12 +49,22 @@ export interface BoardFilter {
   projects: string[] | null
   /** Whether the finished column has been unfolded past its window. */
   expanded: boolean
+  /**
+   * The hidden status columns (泳道), by column key. `[]` is the default and
+   * means every column is shown -- hiding is *explicit*, so a column the
+   * contract grows in a later release starts visible rather than disappearing
+   * the moment nobody names it. One set drives the header row, every project's
+   * cells and the grid's track count, so a hidden column can never leak its
+   * cards into a neighbour.
+   */
+  hidden: string[]
 }
 
 export const DEFAULT_FILTER: BoardFilter = {
   range: DEFAULT_RANGE,
   projects: null,
-  expanded: false
+  expanded: false,
+  hidden: []
 }
 
 export function isRange(value: unknown): value is RangeChoice {
@@ -110,12 +123,38 @@ function readProjects(query: QueryLike): string[] | null {
   return single ? [single] : null
 }
 
+/**
+ * The hidden status columns, from the one canonical `?hide=` key. The comma is
+ * the separator, the same documented shape as `?projects=`. An absent key means
+ * "nothing hidden" -- the default -- so a stale or hand-edited URL still shows
+ * the whole board rather than silently swallowing a column. A key the contract
+ * does not declare is dropped: an old bookmark must not hide a column this
+ * build now uses for something else. Duplicates collapse; order is preserved
+ * here and normalised to contract order on the way back out.
+ */
+function readHidden(query: QueryLike): string[] {
+  const raw = readParam(query, HIDE_KEY)
+  if (raw === null) return []
+  const known = new Set(COLUMNS.map((column) => column.key))
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const piece of raw.split(',')) {
+    const key = piece.trim()
+    if (key && known.has(key) && !seen.has(key)) {
+      seen.add(key)
+      out.push(key)
+    }
+  }
+  return out
+}
+
 export function parseBoardFilter(query: QueryLike): BoardFilter {
   const rawRange = readParam(query, 'range')
   return {
     range: isRange(rawRange) ? rawRange : DEFAULT_RANGE,
     projects: readProjects(query),
-    expanded: readParam(query, 'done') === DONE_EXPANDED
+    expanded: readParam(query, 'done') === DONE_EXPANDED,
+    hidden: readHidden(query)
   }
 }
 
@@ -129,6 +168,14 @@ export function boardQuery(filter: BoardFilter): string {
   if (filter.range !== DEFAULT_RANGE) params.set('range', filter.range)
   if (filter.projects !== null) params.set('projects', filter.projects.join(','))
   if (filter.expanded) params.set('done', DONE_EXPANDED)
+  if (filter.hidden.length) {
+    // Contract order and no duplicates, so the address bar reads the same no
+    // matter which order the switches were flipped. Keys the contract does not
+    // declare are dropped on the way out, matching `readHidden`.
+    const hidden = new Set(filter.hidden)
+    const keys = COLUMNS.filter((column) => hidden.has(column.key)).map((column) => column.key)
+    if (keys.length) params.set(HIDE_KEY, keys.join(','))
+  }
   // URLSearchParams percent-encodes the comma; a plain comma is the documented
   // separator and keeps the address bar readable.
   return params.toString().replace(/%2C/g, ',')
@@ -200,12 +247,27 @@ export function sortColumn(key: string, tasks: Task[]): Task[] {
   return copy
 }
 
-/** Group tasks into their columns and order each one. */
-export function groupColumns(tasks: Task[]): Record<string, Task[]> {
+/**
+ * Group tasks into their columns and order each one.
+ *
+ * The column list is a parameter so a test can inject a wider contract (a
+ * seven- or eight-column board) and prove the header order and the member
+ * assignment still agree -- the "never cross a lane" invariant, checked without
+ * a browser. It defaults to the real `COLUMNS`, so production reads the same
+ * list the grid draws.
+ *
+ * A status no column claims lands in the last column, exactly like
+ * `columnFor`, so an unknown word is never dropped.
+ */
+export function groupColumns(tasks: Task[], columns: Column[] = COLUMNS): Record<string, Task[]> {
   const grouped: Record<string, Task[]> = {}
-  for (const column of COLUMNS) grouped[column.key] = []
-  for (const task of tasks) grouped[columnFor(task.status).key].push(task)
-  for (const column of COLUMNS) grouped[column.key] = sortColumn(column.key, grouped[column.key])
+  for (const column of columns) grouped[column.key] = []
+  const fallback = columns[columns.length - 1]
+  for (const task of tasks) {
+    const column = columns.find((entry) => entry.members.includes(task.status)) ?? fallback
+    if (column) grouped[column.key].push(task)
+  }
+  for (const column of columns) grouped[column.key] = sortColumn(column.key, grouped[column.key])
   return grouped
 }
 
@@ -277,6 +339,57 @@ export function visibleProjects(projects: Project[], filter: BoardFilter): Proje
   if (filter.projects === null) return [...projects]
   const chosen = new Set(filter.projects)
   return projects.filter((project) => chosen.has(project.id))
+}
+
+/**
+ * The status columns (泳道) the board actually draws: every contract column the
+ * filter has not hidden, in contract order. ONE list feeds the header row,
+ * every project's cells and the grid's track count -- that is the whole
+ * guarantee that a hidden column cannot show up in a neighbour. The list is
+ * injectable so a wider contract can be exercised in a test.
+ */
+export function visibleColumns(filter: BoardFilter, columns: Column[] = COLUMNS): Column[] {
+  const hidden = new Set(filter.hidden)
+  return columns.filter((column) => !hidden.has(column.key))
+}
+
+/** What the "已隐藏 N 列" hint reports: how many columns are gone and how many
+ *  cards (in hand, after filtering) went with them. Counted from the fetched
+ *  cards, never from a summary that would pretend to know rows we have not
+ *  received. */
+export interface HiddenTally {
+  count: number
+  cards: number
+}
+
+export function hiddenTally(
+  filter: BoardFilter,
+  groups: Record<string, Task[]>,
+  columns: Column[] = COLUMNS
+): HiddenTally {
+  const hidden = new Set(filter.hidden)
+  let count = 0
+  let cards = 0
+  for (const column of columns) {
+    if (!hidden.has(column.key)) continue
+    count += 1
+    cards += (groups[column.key] ?? []).length
+  }
+  return { count, cards }
+}
+
+/**
+ * The grid's track list: one lane track (the project-name column) followed by
+ * one track per *visible* status column. The count is the visible count -- not
+ * a fixed six -- so hiding a column widens the rest instead of leaving a gap,
+ * and a hidden column claims no track at all.
+ *
+ * `repeat(0, ...)` is an invalid track list, so an all-hidden board (the
+ * degenerate state) keeps only the lane track rather than blanking the grid.
+ */
+export function gridTracks(visible: number): string {
+  if (visible <= 0) return 'var(--lane)'
+  return `var(--lane) repeat(${visible}, minmax(var(--col), 1fr))`
 }
 
 /**
