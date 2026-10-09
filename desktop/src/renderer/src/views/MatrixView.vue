@@ -110,12 +110,18 @@ function tasksIn(projectId: string, columnKey: string): Task[] {
   return (shown.value[columnKey] ?? []).filter((task) => task.project === projectId)
 }
 
-/** The 1-based grid column a status lane occupies, or null when it is hidden.
- *  The lane track is 1, so the first visible status column is 2. The fold bars
- *  read this so they follow the visible set rather than a hard-coded 5 / 6. */
-function laneColumn(key: string): string | null {
-  const index = lanes.value.findIndex((column) => column.key === key)
-  return index < 0 ? null : String(index + 2)
+/** The fold control a terminal header draws *inside itself*, read off the one
+ *  `?done=expanded` window the board has always used. `null` -- no bar, and so
+ *  no reserved space -- whenever the column hides nothing and has nothing to
+ *  collapse; the header's own band then closes up with no seam. */
+type FoldControl = { mode: 'expand' | 'collapse'; n: number } | null
+
+function foldFor(key: string): FoldControl {
+  const win = key === 'done' ? done.value : key === 'cancelled' ? cancelled.value : null
+  if (!win) return null
+  if (win.hidden > 0) return { mode: 'expand', n: win.hidden }
+  if (filter.value.expanded && win.total > DONE_WINDOW) return { mode: 'collapse', n: 0 }
+  return null
 }
 
 function isExpanded(id: string): boolean {
@@ -286,6 +292,31 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
               <span v-html="ICONS.eyeOff" />
             </button>
           </span>
+
+          <!-- The terminal fold bar, *inside* the header so it rides the
+               sticky band: it sits directly under this column's label, above
+               the first card, and is part of the opaque pinned header for
+               hit-testing. Only drawn when this column hides cards (or can be
+               collapsed); absent means no bar and no gap. It drives the same
+               single `expanded` flag as before -- no second toggle. -->
+          <button
+            v-if="foldFor(column.key)?.mode === 'expand'"
+            type="button"
+            class="fold"
+            :data-col="column.key"
+            @click="applyFilter({ expanded: true })"
+          >
+            {{ t('board.expand', { n: foldFor(column.key)?.n ?? 0 }) }}
+          </button>
+          <button
+            v-else-if="foldFor(column.key)?.mode === 'collapse'"
+            type="button"
+            class="fold collapse"
+            :data-col="column.key"
+            @click="applyFilter({ expanded: false })"
+          >
+            {{ t('board.collapse') }}
+          </button>
         </div>
 
         <template v-for="project in projects" :key="project.id">
@@ -316,50 +347,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
             <div v-if="!tasksIn(project.id, column.key).length" class="dash">—</div>
           </div>
         </template>
-
-        <!-- The terminal columns' fold bars: one trailing grid row, pinned under
-             the done column and under the cancelled column so each reads as the
-             foot of its own lane. Both drive the board's single fold toggle. -->
-        <button
-          v-if="laneColumn('done') && done.hidden > 0"
-          type="button"
-          class="fold"
-          :style="{ gridColumn: laneColumn('done') || undefined }"
-          data-col="done"
-          @click="applyFilter({ expanded: true })"
-        >
-          {{ t('board.expand', { n: done.hidden }) }}
-        </button>
-        <button
-          v-else-if="laneColumn('done') && filter.expanded && done.total > DONE_WINDOW"
-          type="button"
-          class="fold collapse"
-          :style="{ gridColumn: laneColumn('done') || undefined }"
-          data-col="done"
-          @click="applyFilter({ expanded: false })"
-        >
-          {{ t('board.collapse') }}
-        </button>
-        <button
-          v-if="laneColumn('cancelled') && cancelled.hidden > 0"
-          type="button"
-          class="fold"
-          :style="{ gridColumn: laneColumn('cancelled') || undefined }"
-          data-col="cancelled"
-          @click="applyFilter({ expanded: true })"
-        >
-          {{ t('board.expand', { n: cancelled.hidden }) }}
-        </button>
-        <button
-          v-else-if="laneColumn('cancelled') && filter.expanded && cancelled.total > DONE_WINDOW"
-          type="button"
-          class="fold collapse"
-          :style="{ gridColumn: laneColumn('cancelled') || undefined }"
-          data-col="cancelled"
-          @click="applyFilter({ expanded: false })"
-        >
-          {{ t('board.collapse') }}
-        </button>
       </div>
     </div>
     <TaskDrawer />
@@ -477,7 +464,11 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   flex: 1;
   overflow: auto;
   min-width: 0;
-  padding: 10px 0 24px;
+  /* No top padding: a scroll container's padding-top is not covered by a
+     `top: 0` sticky header, so cards used to scroll through that strip. The
+     10px breathing room now lives in `.hd`'s own top padding, under its
+     opaque background. */
+  padding: 0 0 24px;
 }
 /* The column count is the *visible* column count -- `grid-template-columns`
    is written from `lanes` (see `gridTracks`), so it rises and falls with the
@@ -495,13 +486,32 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   top: 0;
   z-index: 3;
   display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px 9px;
+  padding: 18px 10px 9px;
   font: 500 12px/1 var(--sans);
   color: var(--ink-2);
   background: var(--bg);
+}
+/* The pinned band has to be opaque all the way down to the first card, not
+   just to the header's own box: a sliver of card scrolling up between the
+   header's lower edge and the first card reads as the header being
+   see-through (the TP-card40 穿透). `::after` extends the band across that
+   seam and -- because a pseudo-element is hit-tested as the box that owns it
+   -- every pixel of the seam answers `.hd` (or the `.fold` it carries) rather
+   than a card. `background: inherit` keeps the zebra columns' tint, and the
+   band's bottom rule moves here so the seam reads as part of the header. */
+.hd::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 10px;
+  background: inherit;
   border-bottom: 1px solid var(--rule-2);
 }
 .hd .lb {
@@ -513,6 +523,20 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+/* The band must answer as the header itself: the label and the tallies are
+   decoration, so they do not intercept a hit -- only the hide switch (the one
+   control up here) does. This is what makes `elementFromPoint` on any point of
+   the band return `.hd`/`.fold` and never a card that scrolled underneath. */
+.hd .lb,
+.hd .rt {
+  pointer-events: none;
+}
+.hd .rt .lane-hide {
+  pointer-events: auto;
+}
+.hd .rt .lane-hide * {
+  pointer-events: none;
 }
 .hd .n {
   font: 11px/1 var(--mono);
@@ -606,12 +630,15 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   color: var(--ink-4);
   opacity: 0.4;
 }
-/* The fold bars sit in their own trailing row, pinned under their own lane.
-   Their grid column is written from the visible set (see `laneColumn`) rather
-   than a literal, so hiding a column ahead of them slides them along with the
-   column they belong to. Both drive the same `expanded` flag. */
+/* The fold bars ride *inside* their own column's header, so the sticky band
+   carries them: they sit directly under that column's label and stay pinned
+   there as the grid scrolls. `flex: 1 0 100%` forces each onto its own
+   full-width line underneath the label row; a column that hides nothing draws
+   no bar at all, so it leaves no gap. Both columns drive the ONE
+   `expanded` flag -- there is no second toggle. */
 .fold {
-  margin: 0 6px;
+  flex: 1 0 100%;
+  margin: 0;
   padding: 9px 10px;
   text-align: left;
   font: 11.5px/1 var(--sans);

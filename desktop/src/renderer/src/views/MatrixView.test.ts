@@ -170,12 +170,48 @@ describe('matrix grid columns', () => {
     expect(view).toMatch(/@click="hideLane\(column\.key\)"/)
   })
 
-  it('pins the fold bars under their own visible lane, not a literal', () => {
-    // done / cancelled used to be grid columns 5 / 6 by arithmetic. Now the
-    // column is written from `laneColumn`, so hiding a lane ahead of them
-    // slides each fold bar along with the lane it belongs to.
-    expect(view).toMatch(/:style="\{ gridColumn: laneColumn\('done'\) \|\| undefined \}"/)
-    expect(view).toMatch(/:style="\{ gridColumn: laneColumn\('cancelled'\) \|\| undefined \}"/)
+  it('rides each fold bar inside its own column header, not a trailing row', () => {
+    // The bar used to be a trailing grid row with a hand-written `grid-column`.
+    // It now lives in the header it belongs to, so the sticky band carries it
+    // and no `grid-column` arithmetic is needed. Both terminal columns still
+    // drive the ONE `?done=expanded` toggle -- one flag, no second state.
+    expect(view).not.toMatch(/laneColumn/)
+    expect(view).not.toMatch(/gridColumn:/)
+    expect(view).toMatch(/v-if="foldFor\(column\.key\)\?\.mode === 'expand'"/)
+    expect(view).toMatch(/v-else-if="foldFor\(column\.key\)\?\.mode === 'collapse'"/)
+    expect(view).toMatch(/@click="applyFilter\(\{ expanded: true \}\)"/)
+    expect(view).toMatch(/@click="applyFilter\(\{ expanded: false \}\)"/)
+    expect(view).toMatch(/:data-col="column\.key"/)
     expect(rule('.fold')['grid-column']).toBeUndefined()
+  })
+
+  it('covers the seam under each header so nothing scrolls through it', () => {
+    // A `top: 0` sticky header only covers its own box. The strip between its
+    // lower edge and the first card used to show scrolling cards through it
+    // (TP-card40's 穿透). The header now paints an opaque `::after` across
+    // that seam, and the matrix's own top padding -- which a sticky header
+    // does NOT cover -- is gone so the band pins flush at the scrollport top.
+    const matrix = rule('.matrix')
+    expect(matrix['padding-top']).toBeUndefined()
+    expect(matrix['padding']).toMatch(/^0\b/)
+
+    const hd = rule('.hd')
+    expect(hd['position']).toBe('sticky')
+    expect(hd['top']).toBe('0')
+    // The 10px breathing room above the labels moved into the header itself,
+    // under its opaque background.
+    expect(Number.parseFloat(hd['padding'] ?? hd['padding-top'] ?? '0')).toBeGreaterThan(0)
+
+    const seam = rule('.hd::after')
+    expect(seam['position']).toBe('absolute')
+    expect(seam['top']).toBe('100%')
+    expect(Number.parseFloat(seam['height'] ?? '0')).toBeGreaterThan(0)
+    expect(seam['background']).toBe('inherit')
+
+    // The label/tally decoration must not intercept a hit, so a probe of the
+    // band lands on `.hd` (or `.fold`), never the elements painting the seam.
+    // The one control up here stays clickable.
+    expect(rule('.hd .lb, .hd .rt')['pointer-events']).toBe('none')
+    expect(rule('.hd .rt .lane-hide')['pointer-events']).toBe('auto')
   })
 })
