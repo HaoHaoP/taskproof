@@ -5,15 +5,17 @@
  *  - queued: dispatch now (the manual entry that jumps one card out of its
  *    wave) + delete (disabled -- delete is terminal-only),
  *  - running / verifying: stop (delete disabled -- stop it first),
- *  - terminal: run again + delete.
+ *  - blocked: accept (the human's one-word release of a boundary breach) first,
+ *    then the usual terminal pair -- run again + delete,
+ *  - every other terminal: run again + delete.
  *
  * Keeping this a pure function means "which items does this card offer" is
  * testable without a DOM, and the SFC only maps it to markup.
  */
 import { isTerminal } from './contract'
 
-/** The four console actions a card can offer. */
-export type TaskAction = 'advance' | 'stop' | 'delete' | 'rerun'
+/** The console actions a card can offer. */
+export type TaskAction = 'advance' | 'stop' | 'accept' | 'delete' | 'rerun'
 
 export interface TaskMenuItem {
   action: TaskAction
@@ -38,6 +40,16 @@ export function menuFor(status: string): TaskMenuItem[] {
     return [
       { action: 'stop', label: 'task.stop' },
       { action: 'delete', label: 'task.delete', danger: true, disabled: true }
+    ]
+  }
+  if (status === 'blocked') {
+    // A blocked card is terminal, but its signature action is `accept` -- the
+    // human's release of the boundary breach (green acceptance -> done, red ->
+    // failed). Run again and delete still apply, as on any terminal card.
+    return [
+      { action: 'accept', label: 'task.accept' },
+      { action: 'rerun', label: 'task.rerun' },
+      { action: 'delete', label: 'task.delete', danger: true }
     ]
   }
   if (isTerminal(status)) {

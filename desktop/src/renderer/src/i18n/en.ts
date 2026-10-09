@@ -43,9 +43,14 @@ export default {
     label: 'Status'
   },
 
+  /* Column-head copy. Most columns reuse the status word; `blocked` is the one
+     exception -- it names the operator's job ("needs review"), not the status
+     word itself, which stays Blocked. Two purposes, two keys. */
+  column: { blocked: 'Needs review' },
+
   tally: { tasks: 'tasks', flying: 'in progress', failed: 'failed' },
 
-  card: { attempt: 'try', files: 'files' },
+  card: { attempt: 'try', files: 'files', acceptancePassed: 'Acceptance passed' },
 
   /* The console's four actions plus the dispatch form and the queue. They live
      flat under `task.*` (singular) so the card menu, the store's failure copy
@@ -54,6 +59,7 @@ export default {
     new: 'New task',
     menu: 'Actions',
     advance: 'Dispatch now',
+    accept: 'Accept',
     stop: 'Stop',
     delete: 'Delete',
     rerun: 'Run again',
@@ -89,6 +95,11 @@ export default {
       body: 'The workspace will not be touched. The task is recorded as cancelled. This cannot be undone.',
       confirm: 'Stop'
     },
+    confirmAccept: {
+      title: 'Accept this card?',
+      body: 'The boundary breach is confirmed as passing, and the task lands on Done or Not passing by its acceptance result. This cannot be undone.',
+      confirm: 'Accept'
+    },
     confirmDelete: {
       title: 'Delete this task?',
       body: 'Deletes the task record and its event stream. This cannot be undone.',
@@ -109,7 +120,8 @@ export default {
     },
     notice: {
       group: "This project's lane is busy — the card stays queued. Retry later.",
-      cap: 'Global concurrency is full — the card stays queued. Retry later.'
+      cap: 'Global concurrency is full — the card stays queued. Retry later.',
+      stale: 'This card is no longer waiting for review; the board has been refreshed.'
     }
   },
 

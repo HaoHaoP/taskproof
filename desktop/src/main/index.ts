@@ -644,6 +644,7 @@ function registerIpc(): void {
   )
   ipcMain.handle('tp:tasks:advance', (_event, id: string) => tasks().advance(String(id)))
   ipcMain.handle('tp:tasks:cancel', (_event, id: string) => tasks().cancel(String(id)))
+  ipcMain.handle('tp:tasks:accept', (_event, id: string) => tasks().accept(String(id)))
   ipcMain.handle('tp:tasks:remove', (_event, id: string) => tasks().remove(String(id)))
   ipcMain.handle('tp:tasks:patch-queue-seq', (_event, id: string, seq: number | null) =>
     tasks().patchQueueSeq(String(id), seq)

@@ -22,6 +22,7 @@ import { useI18n } from 'vue-i18n'
 import StatusMark from './StatusMark.vue'
 import type { Task } from '../api/client'
 import { menuFor, waveSlot, type TaskAction } from '../taskmenu'
+import { acceptancePassed } from '../card'
 import { duration } from '../format'
 
 const props = defineProps<{ task: Task; expanded?: boolean }>()
@@ -42,6 +43,11 @@ const stamp = computed(() => {
 
 const menu = computed(() => menuFor(props.task.status))
 const queued = computed(() => props.task.status === 'queued')
+
+/** The "acceptance passed" badge: shown on a blocked card whose acceptance went
+ *  green (see `acceptancePassed`). It answers "the result is fine, only the
+ *  boundary was crossed" without ever claiming a pass that was not earned. */
+const passBadge = computed(() => acceptancePassed(props.task))
 
 /** The wave chip's palette slot, keyed off the card's own `queue_seq` (see
  *  `waveSlot`). Same seq, same colour; the colour does not depend on which
@@ -64,6 +70,7 @@ const waveClass = computed(() => `w${waveSlot(props.task.queue_seq)}`)
       <StatusMark :status="task.status" />
       <span class="cid">{{ task.id }}</span>
       <span class="tail">
+        <span v-if="passBadge" class="stamp good">{{ t('card.acceptancePassed') }}</span>
         <span v-if="stamp" class="stamp" :class="stamp.cls">{{ stamp.text }}</span>
         <el-dropdown trigger="click" placement="bottom-end" @command="(a: TaskAction) => emit('action', a)">
           <button

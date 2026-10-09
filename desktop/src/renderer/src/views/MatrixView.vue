@@ -35,6 +35,7 @@ import {
   type BoardFilter,
   type RangeChoice
 } from '../matrix'
+import { columnLabelKey } from '../contract'
 import { useBoardStore } from '../stores/board'
 import { useTasksStore } from '../stores/tasks'
 import type { TaskAction } from '../taskmenu'
@@ -132,12 +133,14 @@ function openTask(id: string): void {
   void router.push(`/matrix/${id}`)
 }
 
-/** The card menu's four actions. Advance / rerun go straight to the store;
- *  stop and delete raise their confirmation sheets first. A write that landed
- *  re-reads the board. */
+/** The card menu's actions. Advance / rerun go straight to the store; stop,
+ *  accept and delete raise their confirmation sheets first (a write that landed
+ *  re-reads the board). `accept` is blocked-only and cannot be undone, so it
+ *  goes through the same confirm step as stop / delete. */
 function onAction(task: Task, action: TaskAction): void {
   if (action === 'advance') void advance(task)
   else if (action === 'stop') tasks.openStop(task)
+  else if (action === 'accept') tasks.openAccept(task)
   else if (action === 'delete') tasks.openDelete(task)
   else if (action === 'rerun') void tasks.openRerun(task)
 }
@@ -276,7 +279,7 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
         >
           <span class="lb">
             <StatusMark :status="column.key" shape="dot" />
-            {{ t(`status.${column.key}`) }}
+            {{ t(columnLabelKey(column.key)) }}
           </span>
           <span class="rt">
             <span class="n">{{ countIn(column.key) }}</span>
@@ -285,8 +288,8 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
             <button
               type="button"
               class="lane-hide"
-              :title="t('board.hideLane', { name: t(`status.${column.key}`) })"
-              :aria-label="t('board.hideLane', { name: t(`status.${column.key}`) })"
+              :title="t('board.hideLane', { name: t(columnLabelKey(column.key)) })"
+              :aria-label="t('board.hideLane', { name: t(columnLabelKey(column.key)) })"
               @click="hideLane(column.key)"
             >
               <span v-html="ICONS.eyeOff" />

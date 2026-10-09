@@ -27,6 +27,7 @@ export interface TasksClient {
   create(payload: TaskCreatePayload): Promise<TaskResult<{ task: TaskRow }>>
   advance(id: string): Promise<TaskResult<{ task: TaskRow }>>
   cancel(id: string): Promise<TaskResult<{ task: TaskRow }>>
+  accept(id: string): Promise<TaskResult<{ task: TaskRow }>>
   remove(id: string): Promise<TaskResult<{ removed: string }>>
   patchQueueSeq(id: string, queueSeq: number | null): Promise<TaskResult<{ task: TaskRow }>>
 }
@@ -131,6 +132,7 @@ export function createTasksClient(options: TasksClientOptions): TasksClient {
     create: (payload) => request<{ task: TaskRow }>('/api/tasks', 'POST', payload),
     advance: (id) => request<{ task: TaskRow }>(`/api/tasks/${segment(id)}/advance`, 'POST'),
     cancel: (id) => request<{ task: TaskRow }>(`/api/tasks/${segment(id)}/cancel`, 'POST'),
+    accept: (id) => request<{ task: TaskRow }>(`/api/tasks/${segment(id)}/accept`, 'POST'),
     remove: (id) => request<{ removed: string }>(`/api/tasks/${segment(id)}`, 'DELETE'),
     patchQueueSeq: (id, queueSeq) =>
       request<{ task: TaskRow }>(`/api/tasks/${segment(id)}`, 'PATCH', { queue_seq: queueSeq })

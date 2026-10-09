@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { i18n } from '../i18n'
 import { useBoardStore } from './board'
-import { isDeletable, useTasksStore } from './tasks'
+import { isAcceptable, isDeletable, useTasksStore } from './tasks'
 import type { Project, Task } from '../api/client'
 import type { TaskResult, TaskWriteError } from '../../../preload/types'
 
@@ -237,6 +237,83 @@ describe('tasks store — stop', () => {
     expect(await store.confirmStop()).toBe(true)
     expect(cancel).toHaveBeenCalledWith('t1')
     expect(store.stopOpen).toBe(false)
+  })
+})
+
+describe('tasks store — accept (release a blocked card)', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+  afterEach(() => vi.restoreAllMocks())
+
+  it('refuses to open the accept confirm for a card that is not blocked', () => {
+    const accept = vi.fn(async (_id: string) => ok({ task: { id: 't1' } }))
+    install({ accept })
+
+    const store = useTasksStore()
+    for (const status of ['queued', 'running', 'verifying', 'done', 'failed', 'timeout', 'cancelled']) {
+      store.openAccept(task({ status }))
+      expect(store.acceptOpen).toBe(false)
+    }
+    expect(store.target).toBeNull()
+    expect(accept).not.toHaveBeenCalled()
+  })
+
+  it('confirms the accept through a dialog before calling the API', async () => {
+    const accept = vi.fn(async (_id: string) => ok({ task: { id: 't1', status: 'done' } }))
+    install({ accept })
+
+    const store = useTasksStore()
+    store.openAccept(task({ status: 'blocked', verify_exit: 0 }))
+    expect(store.acceptOpen).toBe(true)
+    expect(accept).not.toHaveBeenCalled()
+
+    expect(await store.confirmAccept()).toBe(true)
+    expect(accept).toHaveBeenCalledWith('t1')
+    expect(store.acceptOpen).toBe(false)
+    expect(store.error).toBeNull()
+    expect(store.notice).toBeNull()
+  })
+
+  it('treats a 409 (no longer blocked) as a notice + refresh, not an error', async () => {
+    // The card was released elsewhere; instead of a scary error we say so and
+    // return true so the caller refreshes -- no stale, still-clickable card.
+    const accept = vi.fn(async (_id: string) =>
+      fail({ kind: 'state', status: 409, message: 'task is not blocked' })
+    )
+    install({ accept })
+
+    const store = useTasksStore()
+    store.openAccept(task({ status: 'blocked' }))
+    const result = await store.confirmAccept()
+
+    expect(result).toBe(true)
+    expect(store.acceptOpen).toBe(false)
+    expect(store.error).toBeNull()
+    expect(store.notice).toBe(copy('task.notice.stale'))
+  })
+
+  it('surfaces a 404 / forbidden / network as a hard error, not silence', async () => {
+    for (const error of [
+      { kind: 'notfound', status: 404, message: 'no such task' },
+      { kind: 'forbidden', status: 403, message: 'bad token' },
+      { kind: 'network', status: 0, message: 'ECONNREFUSED' }
+    ] as const) {
+      setActivePinia(createPinia())
+      const accept = vi.fn(async (_id: string) => fail({ ...error }))
+      install({ accept })
+
+      const store = useTasksStore()
+      store.openAccept(task({ status: 'blocked' }))
+      const result = await store.confirmAccept()
+
+      expect(result).toBe(false)
+      expect(store.acceptOpen).toBe(true)
+      expect(store.error).toBe(copy(`task.error.${error.kind}`, error.message))
+    }
+  })
+
+  it('agrees with the exported blocked-only gate', () => {
+    expect(isAcceptable({ status: 'blocked' })).toBe(true)
+    expect(isAcceptable({ status: 'done' })).toBe(false)
   })
 })
 

@@ -4,6 +4,7 @@ import {
   COLUMNS,
   STATUS_IDS,
   columnFor,
+  columnLabelKey,
   isKnownStatus,
   metaFor,
   unknownStatuses
@@ -39,8 +40,12 @@ describe('the status contract', () => {
   })
 
   it('collects exactly the abnormal terminal states in the last column', () => {
+    // `abnormal` is the last column, and it holds only the failure-like
+    // verdicts -- never `blocked`, which is a waiting room, not a defect.
     expect(COLUMNS[COLUMNS.length - 1].key).toBe('abnormal')
     expect([...COLUMNS[COLUMNS.length - 1].members].sort()).toEqual([...ABNORMAL].sort())
+    expect(ABNORMAL).toEqual(['failed', 'timeout'])
+    expect(ABNORMAL).not.toContain('blocked')
     // and nothing else hides in there
     expect(ABNORMAL).not.toContain('done')
     expect(ABNORMAL).not.toContain('queued')
@@ -48,23 +53,40 @@ describe('the status contract', () => {
     expect(ABNORMAL).not.toContain('verifying')
   })
 
-  it('has six columns, with cancellation split out of the failure column', () => {
+  it('has seven columns, with cancellation and blocked each split out', () => {
     // The board's column count and order are load-bearing: `.grid` hands the
     // same count to `grid-template-columns`, so a mismatch silently interleaves
-    // every lane. Cancellation is an operator action, not a defect, so it sits
-    // in its own column between done and abnormal.
-    expect(COLUMNS).toHaveLength(6)
+    // every lane. Two terminal states are waiting rooms and get their own
+    // column: cancellation (the operator stopped it) and blocked (a boundary
+    // breach parked for a human to release). `abnormal` stays last.
+    expect(COLUMNS).toHaveLength(7)
     expect(COLUMNS.map((column) => column.key)).toEqual([
       'queued',
       'running',
       'verifying',
       'done',
       'cancelled',
+      'blocked',
       'abnormal'
     ])
     const cancelled = COLUMNS.find((column) => column.key === 'cancelled')
     expect(cancelled?.members).toEqual(['cancelled'])
     expect(ABNORMAL).not.toContain('cancelled')
+
+    const blocked = COLUMNS.find((column) => column.key === 'blocked')
+    expect(blocked?.members).toEqual(['blocked'])
+    expect(ABNORMAL).not.toContain('blocked')
+    // the failure column is still the last one
+    expect(COLUMNS[COLUMNS.length - 1].key).toBe('abnormal')
+  })
+
+  it('labels the blocked lane with its own key, and the rest with the status word', () => {
+    // The lane header names the operator's job ("Needs review"), not the status
+    // word ("Blocked") -- two purposes, two keys. Every other column reuses the
+    // status word.
+    expect(columnLabelKey('blocked')).toBe('column.blocked')
+    expect(columnLabelKey('queued')).toBe('status.queued')
+    expect(columnLabelKey('abnormal')).toBe('status.abnormal')
   })
 })
 

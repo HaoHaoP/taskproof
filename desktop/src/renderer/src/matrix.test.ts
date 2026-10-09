@@ -326,6 +326,21 @@ describe('grouping', () => {
     expect(grouped.abnormal.map((t) => t.id)).toEqual(['t1', 'f1'])
   })
 
+  it('puts blocked in its own column, and keeps failed / timeout out of it', () => {
+    // A boundary breach is a waiting room, not a verdict: blocked gets its own
+    // column and does NOT land in `abnormal` with the failure-like states.
+    const grouped = groupColumns([
+      task('b1', { status: 'blocked', created_at: '2026-10-08T09:00:00+08:00' }),
+      task('f1', { status: 'failed', created_at: '2026-10-08T10:00:00+08:00' }),
+      task('t1', { status: 'timeout', created_at: '2026-10-08T11:00:00+08:00' })
+    ])
+    expect(grouped.blocked.map((t) => t.id)).toEqual(['b1'])
+    expect(grouped.abnormal.map((t) => t.id)).toEqual(['t1', 'f1'])
+    // blocked is nowhere near the failure column
+    expect(grouped.abnormal.some((t) => t.status === 'blocked')).toBe(false)
+    expect(grouped.blocked.some((t) => t.status === 'failed')).toBe(false)
+  })
+
   it('places abnormal terminal states in the last column and orders each', () => {
     const grouped = groupColumns([
       task('f1', { status: 'failed', created_at: '2026-10-08T09:00:00+08:00' }),
@@ -351,6 +366,7 @@ describe('visible status columns (泳道 显隐)', () => {
       'running',
       'verifying',
       'cancelled',
+      'blocked',
       'abnormal'
     ])
   })

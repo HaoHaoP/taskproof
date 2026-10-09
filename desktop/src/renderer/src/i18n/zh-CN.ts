@@ -36,9 +36,13 @@ export default {
     label: '状态'
   },
 
+  /* 列头文案。多数列直接用状态词；`blocked` 列是例外 —— 它是「等你看一眼」的
+     待办，不是状态词本身，所以另起一个键（状态词「阻塞」保持不变）。 */
+  column: { blocked: '待复核' },
+
   tally: { tasks: '任务', flying: '处理中', failed: '未通过' },
 
-  card: { attempt: '尝试', files: '文件' },
+  card: { attempt: '尝试', files: '文件', acceptancePassed: '验收已过' },
 
   /* 控制台的四个动作 + 新增表单 + 排队列。统一放在 `task.*`（单数）下，
      卡片菜单、失败文案与弹窗都读这一个命名空间；`tasks`（复数）是任务表页。 */
@@ -46,6 +50,7 @@ export default {
     new: '新增任务',
     menu: '操作',
     advance: '立刻发车',
+    accept: '放行',
     stop: '停止',
     delete: '删除',
     rerun: '再跑一次',
@@ -81,6 +86,11 @@ export default {
       body: '工作区不会被动。任务会记为「已取消」。此操作不可撤销。',
       confirm: '停止'
     },
+    confirmAccept: {
+      title: '放行这张卡？',
+      body: '越界记录将被确认通过，任务按验收结果落到「完成」或「未通过」。此操作不可撤销。',
+      confirm: '放行'
+    },
     confirmDelete: {
       title: '删除这个任务？',
       body: '会删除任务记录与事件流。此操作不可撤销。',
@@ -101,7 +111,8 @@ export default {
     },
     notice: {
       group: '这个项目的道被占用了 —— 卡片仍在排队，稍后重试。',
-      cap: '全局并发已满 —— 卡片仍在排队，稍后重试。'
+      cap: '全局并发已满 —— 卡片仍在排队，稍后重试。',
+      stale: '这张卡已经不是「待复核」了，看板已刷新。'
     }
   },
 

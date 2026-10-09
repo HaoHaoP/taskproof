@@ -36,6 +36,7 @@ export const useTasksStore = defineStore('tasks', () => {
   const composeOpen = ref(false)
   const summaryOpen = ref(false)
   const stopOpen = ref(false)
+  const acceptOpen = ref(false)
   const deleteOpen = ref(false)
   const busy = ref(false)
   /** A hard failure, shown inline in whichever sheet is open. */
@@ -84,6 +85,7 @@ export const useTasksStore = defineStore('tasks', () => {
     composeOpen.value = false
     summaryOpen.value = false
     stopOpen.value = false
+    acceptOpen.value = false
     deleteOpen.value = false
     target.value = null
     rerunOf.value = null
@@ -238,6 +240,59 @@ export const useTasksStore = defineStore('tasks', () => {
     }
   }
 
+  function openAccept(task: Task): void {
+    // Belt and braces: the menu only offers accept on a blocked card, but the
+    // gate lives here too so no future caller can release a live row.
+    if (!isAcceptable(task)) return
+    resetTransient()
+    target.value = task
+    acceptOpen.value = true
+  }
+
+  function closeAccept(): void {
+    acceptOpen.value = false
+    target.value = null
+  }
+
+  /**
+   * Release a blocked card: `POST …/accept`. Green acceptance -> done, red ->
+   * failed, and it cannot be undone. The one branch that is not a plain success
+   * or a hard error is a 409 (`state`): the card is no longer blocked, so
+   * instead of an error we say so and return true -- the caller refreshes, and
+   * no stale, still-clickable card is left on the board.
+   */
+  async function confirmAccept(): Promise<boolean> {
+    const api = requireApi()
+    const task = target.value
+    if (!task) return false
+    if (!isAcceptable(task)) {
+      closeAccept()
+      return false
+    }
+    busy.value = true
+    error.value = null
+    try {
+      if (!api) {
+        error.value = copyFor(unavailable())
+        return false
+      }
+      const result = await api.accept(task.id)
+      if (!result.ok) {
+        if (result.error.kind === 'state') {
+          closeAccept()
+          notice.value = String(i18n.global.t('task.notice.stale'))
+          return true
+        }
+        error.value = copyFor(result.error)
+        return false
+      }
+      closeAccept()
+      return true
+    } finally {
+      busy.value = false
+    }
+  }
+
   function openDelete(task: Task): void {
     // Belt and braces: the menu already greys this for a non-terminal card, but
     // the gate lives here too so no future caller can slip a live row through.
@@ -304,6 +359,7 @@ export const useTasksStore = defineStore('tasks', () => {
     composeOpen,
     summaryOpen,
     stopOpen,
+    acceptOpen,
     deleteOpen,
     busy,
     error,
@@ -324,6 +380,9 @@ export const useTasksStore = defineStore('tasks', () => {
     openStop,
     closeStop,
     confirmStop,
+    openAccept,
+    closeAccept,
+    confirmAccept,
     openDelete,
     closeDelete,
     confirmDelete,
@@ -336,4 +395,10 @@ export const useTasksStore = defineStore('tasks', () => {
 /** Delete is terminal-only. Exported so the gate is testable in one place. */
 export function isDeletable(task: Pick<Task, 'status'>): boolean {
   return ['done', 'failed', 'blocked', 'timeout', 'cancelled'].includes(task.status)
+}
+
+/** Only a card waiting for review can be released. Exported so the gate is
+ *  testable in one place. */
+export function isAcceptable(task: Pick<Task, 'status'>): boolean {
+  return task.status === 'blocked'
 }

@@ -238,6 +238,12 @@ export interface TasksApi {
   advance(id: string): Promise<TaskResult<{ task: TaskRow }>>
   /** Stop a task (`POST …/cancel`); it lands in the cancelled column. */
   cancel(id: string): Promise<TaskResult<{ task: TaskRow }>>
+  /**
+   * Clear a card that is waiting for review (`POST …/accept`). Only a `blocked`
+   * task is accepted: green acceptance -> `done`, red -> `failed`. A card that
+   * is no longer blocked comes back as a `state` (409) failure.
+   */
+  accept(id: string): Promise<TaskResult<{ task: TaskRow }>>
   /** Delete a terminal task's row and events (`DELETE …`). */
   remove(id: string): Promise<TaskResult<{ removed: string }>>
   /** Edit a queued card's order (`PATCH …`); the only editable field. */

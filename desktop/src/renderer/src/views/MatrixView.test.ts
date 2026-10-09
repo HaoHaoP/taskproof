@@ -163,6 +163,19 @@ describe('matrix grid columns', () => {
     expect(view).toMatch(/data-status="column\.key"/)
   })
 
+  it('labels each header through columnLabelKey, so blocked reads "Needs review"', () => {
+    // The blocked lane names the operator's job, not the status word. The header
+    // (and its hide switch's name) read the label through `columnLabelKey`, and
+    // the raw `status.<key>` template is gone.
+    expect(view).toMatch(/t\(columnLabelKey\(column\.key\)\)/)
+    expect(view).not.toMatch(/status\.\$\{column\.key\}/)
+  })
+
+  it('routes the blocked card menu accept item through the store confirm', () => {
+    expect(view).toMatch(/action === 'accept'/)
+    expect(view).toMatch(/tasks\.openAccept\(task\)/)
+  })
+
   it('puts a hide switch in every column header, not in the board row', () => {
     // The switch lives in the header it hides: "which column" is the header
     // that was clicked, with no second menu and no second project control.

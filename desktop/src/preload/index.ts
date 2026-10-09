@@ -71,6 +71,7 @@ const api: TpApi = {
     create: (payload: TaskCreatePayload) => ipcRenderer.invoke('tp:tasks:create', payload),
     advance: (id: string) => ipcRenderer.invoke('tp:tasks:advance', id),
     cancel: (id: string) => ipcRenderer.invoke('tp:tasks:cancel', id),
+    accept: (id: string) => ipcRenderer.invoke('tp:tasks:accept', id),
     remove: (id: string) => ipcRenderer.invoke('tp:tasks:remove', id),
     patchQueueSeq: (id: string, queueSeq: number | null) =>
       ipcRenderer.invoke('tp:tasks:patch-queue-seq', id, queueSeq)

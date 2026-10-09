@@ -9,7 +9,8 @@
  *    leaves this process.
  *
  * `createTasksClient` is handed an injectable fetch, so each verb's method,
- * path, and body is asserted without a server.
+ * path, and body is asserted without a server -- including `accept`, the human's
+ * release of a blocked card (`POST …/accept`).
  */
 import { describe, expect, it } from 'vitest'
 import { classifyTaskFailure, createTasksClient } from './tasks'
@@ -142,6 +143,20 @@ describe('createTasksClient — verbs, paths, and the token', () => {
     await client.cancel('t1')
     expect(calls[0].method).toBe('POST')
     expect(calls[0].url).toBe(`${BASE}/api/tasks/t1/cancel`)
+  })
+
+  it('releases a blocked card with POST …/accept', async () => {
+    const { fetch, calls } = recorder(() => json(200, { task: { id: 't1', status: 'done' } }))
+    const client = createTasksClient({ baseUrl: BASE, token: 'tok', fetch })
+
+    const result = await client.accept('t1')
+
+    expect(result.ok).toBe(true)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].method).toBe('POST')
+    expect(calls[0].url).toBe(`${BASE}/api/tasks/t1/accept`)
+    expect(calls[0].body).toBeNull()
+    expect(calls[0].token).toBe('tok')
   })
 
   it('removes with DELETE …', async () => {

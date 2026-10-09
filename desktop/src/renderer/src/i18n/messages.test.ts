@@ -21,6 +21,28 @@ function at(messages: Record<string, unknown>, path: string): unknown {
   }, messages)
 }
 
+describe('card 35 message keys (the needs-review lane)', () => {
+  it('names the blocked column its own key, distinct from the status word', () => {
+    expect(at(en, 'column.blocked')).toBe('Needs review')
+    expect(at(zhCN, 'column.blocked')).toBe('待复核')
+    // The status word itself is untouched -- two purposes, two keys.
+    expect(at(en, 'status.blocked')).toBe('Blocked')
+    expect(at(zhCN, 'status.blocked')).toBe('阻塞')
+  })
+
+  it('names the acceptance-passed badge and the accept action everywhere', () => {
+    expect(at(en, 'card.acceptancePassed')).toBeTruthy()
+    expect(at(zhCN, 'card.acceptancePassed')).toBeTruthy()
+    expect(at(en, 'task.accept')).toBeTruthy()
+    expect(at(zhCN, 'task.accept')).toBeTruthy()
+    expect(at(en, 'task.confirmAccept.title')).toBeTruthy()
+    expect(at(zhCN, 'task.confirmAccept.title')).toBeTruthy()
+    // The stale-copy a 409 (no longer blocked) shows.
+    expect(at(en, 'task.notice.stale')).toBeTruthy()
+    expect(at(zhCN, 'task.notice.stale')).toBeTruthy()
+  })
+})
+
 describe('card 39 message keys', () => {
   it('drops the write-token section and the drawer claim note everywhere', () => {
     for (const [name, messages] of Object.entries(locales)) {

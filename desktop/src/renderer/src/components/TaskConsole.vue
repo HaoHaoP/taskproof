@@ -31,6 +31,12 @@ async function confirmStop(): Promise<void> {
   if (await store.confirmStop()) await board.refresh()
 }
 
+async function confirmAccept(): Promise<void> {
+  // A 409 ("no longer blocked") also returns true, so the board is re-read and
+  // the stale card leaves no still-clickable leftover.
+  if (await store.confirmAccept()) await board.refresh()
+}
+
 async function confirmDelete(): Promise<void> {
   if (await store.confirmDelete()) await board.refresh()
 }
@@ -203,6 +209,29 @@ function onStepVisibility(value: boolean): void {
       <el-button size="small" @click="store.closeStop()">{{ t('dlg.cancel') }}</el-button>
       <el-button size="small" type="danger" :disabled="store.busy" @click="confirmStop()">
         {{ store.busy ? t('task.busy') : t('task.confirmStop.confirm') }}
+      </el-button>
+    </template>
+  </el-dialog>
+
+  <!-- Accept: the release of a blocked card. It is not undoable, so the
+       consequence is spelled out before the verb, like stop and delete. -->
+  <el-dialog
+    v-model="store.acceptOpen"
+    :transition="SHEET_TRANSITION"
+    class="sheet"
+    width="500"
+    append-to-body
+  >
+    <template #header><span>{{ t('task.confirmAccept.title') }}</span></template>
+    <div class="setrow">
+      <div class="lab"><div class="t">{{ store.target?.id }}</div></div>
+    </div>
+    <p class="hint">{{ t('task.confirmAccept.body') }}</p>
+    <p v-if="store.error" class="err">{{ store.error }}</p>
+    <template #footer>
+      <el-button size="small" @click="store.closeAccept()">{{ t('dlg.cancel') }}</el-button>
+      <el-button size="small" type="danger" :disabled="store.busy" @click="confirmAccept()">
+        {{ store.busy ? t('task.busy') : t('task.confirmAccept.confirm') }}
       </el-button>
     </template>
   </el-dialog>
