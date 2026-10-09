@@ -86,7 +86,7 @@ export default {
     },
     queue: {
       order: '序号',
-      wave: '第 {n} 波',
+      wave: '同波',
       waveHint: '序号相同 = 同一波'
     },
     error: {

@@ -34,7 +34,7 @@ import {
 } from '../matrix'
 import { useBoardStore } from '../stores/board'
 import { useTasksStore } from '../stores/tasks'
-import { queueWaves, type TaskAction } from '../taskmenu'
+import type { TaskAction } from '../taskmenu'
 
 const store = useBoardStore()
 const tasks = useTasksStore()
@@ -58,8 +58,6 @@ const projects = computed(() =>
 /** The narrowed board, grouped and ordered -- the source of every cell. */
 const columns = computed(() => groupColumns(filterBoard(store.tasks, filter.value, Date.now())))
 
-/** Wave index per queued card, so equal `queue_seq` reads as one colour. */
-const waves = computed(() => queueWaves(columns.value.queued ?? []))
 
 /** The finished column's window. The fold bar reads `hidden`; the cell reads
  *  `visible`. */
@@ -216,7 +214,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
               :key="task.id"
               :task="task"
               :expanded="isExpanded(task.id)"
-              :wave="waves.get(task.id)"
               @open="openTask"
               @action="(action: TaskAction) => onAction(task, action)"
               @reorder="(seq: number) => reorder(task, seq)"

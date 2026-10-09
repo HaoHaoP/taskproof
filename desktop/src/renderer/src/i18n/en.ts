@@ -94,7 +94,7 @@ export default {
     },
     queue: {
       order: 'Order',
-      wave: 'wave {n}',
+      wave: 'same wave',
       waveHint: 'Same order = same wave'
     },
     error: {

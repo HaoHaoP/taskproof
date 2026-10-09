@@ -9,9 +9,10 @@
  *
  * The console adds two affordances to the same card:
  *  - an actions menu whose items follow the status (see `menuFor`), and
- *  - for a queued card, its `queue_seq` as an editable number and a wave chip.
- *    The chip's colour is keyed off the wave index, so two cards with the same
- *    number visibly share a wave -- the meaning the order alone cannot carry.
+ *  - for a queued card, its `queue_seq` as an editable number and a "same
+ *    wave" chip. The chip carries no number -- the editable seq is the card's
+ *    one and only number -- and its colour is keyed off that same `queue_seq`,
+ *    so two cards with the same number visibly share a wave.
  *
  * The card is a div with `role="button"` rather than a real <button>, because a
  * menu and a number input cannot legally nest inside one.
@@ -20,10 +21,10 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import StatusMark from './StatusMark.vue'
 import type { Task } from '../api/client'
-import { menuFor, type TaskAction } from '../taskmenu'
+import { menuFor, waveSlot, type TaskAction } from '../taskmenu'
 import { duration } from '../format'
 
-const props = defineProps<{ task: Task; expanded?: boolean; wave?: number }>()
+const props = defineProps<{ task: Task; expanded?: boolean }>()
 const emit = defineEmits<{
   open: [id: string]
   action: [action: TaskAction]
@@ -42,9 +43,10 @@ const stamp = computed(() => {
 const menu = computed(() => menuFor(props.task.status))
 const queued = computed(() => props.task.status === 'queued')
 
-/** The wave's palette slot. The index -- not the raw number -- is what colours
- *  the chip, so the palette is fixed however sparse the numbers get. */
-const waveClass = computed(() => `w${((props.wave ?? 0) % 6 + 6) % 6}`)
+/** The wave chip's palette slot, keyed off the card's own `queue_seq` (see
+ *  `waveSlot`). Same seq, same colour; the colour does not depend on which
+ *  cards happen to be visible. The chip renders a word, never a number. */
+const waveClass = computed(() => `w${waveSlot(props.task.queue_seq)}`)
 </script>
 
 <template>
@@ -100,11 +102,12 @@ const waveClass = computed(() => `w${((props.wave ?? 0) % 6 + 6) % 6}`)
       <span>{{ t('card.files') }} {{ task.files_changed ?? 0 }}</span>
     </span>
 
-    <!-- The queue's order: a chip whose colour reads as the wave, and the
-         number itself, editable in place. Only a queued row has a place. -->
+    <!-- The queue's order: a "same wave" chip whose colour reads as the wave,
+         and the one number -- the seq itself -- editable in place. Only a
+         queued row has a place. -->
     <span v-if="queued" class="qbar" @click.stop>
       <span class="wave" :class="waveClass" :title="t('task.queue.waveHint')">
-        {{ t('task.queue.wave', { n: (wave ?? 0) + 1 }) }}
+        {{ t('task.queue.wave') }}
       </span>
       <span class="qlab">{{ t('task.queue.order') }}</span>
       <el-input-number

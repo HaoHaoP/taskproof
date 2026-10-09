@@ -10,7 +10,6 @@
  * Keeping this a pure function means "which items does this card offer" is
  * testable without a DOM, and the SFC only maps it to markup.
  */
-import type { Task } from './api/client'
 import { isTerminal } from './contract'
 
 /** The four console actions a card can offer. */
@@ -52,23 +51,21 @@ export function menuFor(status: string): TaskMenuItem[] {
   return []
 }
 
+/** How many colour slots the wave chip cycles through. Fixed, so the palette
+ *  cannot grow with the numbers. */
+export const WAVE_SLOTS = 6
+
 /**
- * Assign each queued task a wave index, so equal `queue_seq` reads as one wave.
+ * The wave chip's palette slot for a queued card.
  *
- * Distinct seqs are numbered in ascending order (wave 0 is the head); every
- * task with the same seq shares that number, and rows with no seq collect in a
- * final bucket. The index -- not the raw seq -- is what the card colours by, so
- * the palette stays small no matter how large the numbers get.
+ * This is keyed off the card's own `queue_seq` -- never an index over whatever
+ * cards happen to be visible. Two cards with the same seq land in the same
+ * slot, so the chip still reads "same number = same wave", and the slot does
+ * not move when a project / range filter hides a neighbour. The slot is only a
+ * colour (wrapped into `WAVE_SLOTS`); it is never rendered as a number, so no
+ * second numbering source can leak back in.
  */
-export function queueWaves(tasks: readonly Task[]): Map<string, number> {
-  const seqs = [...new Set(tasks.map((task) => task.queue_seq).filter((s): s is number => s != null))]
-  seqs.sort((a, b) => a - b)
-  const bySeq = new Map<number, number>()
-  seqs.forEach((seq, index) => bySeq.set(seq, index))
-  const noSeq = seqs.length
-  const waves = new Map<string, number>()
-  for (const task of tasks) {
-    waves.set(task.id, task.queue_seq == null ? noSeq : (bySeq.get(task.queue_seq) ?? noSeq))
-  }
-  return waves
+export function waveSlot(seq: number | null | undefined): number {
+  const n = seq ?? 0
+  return ((n % WAVE_SLOTS) + WAVE_SLOTS) % WAVE_SLOTS
 }

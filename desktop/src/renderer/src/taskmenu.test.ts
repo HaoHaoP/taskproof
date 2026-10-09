@@ -4,13 +4,13 @@
  * but greyed while a row is live, and that an unknown status offers nothing
  * rather than a wrong verb.
  *
- * `queueWaves` is the other half: equal `queue_seq` must resolve to the same
- * index (one colour, one wave), distinct ones to ascending indices, and rows
- * with no seq to a trailing bucket.
+ * `waveSlot` is the other half: the wave chip's colour must come from the
+ * card's own `queue_seq`, so equal seqs share a slot, the slot never depends on
+ * which cards are visible, and it wraps into a fixed palette instead of leaking
+ * a second number onto the card.
  */
 import { describe, expect, it } from 'vitest'
-import { menuFor, queueWaves } from './taskmenu'
-import type { Task } from './api/client'
+import { WAVE_SLOTS, menuFor, waveSlot } from './taskmenu'
 
 const TERMINAL = ['done', 'failed', 'blocked', 'timeout', 'cancelled']
 const LIVE = ['running', 'verifying']
@@ -46,29 +46,26 @@ describe('menuFor — items follow the status', () => {
   })
 })
 
-/** A task with only what the wave rules read. */
-function task(id: string, queue_seq: number | null): Task {
-  return { id, queue_seq } as Task
-}
-
-describe('queueWaves — equal seq, one wave', () => {
-  it('numbers distinct seqs ascending and shares the index for equal ones', () => {
-    const waves = queueWaves([
-      task('a', 5),
-      task('b', 1),
-      task('c', 1),
-      task('d', 3)
-    ])
-    expect(waves.get('b')).toBe(0)
-    expect(waves.get('c')).toBe(0) // equal seq -> same wave
-    expect(waves.get('d')).toBe(1)
-    expect(waves.get('a')).toBe(2)
+describe('waveSlot — colour reads the card, not the visible set', () => {
+  it('gives equal seqs the same slot', () => {
+    expect(waveSlot(5)).toBe(waveSlot(5))
+    expect(waveSlot(7)).toBe(waveSlot(7))
   })
 
-  it('collects rows with no seq in a trailing bucket', () => {
-    const waves = queueWaves([task('a', 1), task('b', null), task('c', 2)])
-    expect(waves.get('a')).toBe(0)
-    expect(waves.get('c')).toBe(1)
-    expect(waves.get('b')).toBe(2)
+  it('is a pure function of the seq alone — a hidden neighbour cannot shift it', () => {
+    // The old `queueWaves` numbered distinct seqs by their rank among the
+    // visible cards, so filtering the board re-coloured the survivors. The slot
+    // now depends on nothing but the seq, so the same card keeps its colour
+    // whether or not its neighbours are on the board.
+    expect(waveSlot(5)).toBe(5)
+    expect(waveSlot(9)).toBe(3)
+  })
+
+  it('wraps the raw seq into a fixed palette, so the numbers can grow but the colours cannot', () => {
+    expect(waveSlot(WAVE_SLOTS)).toBe(0)
+    expect(waveSlot(WAVE_SLOTS + 2)).toBe(2)
+    expect(waveSlot(-1)).toBe(WAVE_SLOTS - 1)
+    expect(waveSlot(null)).toBe(0)
+    expect(waveSlot(undefined)).toBe(0)
   })
 })
