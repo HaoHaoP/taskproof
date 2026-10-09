@@ -356,11 +356,49 @@ function raiseNotification(title: string, task: NotifiableTask): void {
   new Notification({ title, body: notificationBody(task) }).show()
 }
 
+/**
+ * How long to wait between poll-driven attempts to (re)establish the port.
+ *
+ * The stdout handshake already gives a slow child a whole timeout window to
+ * announce itself, so this only spaces out attempts when a child fails
+ * *instantly* -- and keeps a broken binary from spawn-looping on every tick.
+ */
+const START_BACKOFF_MS = 5_000
+/** The last time a poll-driven start was issued; 0 means "never". */
+let lastStartAttempt = 0
+
+/**
+ * Re-establish the connection when a poll finds no port.
+ *
+ * The port is read from the child's stdout exactly once, with a timeout; if that
+ * read times out the child is killed and the app would otherwise stay "not
+ * connected" forever -- a slow machine would never recover. Retrying here lets
+ * the next tick re-spawn and re-read the port. It never guesses a port, and
+ * `launch: 'manual'` is left alone: there the user starts the service.
+ */
+function recoverPort(): void {
+  if (quitting) return
+  if (!spawnOnBoot(settings.get().launch)) return
+  const state = api.getStatus().state
+  // Already coming up (or up): the port reader is still listening, so just wait.
+  if (state === 'starting' || state === 'ready') return
+  const now = Date.now()
+  if (now - lastStartAttempt < START_BACKOFF_MS) return
+  lastStartAttempt = now
+  diag(`poll retry: no port yet (service ${state}); restarting`)
+  void api.start()
+}
+
 async function pollDesktop(): Promise<void> {
   const port = api.getStatus().port
   if (!port) {
     lastSummary = null
     applyBadge()
+    // "No port" must be its own unmissable line. It used to print only the Dock
+    // skip -- exactly what a *real* poll prints off macOS -- so a stuck port and
+    // a working poll looked identical in the trace. That was the CI blind spot.
+    diag('poll skipped: no port yet')
+    recoverPort()
     return
   }
   const current = settings.get()
@@ -373,6 +411,7 @@ async function pollDesktop(): Promise<void> {
     }
     applyBadge()
 
+    let taskCount = 0
     if (current.notifyFail || current.notifyDone) {
       const rawTasks = asRecord(await readJson(`${base}/api/tasks?limit=${TASK_SCAN_LIMIT}`))?.tasks
       const rows: unknown[] = Array.isArray(rawTasks) ? rawTasks : []
@@ -386,6 +425,7 @@ async function pollDesktop(): Promise<void> {
           project: record.project ? String(record.project) : undefined
         })
       }
+      taskCount = tasks.length
       if (!notifier.isPrimed) {
         // The first task list of this launch only *seeds*: every id that is
         // already here (the entire backlog) is remembered, and nothing fires.
@@ -400,11 +440,17 @@ async function pollDesktop(): Promise<void> {
         }
       }
     }
-  } catch {
+    // The one line that proves a *real* poll happened: the port it read and how
+    // many tasks came back. Emitted after the seed/claim, so a waiter that sees
+    // it can trust the first-poll seeding already happened.
+    diag(`poll port=${port} tasks=${taskCount}`)
+  } catch (error) {
     // The service may be mid-restart; the next tick tries again rather than
     // clearing a badge on one dropped read.
     lastSummary = null
     applyBadge()
+    const detail = error instanceof Error ? error.message : String(error)
+    diag(`poll failed port=${port}: ${detail}`)
   }
 }
 
@@ -764,12 +810,15 @@ app.whenReady().then(async () => {
   // decides whether a child exists at all.
   syncTray()
   syncAutostart()
-  syncDesktopPoll()
+  // Start the service (when it is meant to be up) *before* the pump, so the first
+  // poll sees either a real port or a start in progress -- never a bare "no port"
+  // that would make it try to re-spawn the very child we are about to start.
   if (spawnOnBoot(settings.get().launch)) {
     await api.start()
   } else {
     applyBadge()
   }
+  syncDesktopPoll()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

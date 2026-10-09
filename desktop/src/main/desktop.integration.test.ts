@@ -27,13 +27,13 @@
  * macOS box -- the same code paths the ubuntu CI runs for real.
  */
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 
 /** A stub API child: prints the port/token lines the real CLI prints, then serves
  *  the two read endpoints the poller consumes. Writes `<pid> <port>` when up. */
 const FAKE_API = `
 import { createServer } from 'node:http'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 const argv = process.argv.slice(2)
 const i = argv.indexOf('--port')
 const want = i >= 0 ? Number(argv[i + 1]) : 0
@@ -52,6 +52,11 @@ const srv = createServer((req, res) => {
 srv.listen(want, '127.0.0.1', () => {
   const port = srv.address().port
   writeFileSync(log, process.pid + ' ' + port)
+  // Test seam only: while FAKE_API_HOLD points at an existing file, withhold the
+  // port/token lines -- a stand-in for a child that is slow to announce its port.
+  // A real run never sets this, so a real child always announces immediately.
+  const hold = process.env.FAKE_API_HOLD
+  if (hold && existsSync(hold)) return
   process.stdout.write('taskproof api listening on http://127.0.0.1:' + port + '\\n')
   process.stdout.write('taskproof api token fake-session-token\\n')
 })
@@ -71,6 +76,8 @@ const H = vi.hoisted(() => {
     on: {} as Record<string, Array<(...a: any[]) => void>>,
     logFile: '',
     tasksFile: '',
+    // Path to the file the FAKE_API hold seam watches (see FAKE_API above).
+    holdFile: '',
     isPackaged: false,
     diag: [] as string[],
     ready: false,
@@ -100,6 +107,10 @@ vi.mock('electron', async () => {
   // must stay silent, and only a card that appears *after* that can notify.
   H.tasksFile = path.join(dir, 'tasks.json')
   process.env.FAKE_API_TASKS = H.tasksFile
+  // The child withholds its port line while this file exists; a test creates it
+  // to reproduce the CI shape (a child that is up but has not announced a port).
+  H.holdFile = path.join(dir, 'api-hold')
+  process.env.FAKE_API_HOLD = H.holdFile
   fs.writeFileSync(
     H.tasksFile,
     JSON.stringify([
@@ -301,17 +312,40 @@ function resetPlatform(): void {
   delete process.env.TP_DESKTOP_PLATFORM
 }
 
+/** The lines the poller emits about the API round trip, exact-text assertable. */
+const POLL_OK_PREFIX = '[diag] poll port='
+const POLL_NO_PORT_DIAG = '[diag] poll skipped: no port yet'
+
 /**
- * Wait until a summary poll has landed. macOS paints the Dock badge; the other
- * platforms log the Dock skip. Either way the poll that reads `summary` (and
- * seeds the backlog) has happened, which the seeding assertions depend on.
+ * Wait until a *fresh* real poll has landed.
+ *
+ * The old version waited on "the Dock badge is 2" (macOS) or "a Dock skip was
+ * logged" (everywhere else). Both are already true from earlier tests, so the
+ * wait returned instantly and the seed could land *after* the test had written
+ * its "new" card -- the seed then swallowed it and no notification fired. That is
+ * the CI failure this card pins. A real poll now logs `[diag] poll port=<n> ...`
+ * *after* it seeds, so waiting for a line that appears after this call proves the
+ * seed already happened. The no-port early return logs a different line
+ * (`poll skipped: no port yet`) and can never satisfy this wait.
  */
 async function waitForSummaryPoll(): Promise<void> {
-  if (H.platform === 'darwin') {
-    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 15_000 })
-  } else {
-    await vi.waitFor(() => expect(H.diag).toContain(DOCK_SKIP_DIAG), { timeout: 15_000 })
-  }
+  const before = H.diag.filter((line) => line.startsWith(POLL_OK_PREFIX)).length
+  await vi.waitFor(
+    () =>
+      expect(H.diag.filter((line) => line.startsWith(POLL_OK_PREFIX)).length).toBeGreaterThan(
+        before
+      ),
+    { timeout: 15_000 }
+  )
+}
+
+/** Append a card to the stub's task list, so the next poll sees a brand-new id. */
+function writeNewCard(id: string): void {
+  const history = JSON.parse(readFileSync(H.tasksFile, 'utf8')) as Array<Record<string, string>>
+  writeFileSync(
+    H.tasksFile,
+    JSON.stringify([...history, { id, status: 'failed', project: 'proj' }])
+  )
 }
 
 afterAll(async () => {
@@ -361,10 +395,11 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
   })
 
   it('seeds the whole backlog on the first poll, then fires once for a new id', async () => {
+    H.notifySupported = true
     await childUp()
-    // One successful summary poll primes the badge (macOS) or logs the Dock
-    // skip (elsewhere); that same poll seeded the seven historical cards (four
-    // not-passing + three done) the stub starts with.
+    // One real poll seeds the seven historical cards (four not-passing + three
+    // done) the stub starts with; `waitForSummaryPoll` only returns once that
+    // poll (and therefore the seed) has actually happened.
     await waitForSummaryPoll()
     // (1) A fresh launch onto a full backlog raises nothing, and the main-process
     // trace carries no `notify` line at all.
@@ -372,11 +407,7 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
     expect(H.diag.some((line) => line.includes('notify'))).toBe(false)
 
     // (2) A card that only shows up *after* the seed fires exactly one notice.
-    const history = JSON.parse(readFileSync(H.tasksFile, 'utf8')) as Array<Record<string, string>>
-    writeFileSync(
-      H.tasksFile,
-      JSON.stringify([...history, { id: 't-new', status: 'failed', project: 'proj' }])
-    )
+    writeNewCard('t-new')
     await vi.waitFor(
       () => expect(H.notifications.filter((n) => n.body.includes('t-new'))).toHaveLength(1),
       { timeout: 15_000 }
@@ -389,6 +420,84 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
     // The same id on later polls stays quiet: one notification per id, ever.
     await new Promise((r) => setTimeout(r, 4500))
     expect(H.notifications.filter((n) => n.body.includes('t-new'))).toHaveLength(1)
+  })
+
+  it('when notifications are unsupported: says so, shows nothing, and still de-dupes', async () => {
+    // The honest other world: `Notification.isSupported()` is false (a headless
+    // host, a locked-down OS). The claim must still be recorded -- exactly once --
+    // and the trace must say why nothing was shown, instead of firing a fake.
+    H.notifySupported = false
+    try {
+      await childUp()
+      await waitForSummaryPoll()
+      writeNewCard('t-unsupported')
+      await vi.waitFor(
+        () => expect(H.diag).toContain('[diag] notify-unsupported t-unsupported'),
+        { timeout: 15_000 }
+      )
+      // Nothing was shown, and the id is remembered: later polls stay silent.
+      expect(H.notifications.filter((n) => n.body.includes('t-unsupported'))).toHaveLength(0)
+      await new Promise((r) => setTimeout(r, 4500))
+      expect(H.notifications.filter((n) => n.body.includes('t-unsupported'))).toHaveLength(0)
+      // Exactly one unsupported line for the id -- the de-dup holds here too.
+      expect(
+        H.diag.filter((line) => line === '[diag] notify-unsupported t-unsupported')
+      ).toHaveLength(1)
+    } finally {
+      H.notifySupported = true
+    }
+  })
+
+  it('recovers real polling after a child withholds its port (the CI shape)', async () => {
+    // The CI failure in miniature: the child comes up but does not announce its
+    // port yet. Before this card a "no port" tick looked just like a real poll in
+    // the trace (both printed only the Dock skip), and the one-shot port read gave
+    // up for good once it timed out. Here we hold the port back and prove the app
+    // (a) says the poll was skipped, (b) invents no notice, and (c) recovers the
+    // moment a later child announces -- without ever guessing a port.
+    await childUp()
+    // Prime the notifier off a *real* poll of the standing backlog first. This
+    // file's notifier is module-level state shared across tests, so without this
+    // the recovery test would only pass because an earlier test had primed it --
+    // and would fail when run alone. Priming here makes the card added below a
+    // genuinely *new* id no matter what ran before.
+    await waitForSummaryPoll()
+    const okCount = (): number => H.diag.filter((line) => line.startsWith(POLL_OK_PREFIX)).length
+    const skipCount = (): number => H.diag.filter((line) => line === POLL_NO_PORT_DIAG).length
+    const okBefore = okCount()
+    const skipBefore = skipCount()
+    const diagBefore = H.diag.length
+    H.notifications.length = 0
+
+    // Withhold the port/token lines on the next child, then restart into it. The
+    // restart promise blocks until the port read times out, so do not await it.
+    writeFileSync(H.holdFile, '')
+    void H.ipc['tp:service:restart']()
+
+    // (a) The no-port tick is explicit and *distinct* from a real poll.
+    await vi.waitFor(() => expect(skipCount()).toBeGreaterThan(skipBefore), { timeout: 15_000 })
+    expect(H.diag.slice(diagBefore).filter((l) => l.startsWith(POLL_OK_PREFIX))).toHaveLength(0)
+
+    // (b) Nothing is invented while there is no port: a card that appears now must
+    // stay silent until a real poll can actually read it.
+    writeNewCard('t-held')
+    await new Promise((r) => setTimeout(r, 1_000))
+    expect(H.notifications.filter((n) => n.body.includes('t-held'))).toHaveLength(0)
+    expect(H.diag.slice(diagBefore).some((l) => l.includes('notify'))).toBe(false)
+
+    // Release the hold, then let the launcher give up on child #1 and the poll
+    // re-spawn: a child that announces recovers real polling.
+    rmSync(H.holdFile, { force: true })
+    await vi.waitFor(() => expect(okCount()).toBeGreaterThan(okBefore), { timeout: 30_000 })
+
+    // (c) The recovered poll finally sees t-held -- one real notice, once.
+    await vi.waitFor(
+      () => expect(H.notifications.filter((n) => n.body.includes('t-held'))).toHaveLength(1),
+      { timeout: 15_000 }
+    )
+    expect(H.diag).toContain('[diag] notify 验收未通过 t-held')
+    await new Promise((r) => setTimeout(r, 4_500))
+    expect(H.notifications.filter((n) => n.body.includes('t-held'))).toHaveLength(1)
   })
 
   it('close-to-tray: hides (not quits) while tray is on, tears down when off', async () => {
