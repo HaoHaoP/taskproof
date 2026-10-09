@@ -123,6 +123,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-write", action="store_true",
                    help="enable token-protected registry writes")
 
+    sub.add_parser(
+        "queue",
+        help="run the resident queue daemon (advances parked tasks; blocks)",
+    )
+
     sub.add_parser("doctor", help="environment self-check")
     sub.add_parser("gc", help="rotate the audit stream and prune old state")
 
@@ -773,6 +778,13 @@ def cmd_api(args):
     return server.serve(args.workspace, args.port, allow_write=args.allow_write)
 
 
+def cmd_queue(args):
+    """Block on the resident queue daemon until SIGINT/SIGTERM."""
+    from . import queue
+
+    return queue.run_forever(args.workspace)
+
+
 def _check_workspace(workspace) -> dict:
     try:
         os.makedirs(workspace, exist_ok=True)
@@ -931,6 +943,7 @@ COMMANDS = {
     "rm": cmd_rm,
     "board": cmd_board,
     "api": cmd_api,
+    "queue": cmd_queue,
     "doctor": cmd_doctor,
     "gc": cmd_gc,
 }

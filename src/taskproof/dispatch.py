@@ -189,6 +189,14 @@ def dispatch(
                     "group": project.group,
                     "adapter": adapter,
                     "queue_seq": queue_seq,
+                    # Card 22 parks a row with only its `tasks` columns; the
+                    # run flags have no column, so they ride along in this
+                    # event payload. `run_queued` reads them back when the
+                    # queue advances the row.
+                    "read_only": read_only,
+                    "worktree": worktree,
+                    "skip_verify": skip_verify,
+                    "timeout": timeout,
                 },
             )
             return task_id
@@ -235,57 +243,209 @@ def dispatch(
                 },
             )
 
-            worktree_root = None
-            worktree_path = None
-            run_dir = project.path
-            try:
-                if worktree:
-                    if not _is_git_repo(project.path):
-                        raise UsageError(
-                            f"--worktree needs a git repository, but {project.path} "
-                            "is not one",
-                            hint="run without --worktree, or point the registry at a git checkout",
-                        )
-                    worktree_root, worktree_path = _create_worktree(project.path)
-                    run_dir = worktree_path
-                    storage.append_event(
-                        conn, task_id, "worktree_created", {"path": run_dir}
-                    )
+            _execute_claimed(
+                conn,
+                task_id=task_id,
+                project=project,
+                adapter_obj=adapter_obj,
+                adapter_name=adapter,
+                brief=brief,
+                workspace=workspace,
+                read_only=read_only,
+                worktree=worktree,
+                skip_verify=skip_verify,
+                timeout=effective_timeout,
+            )
+            return task_id
+        finally:
+            concurrency.release(conn, scopes)
+    finally:
+        conn.close()
 
-                _execute(
-                    conn,
-                    task_id=task_id,
-                    project=project,
-                    adapter_obj=adapter_obj,
-                    adapter_name=adapter,
-                    brief=brief,
-                    run_dir=run_dir,
-                    workspace=workspace,
-                    read_only=read_only,
-                    skip_verify=skip_verify,
-                    timeout=effective_timeout,
+
+def _execute_claimed(
+    conn,
+    *,
+    task_id: str,
+    project,
+    adapter_obj,
+    adapter_name: str,
+    brief: str,
+    workspace: str,
+    read_only: bool,
+    worktree: bool,
+    skip_verify: bool,
+    timeout: int,
+) -> None:
+    """Steps 5-8 for a task that is already `running` and holds a slot.
+
+    Shared by `dispatch(start=True)` (row inserted running) and `run_queued`
+    (row flipped from queued to running). Owns the whole worktree lifecycle
+    (create -> execute -> always remove) and raises whatever `_execute` raises;
+    it never touches the concurrency claim, which stays the caller's.
+    """
+    worktree_root = None
+    worktree_path = None
+    run_dir = project.path
+    try:
+        if worktree:
+            if not _is_git_repo(project.path):
+                raise UsageError(
+                    f"--worktree needs a git repository, but {project.path} "
+                    "is not one",
+                    hint="run without --worktree, or point the registry at a git checkout",
                 )
-                return task_id
-            finally:
-                # The worktree must be cleaned up on every exit path; a cleanup
-                # failure is recorded rather than raised (it would mask the real
-                # outcome).
-                if worktree_root is not None:
-                    error = _remove_worktree(project.path, worktree_root, worktree_path)
-                    if error:
-                        storage.append_event(
-                            conn,
-                            task_id,
-                            "worktree_cleanup_failed",
-                            {"path": worktree_path, "error": error},
-                        )
-                    else:
-                        storage.append_event(
-                            conn,
-                            task_id,
-                            "worktree_removed",
-                            {"path": worktree_path},
-                        )
+            worktree_root, worktree_path = _create_worktree(project.path)
+            run_dir = worktree_path
+            storage.append_event(conn, task_id, "worktree_created", {"path": run_dir})
+
+        _execute(
+            conn,
+            task_id=task_id,
+            project=project,
+            adapter_obj=adapter_obj,
+            adapter_name=adapter_name,
+            brief=brief,
+            run_dir=run_dir,
+            workspace=workspace,
+            read_only=read_only,
+            skip_verify=skip_verify,
+            timeout=timeout,
+        )
+    finally:
+        # The worktree must be cleaned up on every exit path; a cleanup failure
+        # is recorded rather than raised (it would mask the real outcome).
+        if worktree_root is not None:
+            error = _remove_worktree(project.path, worktree_root, worktree_path)
+            if error:
+                storage.append_event(
+                    conn,
+                    task_id,
+                    "worktree_cleanup_failed",
+                    {"path": worktree_path, "error": error},
+                )
+            else:
+                storage.append_event(
+                    conn, task_id, "worktree_removed", {"path": worktree_path}
+                )
+
+
+def _queued_options(conn, task_id: str) -> dict:
+    """Recover the run flags a parked task carried in its `queued` event.
+
+    Card 22 parked a row with only its `tasks` columns (project, brief, adapter,
+    model, reasoning, queue_seq); read_only / worktree / skip_verify / timeout
+    have no column, so they were recorded in the `queued` event payload. The
+    latest such event wins. A row parked by an older build (no payload) yields
+    `{}` and the queue advances it with the documented defaults.
+    """
+    row = conn.execute(
+        "SELECT payload FROM events WHERE task_id = ? AND event = 'queued' "
+        "ORDER BY id DESC LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return {}
+    try:
+        payload = json.loads(row[0])
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def run_queued(workspace: str, task_id: str) -> str:
+    """Advance ONE existing ``queued`` row: ``queued -> running -> ...``.
+
+    THE population point `taskproof queue` is built on, and the same entry the
+    manual "fire now" button (card 23) calls to jump a single card out of its
+    wave. It mints NO new id: the row named by ``task_id`` is the very row that
+    ends up running (and terminal), so a queued card keeps its id, its
+    ``queue_seq`` and its place in history.
+
+    Differences from ``dispatch(start=True)``:
+      * the project / brief / adapter / model / reasoning come from the stored
+        row, not from arguments (the `queued` event carries the run flags);
+      * a refusal by the concurrency gate (``ConcurrencyError``, exit 75) leaves
+        the row ``queued`` and unchanged — the queue retries it on a later tick
+        instead of dropping or duplicating it.
+
+    Raises ``TaskNotFoundError`` (no such row) or ``TaskStateError`` (the row is
+    not ``queued``); an attempt that starts raises whatever ``_execute`` raises
+    (the row is still recorded terminal in that case). Returns ``task_id``.
+    """
+    prepare_workspace(workspace)
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+        row = storage.get_task(conn, task_id)
+        if row is None:
+            raise TaskNotFoundError(f"no such task: {task_id}")
+        if row["status"] != STATUS_QUEUED:
+            raise TaskStateError(
+                f"task {task_id} is {row['status']}; only a queued task can be advanced"
+            )
+
+        reg = registry.load(registry.workspace_registry_path(workspace))
+        project = reg.require(row["project"])
+        options = _queued_options(conn, task_id)
+        effective_timeout = (
+            options.get("timeout") if options.get("timeout") is not None else reg.timeout
+        )
+        # Resolve the adapter the row was parked with, before any claim exists.
+        adapter_obj = get_adapter(
+            row["adapter"],
+            model=row["model"],
+            reasoning=row["reasoning"],
+            timeout=effective_timeout,
+        )
+
+        # 3. Claim the slot BEFORE flipping the row, so a refusal (exit 75)
+        # leaves it exactly as the queue found it: `queued`, same seq, no pid.
+        ttl = max(1, int(effective_timeout)) + 60
+        scopes = concurrency.acquire(
+            conn, task_id, project.group, cap=reg.concurrency, ttl=ttl
+        )
+        try:
+            # 4. queued -> running, SAME id. Only status / pid / started_at are
+            # rewritten; brief, queue_seq and created_at are left untouched.
+            storage.update_task(
+                conn,
+                task_id,
+                status=STATUS_RUNNING,
+                pid=os.getpid(),
+                started_at=storage.now_iso(),
+            )
+            storage.append_event(
+                conn,
+                task_id,
+                "started",
+                {
+                    "project": project.id,
+                    "group": project.group,
+                    "adapter": row["adapter"],
+                    "read_only": bool(options.get("read_only")),
+                    "worktree": bool(options.get("worktree")),
+                    "skip_verify": bool(options.get("skip_verify")),
+                    "queue_seq": row["queue_seq"],
+                    # Distinguishes "left the queue" from a task that was born
+                    # running via `dispatch(start=True)`.
+                    "advanced": True,
+                },
+            )
+            _execute_claimed(
+                conn,
+                task_id=task_id,
+                project=project,
+                adapter_obj=adapter_obj,
+                adapter_name=row["adapter"],
+                brief=row["brief"],
+                workspace=workspace,
+                read_only=bool(options.get("read_only")),
+                worktree=bool(options.get("worktree")),
+                skip_verify=bool(options.get("skip_verify")),
+                timeout=effective_timeout,
+            )
+            return task_id
         finally:
             concurrency.release(conn, scopes)
     finally:

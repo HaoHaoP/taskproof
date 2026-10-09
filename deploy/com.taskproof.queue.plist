@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      The resident queue daemon: `taskproof queue` (control-plane.md, section 3).
+
+      Keep the two values below in step with the desktop app's settings.json:
+        * settings.json `taskproofPath`  ->  <ProgramArguments>[0..n-2]
+        * settings.json `workspace`      ->  the value after `--workspace`
+
+      launchd expands neither `~` nor environment variables in
+      ProgramArguments, so both the command and the workspace must be absolute
+      paths. Replace /Users/CHANGEME and /opt/homebrew/bin/taskproof with the
+      real ones from your settings.json before loading.
+    -->
+    <key>Label</key>
+    <string>com.taskproof.queue</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/taskproof</string>
+        <string>--workspace</string>
+        <string>/Users/CHANGEME/.taskproof</string>
+        <string>queue</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart only when the daemon dies abnormally. A clean SIGTERM exit (0,
+         the normal shutdown) is left stopped, e.g. for a manual stop. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/com.taskproof.queue.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/com.taskproof.queue.err.log</string>
+</dict>
+</plist>
