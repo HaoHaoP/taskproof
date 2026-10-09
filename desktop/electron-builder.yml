@@ -1,0 +1,76 @@
+# electron-builder packaging for the taskproof desktop console.
+#
+# The app talks to the local taskproof service by spawning the bundled Python
+# interpreter with our source on PYTHONPATH — see `extraResources` below. The
+# runtime tree is produced by `scripts/fetch-runtime.mjs` and is pinned,
+# checksum-verified and pruned before it ever reaches this config.
+appId: io.github.haohaop.taskproof   # stays lowercase (reverse-DNS by convention)
+productName: Taskproof               # user-visible: Dock, menu bar, Taskproof.app
+                                     # the userData dir is pinned in the main process
+                                     # (…/Application Support/taskproof-desktop), so
+                                     # renaming this never moves anyone's state
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - out/**
+  - package.json
+  # The main process loads these at runtime via app.getAppPath()/build/... so they
+  # must live inside the asar. Without them `app.dock.setIcon` throws while the
+  # window is being created and the packaged app comes up with NO window at all
+  # (found by installing the dmg and launching it with launchd's bare PATH).
+  - build/icon.png
+  - build/trayTemplate.png
+  - build/trayTemplate@2x.png
+
+asar: true
+
+# Extra files copied verbatim into the app's resources directory. The Python
+# runtime lands in `python/` and our source in `src/` so the app can run
+# `python -m taskproof` with PYTHONPATH pointing at `src`.
+extraResources:
+  - from: build/runtime/${os}-${arch}/python
+    to: python
+  - from: ../src
+    to: src
+    filter:
+      - taskproof/**
+  - from: ../README.md
+    to: README.md
+  - from: ../README.zh-CN.md
+    to: README.zh-CN.md
+  - from: ../LICENSE
+    to: LICENSE
+
+mac:
+  identity: null            # unsigned: no certificate is wired up yet
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  target:
+    - dmg
+    - zip
+
+win:
+  icon: build/icon.png       # electron-builder converts this to .ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  shortcutName: Taskproof
+
+linux:
+  category: Development
+  icon: build/icon.png
+  maintainer: HaoHaoP <HaoHaoP@users.noreply.github.com>
+  target:
+    - AppImage
+    - deb

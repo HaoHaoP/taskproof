@@ -12,7 +12,11 @@
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
-    "pack": "npm run build && electron-builder --dir"
+    "pack": "npm run build && electron-builder --dir",
+    "runtime:fetch": "node scripts/fetch-runtime.mjs",
+    "dist:mac": "npm run runtime:fetch -- --target mac-arm64 && electron-vite build && electron-builder --mac --arm64 --publish never",
+    "dist:win": "npm run runtime:fetch -- --target win-x64 && electron-vite build && electron-builder --win --x64 --publish never",
+    "dist:linux": "npm run runtime:fetch -- --target linux-x64 && electron-vite build && electron-builder --linux --x64 --publish never"
   },
   "dependencies": {
     "element-plus": "^2.14.7",

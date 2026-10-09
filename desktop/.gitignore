@@ -6,3 +6,7 @@ dist
 
 # vitest's own cache directory
 .vitest
+
+# Bundled Python runtime + download cache (npm run runtime:fetch)
+build/runtime
+build/cache

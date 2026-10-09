@@ -539,7 +539,15 @@ function createWindow(): void {
   // their own (electron-builder); this line is what makes the dev window show the
   // real mark. macOS only -- there is no app.dock on the other platforms.
   if (process.platform === 'darwin' && app.dock) {
-    app.dock.setIcon(join(app.getAppPath(), 'build', 'icon.png'))
+    // setIcon throws when the image cannot be loaded, and this runs inside the
+    // async path that creates the window: one missing asset (a packaging mistake)
+    // meant the app came up with no window at all. Degrade to "no dock icon".
+    const icon = nativeImage.createFromPath(join(app.getAppPath(), 'build', 'icon.png'))
+    if (icon.isEmpty()) {
+      diag('dock icon missing; skipping setIcon')
+    } else {
+      app.dock.setIcon(icon)
+    }
   }
 
   mainWindow = new BrowserWindow({
