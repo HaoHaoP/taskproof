@@ -38,7 +38,7 @@ verify_kind = "build"
 | `aliases` | no | `[]` | Alternative names accepted wherever an id is accepted. |
 | `verify` | no | — | The acceptance command, run by taskproof **after** the agent exits. |
 | `verify_kind` | no | `"none"` | `check` / `build` / `none`. Anything else is a hard error. |
-| `forbidden_paths` | no | `[]` | Prefix-matched paths the agent must not touch. |
+| `forbidden_paths` | no | `[]` | Prefix-matched paths the agent must not touch. Each entry may carry a `file:` / `git:` / `presence:` type; untyped entries are `file`. |
 | `result_schema` | no | `"default"` | `"default"`, `"none"`, or an absolute path to a JSON Schema. |
 | `auto_registered` | no | `false` | Written by `taskproof register`; not meant to be edited by hand. |
 
@@ -64,23 +64,65 @@ its own work counts as evidence.
 not exist stops the run instead of silently falling back to the default —
 falling back would change the result contract behind your back.
 
-**Forbidden paths are checked after the run, and not only via git.** A rule
-ending in `/` covers the directory and everything below it; a rule without the
-trailing slash must match that exact path. A violation fails the task even when
-the agent reported success.
+**Forbidden paths are judged on a before/after difference, and each rule
+picks its signal.** A rule ending in `/` covers the directory and everything
+below it; a rule without the trailing slash must match that exact path. A
+violation fails the task even when the agent reported success.
 
-The check deliberately does not rest on the `git status` change list alone. git
-reports nothing inside `.git/`, and it omits every ignored path — which is what
-build output and dependency directories are. Measured: with
+The gate takes a snapshot before the adapter runs and again after it exits, and
+only the **difference** counts. A path that was already dirty or untracked
+before the run — a Finder `.DS_Store`, a leftover build artifact, a directory a
+human left behind — stays in both snapshots and is never attributed to the
+adapter. The error payload's `kind` names the signal that fired.
+
+**Syntax.** A rule is either a bare path (the legacy spelling) or a
+`<type>:<path>` pair. The recognized types are:
+
+| Type | Meaning | Fires on |
+|---|---|---|
+| `file` (default) | fingerprint + git-diff | a path under the rule appears, disappears or changes content — the historical behaviour, unchanged |
+| `git` | repository state (HEAD / refs / stash) | a commit, history rewrite, branch switch, tag or stash |
+| `presence` | file-set membership only | a file under the rule is added or removed |
+
+```toml
+forbidden_paths = [
+  ".git/",             # untyped: keeps its historical git-state meaning
+  "protected/",        # untyped: the historical file fingerprint signal
+  "file:protected/",   # explicit form of the line above
+  "git:.git/",         # explicit form of the .git line above
+  "presence:web/dist/",# dev-server / HMR output: content rewrites are ignored
+]
+```
+
+Untyped rules stay byte-for-byte compatible with the previous release: they
+behave exactly as `file:` rules did (and the special untyped `.git/` rule keeps
+its git-state meaning, as described below). Because the prefix uses a colon,
+protect a literal path that itself begins with `file:`/`git:`/`presence:` by
+spelling it with an explicit extra prefix, e.g. `file:presence:notes.txt`.
+
+**Which signal to use.** `presence:` exists for trees that a background process
+writes to without the agent's involvement — Vite/Webpack HMR rewriting
+`dist/**`, `node_modules/.cache/**` — and for directories where the agent is
+only forbidden from adding or deleting files. Its trade-off: a content-only
+rewrite of a file that already existed is **not** a violation. If you also need
+to catch content edits, use the default `file:` signal for that path.
+
+The default `file` signal deliberately does not rest on the `git status` change
+list alone. git reports nothing inside `.git/`, and it omits every ignored path
+— which is what build output and dependency directories are. Measured: with
 `forbidden_paths = ["dist/"]` and `dist/` in `.gitignore`, an adapter wrote
-`dist/app.js` and the run was recorded as `done`. So the declared paths are also
-fingerprinted before and after the run, which covers ignored paths and
-everything else. A rule that targets the repository's `.git` directory is
-special-cased: its state (HEAD, refs and stash) is compared instead of its
-bookkeeping files, so a read-only `git status` index refresh is not a violation
-while commits, resets, branch/tag changes and stashes still are. One limit worth
-knowing: a protected tree larger than 20000 entries is sampled, and the audit
-event records `snapshot_truncated: true` when that happens.
+`dist/app.js` and the run was recorded as `done`. So declared `file` paths are
+also fingerprinted before and after the run, which covers ignored paths and
+everything else; the git difference and the fingerprint difference are OR-ed.
+
+A rule that targets the repository's `.git` directory is special-cased: its
+state (HEAD, refs and stash) is compared instead of its bookkeeping files, so a
+read-only `git status` index refresh is not a violation while commits, resets,
+branch/tag changes and stashes still are: the probe reads HEAD, the symbolic
+branch, every `refs/heads`, `refs/remotes` and `refs/tags` entry, and the stash
+list. One limit worth knowing: a protected tree larger than 20000 entries is
+sampled, and the audit event records `snapshot_truncated: true` when that
+happens.
 
 ## Hard errors
 

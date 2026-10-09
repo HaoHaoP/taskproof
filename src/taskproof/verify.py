@@ -24,6 +24,20 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 
+@dataclass(frozen=True)
+class ForbiddenRule:
+    """A parsed forbidden-path rule.
+
+    The registry stores rules as strings so old registries keep working. The
+    optional ``file:`` / ``git:`` / ``presence:`` prefixes select the signal;
+    an unprefixed rule is the historical ``file`` form.
+    """
+
+    kind: str
+    path: str
+    raw: str
+
+
 @dataclass
 class VerifyOutcome:
     ran: bool
@@ -162,6 +176,10 @@ def detect_changes(workdir: str) -> Optional[int]:
 def changed_files(workdir: str) -> List[str]:
     """Relative paths reported by `git status --porcelain` (read-only)."""
     porcelain = _git_porcelain(workdir)
+    return _changed_files_from_porcelain(porcelain)
+
+
+def _changed_files_from_porcelain(porcelain: Optional[str]) -> List[str]:
     if not porcelain:
         return []
 
@@ -169,14 +187,55 @@ def changed_files(workdir: str) -> List[str]:
     for line in porcelain.splitlines():
         if not line.strip():
             continue
-        # Format: two status columns, a space, then the path.
-        path = line[3:] if len(line) > 3 else line.strip()
-        # Renames/copies read "R  old -> new"; we care about the new path.
-        if " -> " in path:
-            path = path.split(" -> ", 1)[1]
-        path = path.strip().strip('"')
-        files.append(path)
+        files.append(_porcelain_path(line))
     return files
+
+
+def changed_files_snapshot(workdir: str) -> Optional[Dict[str, str]]:
+    """Map current porcelain paths to their two-column status.
+
+    Keeping the status beside the path lets the dispatcher distinguish a path
+    that was merely present before the run from one whose state changed.  The
+    public ``changed_files`` / ``detect_changes`` functions intentionally keep
+    their historical current-state semantics.
+    """
+    porcelain = _git_porcelain(workdir)
+    if porcelain is None:
+        return None
+
+    entries: Dict[str, str] = {}
+    for line in porcelain.splitlines():
+        if not line.strip():
+            continue
+        entries[_porcelain_path(line)] = line[:2]
+    return entries
+
+
+def diff_changed_files(
+    before: Optional[Dict[str, str]], after: Optional[Dict[str, str]]
+) -> List[str]:
+    """Return paths added, removed, or whose porcelain status changed.
+
+    Two full ``git status`` snapshots are required: a pre-existing dirty path
+    that the adapter never touched is absent from both and therefore cannot be
+    mistaken for this run's work.
+    """
+    before = before or {}
+    after = after or {}
+    return sorted(
+        path
+        for path in set(before) | set(after)
+        if before.get(path) != after.get(path)
+    )
+
+
+def _porcelain_path(line: str) -> str:
+    # Format: two status columns, a space, then the path.
+    path = line[3:] if len(line) > 3 else line.strip()
+    # Renames/copies read "R  old -> new"; we care about the new path.
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1]
+    return path.strip().strip('"')
 
 
 def _normalise(workdir: str, path: str) -> str:
@@ -200,6 +259,28 @@ def _normalise(workdir: str, path: str) -> str:
     if normalised == ".":
         normalised = ""
     return normalised
+
+
+def parse_forbidden_rule(raw) -> Optional[ForbiddenRule]:
+    """Parse the optional ``file:`` / ``git:`` / ``presence:`` prefix.
+
+    Unprefixed strings are the legacy spelling and mean ``file``.  A literal
+    path beginning with one of these prefixes can be protected as a file by
+    spelling it with an explicit extra ``file:`` prefix (for example,
+    ``file:presence:notes.txt``).
+    """
+    if raw is None:
+        return None
+    text = str(raw)
+    for kind in ("file", "git", "presence"):
+        prefix = kind + ":"
+        if text.startswith(prefix):
+            return ForbiddenRule(
+                kind=kind,
+                path=text[len(prefix):].replace("\\", "/"),
+                raw=text,
+            )
+    return ForbiddenRule(kind="file", path=text.replace("\\", "/"), raw=text)
 
 
 def _git_output(workdir: str, args: List[str]) -> Optional[Tuple[int, str]]:
@@ -292,9 +373,10 @@ def check_forbidden(workdir: str, forbidden_paths: List[str],
     """
     rules = []
     for raw in forbidden_paths or []:
-        if raw is None:
+        parsed = parse_forbidden_rule(raw)
+        if parsed is None or parsed.kind == "git":
             continue
-        rule_text = str(raw).replace("\\", "/")
+        rule_text = parsed.path
         is_dir = rule_text.endswith("/")
         rule_path = _normalise(workdir, rule_text)
         if not rule_path:
@@ -404,3 +486,15 @@ def diff_snapshots(before: Dict[str, str], after: Dict[str, str]) -> List[str]:
         if key not in after:
             changed.add(key)
     return sorted(changed)
+
+
+def diff_presence_snapshots(
+    before: Dict[str, str], after: Dict[str, str]
+) -> List[str]:
+    """Paths that appeared or disappeared, ignoring fingerprint changes.
+
+    This is the ``presence`` signal: a devserver may rewrite the content of an
+    existing build artifact without adding or removing a file, and that must
+    not be reported as a forbidden change.
+    """
+    return sorted(set(before) ^ set(after))

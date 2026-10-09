@@ -168,6 +168,44 @@ Process safety       only processes taskproof started are ever killed
 75   concurrency limit reached
 ```
 
+## The forbidden-path gate
+
+The gate answers one question: *did this run move a path the registry protects?*
+It must answer it without trusting the agent and without blaming it for the
+world's noise. Two design rules follow.
+
+**The signal is a difference, not a snapshot.** The gate records the protected
+state before the adapter starts and compares it after the adapter exits. A
+present-tense snapshot is wrong on its face: a repository can be dirty when the
+run begins — a Finder `.DS_Store`, an untracked scratch directory, a
+half-finished build — and a current-state check reports all of it as the
+adapter's work on *every* run. Only a path whose state differs between the two
+snapshots belongs to this run.
+
+**One signal per rule, chosen by what is being protected.** A rule's `kind`
+selects its probe, and the audit event carries that `kind` so a reader can tell
+which one fired:
+
+```
+file       git-status difference OR size:mtime_ns fingerprint difference
+           the historical signal; catches content edits, additions, removals
+git        HEAD / symbolic-ref / refs / stash state (the `.git/` probe)
+           catches commits, history rewrites, branch/tag moves, stashes
+presence   file-set membership only
+           catches files added or removed; ignores a content-only rewrite
+```
+
+`presence` is the deliberate trade of sensitivity for precision. A dev server
+rewriting an existing build artifact changes its content but not the file set,
+and the user never touched the tree — so the gate stays quiet. The cost is real
+and documented: under `presence`, rewriting an existing file is **not** a
+violation. A repository that needs that case caught uses the default `file`
+rule for the path instead.
+
+Untyped rules keep the historical meaning, so existing registries do not change
+behaviour: a bare path is a `file` rule, and the historical bare `.git/` rule
+keeps its git-state meaning. The type prefix is `file:` / `git:` / `presence:`.
+
 ## CLI surface
 
 ```

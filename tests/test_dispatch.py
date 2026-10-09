@@ -232,6 +232,191 @@ class ForbiddenPathTest(DispatchBase):
         self.assertEqual(self.active_claims(), 0)
 
 
+class ForbiddenSignalDiffTest(DispatchBase):
+    """End-to-end coverage for the card-31 signals."""
+
+    def _init_repo(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "probe@example.invalid"],
+            cwd=self.proj,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "probe"],
+            cwd=self.proj,
+            check=True,
+        )
+
+    def _commit_file(self, relative, content):
+        path = os.path.join(self.proj, relative)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        subprocess.run(["git", "add", relative], cwd=self.proj, check=True)
+        subprocess.run(["git", "commit", "-qm", "seed"], cwd=self.proj, check=True)
+
+    def _forbidden_payload(self, task_id):
+        detail = task_detail(self.ws, task_id)
+        event = next(e for e in detail["events"] if e["event"] == "forbidden")
+        return event["payload"]
+
+    def test_pre_existing_noise_with_noop_adapter_passes(self):
+        self._init_repo()
+        os.makedirs(os.path.join(self.proj, "noise"))
+        with open(os.path.join(self.proj, "noise", ".DS_Store"), "w") as handle:
+            handle.write("finder")
+        self.write_registry(verify="exit 0", forbidden=["noise/"])
+
+        task_id = dispatch(
+            self.ws, "proj", "x", adapter="custom:sh -c 'echo ok'"
+        )
+
+        detail = task_detail(self.ws, task_id)
+        self.assertEqual(detail["task"]["status"], STATUS_DONE)
+        self.assertFalse(any(e["event"] == "forbidden" for e in detail["events"]))
+
+    def test_pre_existing_noise_does_not_mask_outside_change(self):
+        self._init_repo()
+        self._commit_file("src/main.txt", "seed")
+        os.makedirs(os.path.join(self.proj, "noise"))
+        with open(os.path.join(self.proj, "noise", ".DS_Store"), "w") as handle:
+            handle.write("finder")
+        self.write_registry(verify="exit 0", forbidden=["noise/"])
+
+        task_id = dispatch(
+            self.ws,
+            "proj",
+            "x",
+            adapter=(
+                "custom:sh -c 'printf changed > src/main.txt && echo ok'"
+            ),
+        )
+
+        self.assertEqual(
+            task_detail(self.ws, task_id)["task"]["status"], STATUS_DONE
+        )
+
+    def test_presence_reports_a_new_file(self):
+        self._init_repo()
+        os.makedirs(os.path.join(self.proj, "dist"))
+        with open(os.path.join(self.proj, "dist", "keep.txt"), "w") as handle:
+            handle.write("keep")
+        self.write_registry(verify="exit 0", forbidden=["presence:dist/"])
+
+        with self.assertRaises(VerifyError) as ctx:
+            dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter=(
+                    "custom:sh -c 'printf new > dist/new.js && echo ok'"
+                ),
+            )
+
+        self.assertEqual(ctx.exception.exit_code, 71)
+        payload = self._forbidden_payload(self.latest_task_id())
+        self.assertEqual(payload["violations"][0]["kind"], "presence")
+        self.assertEqual(payload["violations"][0]["rule"], "presence:dist/")
+        self.assertIn("dist/new.js", payload["violations"][0]["paths"])
+
+    def test_presence_ignores_other_process_rewriting_existing_file(self):
+        self._init_repo()
+        self._commit_file("dist/app.js", "seed")
+        self.write_registry(verify="exit 0", forbidden=["presence:dist/"])
+
+        task_id = dispatch(
+            self.ws,
+            "proj",
+            "x",
+            adapter=(
+                "custom:sh -c '(sleep 0.2; "
+                "printf devserver-rewrite > dist/app.js) & sleep 0.6; echo ok'"
+            ),
+        )
+
+        self.assertEqual(
+            task_detail(self.ws, task_id)["task"]["status"], STATUS_DONE
+        )
+
+    def test_presence_ignores_adapter_rewriting_existing_file(self):
+        self._init_repo()
+        self._commit_file("dist/app.js", "seed")
+        self.write_registry(verify="exit 0", forbidden=["presence:dist/"])
+
+        task_id = dispatch(
+            self.ws,
+            "proj",
+            "x",
+            adapter=(
+                "custom:sh -c 'printf adapter-rewrite > dist/app.js && echo ok'"
+            ),
+        )
+
+        self.assertEqual(
+            task_detail(self.ws, task_id)["task"]["status"], STATUS_DONE
+        )
+
+    def test_explicit_git_rule_reports_a_commit_as_git_state(self):
+        self._init_repo()
+        self.write_registry(verify="exit 0", forbidden=["git:.git/"])
+        with self.assertRaises(VerifyError) as ctx:
+            dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter=(
+                    "custom:sh -c 'git -C {workdir} commit --allow-empty "
+                    "-qm probe && echo ok'"
+                ),
+            )
+        self.assertEqual(ctx.exception.exit_code, 71)
+        payload = self._forbidden_payload(self.latest_task_id())
+        violation = payload["violations"][0]
+        self.assertEqual(violation["kind"], "git-state")
+        self.assertEqual(violation["rule"], "git:.git/")
+        self.assertIn("HEAD", violation["changed"])
+
+    def test_explicit_file_dot_git_rule_matches_legacy_untargeted_behavior(self):
+        # `file:.git/` deliberately opts back into the file-fingerprint signal
+        # for the `.git/` tree, the same tree legacy untyped non-`.git` rules
+        # fingerprint. A commit mutates that tree, so it is a violation.
+        self._init_repo()
+        self.write_registry(verify="exit 0", forbidden=["file:.git/"])
+        with self.assertRaises(VerifyError) as ctx:
+            dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter=(
+                    "custom:sh -c 'git -C {workdir} commit --allow-empty "
+                    "-qm probe && echo ok'"
+                ),
+            )
+        self.assertEqual(ctx.exception.exit_code, 71)
+
+    def test_file_rule_still_reports_content_rewrite(self):
+        self._init_repo()
+        self._commit_file("protected/keep.txt", "seed")
+        self.write_registry(verify="exit 0", forbidden=["protected/"])
+
+        with self.assertRaises(VerifyError) as ctx:
+            dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter=(
+                    "custom:sh -c 'printf adapter-rewrite > protected/keep.txt "
+                    "&& echo ok'"
+                ),
+            )
+
+        self.assertEqual(ctx.exception.exit_code, 71)
+        payload = self._forbidden_payload(self.latest_task_id())
+        self.assertEqual(payload["violations"][0]["kind"], "file")
+        self.assertIn("protected/keep.txt", payload["violations"][0]["paths"])
+
+
 class GitStateForbiddenTest(DispatchBase):
     def _init_repo(self):
         subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True)

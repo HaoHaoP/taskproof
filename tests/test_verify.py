@@ -36,6 +36,54 @@ class ForbiddenPathTest(unittest.TestCase):
         hits = verify.check_forbidden("/repo", ["/repo/dist/"], ["dist/app.js"])
         self.assertEqual(hits, ["dist/app.js"])
 
+    def test_typed_path_prefixes_are_stripped_for_matching(self):
+        self.assertEqual(
+            verify.check_forbidden("/repo", ["file:dist/"], ["dist/app.js"]),
+            ["dist/app.js"],
+        )
+        self.assertEqual(
+            verify.check_forbidden(
+                "/repo", ["presence:dist/"], ["dist/app.js"]
+            ),
+            ["dist/app.js"],
+        )
+        self.assertEqual(
+            verify.check_forbidden("/repo", ["git:.git/"], ["src/main.py"]), []
+        )
+
+
+class ForbiddenRuleParseTest(unittest.TestCase):
+    def test_untyped_rule_is_file(self):
+        rule = verify.parse_forbidden_rule("dist/")
+        self.assertEqual((rule.kind, rule.path, rule.raw), ("file", "dist/", "dist/"))
+
+    def test_explicit_file_rule(self):
+        rule = verify.parse_forbidden_rule("file:dist/")
+        self.assertEqual((rule.kind, rule.path), ("file", "dist/"))
+
+    def test_presence_rule(self):
+        rule = verify.parse_forbidden_rule("presence:dist/")
+        self.assertEqual((rule.kind, rule.path), ("presence", "dist/"))
+
+    def test_git_rule(self):
+        rule = verify.parse_forbidden_rule("git:.git/")
+        self.assertEqual((rule.kind, rule.path), ("git", ".git/"))
+
+
+class ChangedFilesDiffTest(unittest.TestCase):
+    def test_pre_existing_status_is_not_a_difference(self):
+        before = {"noise/.DS_Store": "??"}
+        after = {"noise/.DS_Store": "??"}
+        self.assertEqual(verify.diff_changed_files(before, after), [])
+
+    def test_added_removed_and_status_changed_paths(self):
+        before = {"kept.txt": " M", "gone.txt": "??"}
+        after = {"kept.txt": "A ", "new.txt": "??"}
+        self.assertEqual(
+            verify.diff_changed_files(before, after),
+            ["gone.txt", "kept.txt", "new.txt"],
+        )
+
 
 class ForbiddenSnapshotTest(unittest.TestCase):
     """The guard cannot rest on the git change list.
@@ -114,6 +162,36 @@ class ForbiddenSnapshotTest(unittest.TestCase):
             verify.SNAPSHOT_LIMIT = original
         self.assertTrue(truncated)
         self.assertLessEqual(len(entries), 3)
+
+    def test_presence_ignores_content_change_but_sees_add_and_remove(self):
+        keep = os.path.join(self.workdir, "dist", "keep.js")
+        with open(keep, "w") as handle:
+            handle.write("one")
+        before, _ = self._snapshot("dist/")
+
+        # Same path set, different fingerprints: presence must stay quiet.
+        with open(keep, "w") as handle:
+            handle.write("two-much-longer")
+        content_only, _ = self._snapshot("dist/")
+        self.assertEqual(
+            verify.diff_presence_snapshots(before, content_only), []
+        )
+
+        added = os.path.join(self.workdir, "dist", "new.js")
+        with open(added, "w") as handle:
+            handle.write("new")
+        after_add, _ = self._snapshot("dist/")
+        self.assertEqual(
+            verify.diff_presence_snapshots(before, after_add), ["dist/new.js"]
+        )
+
+        os.remove(keep)
+        after_remove, _ = self._snapshot("dist/")
+        # Removal is spotted relative to the state that still had the file.
+        self.assertEqual(
+            verify.diff_presence_snapshots(after_add, after_remove),
+            ["dist/keep.js"],
+        )
 
 
 class GitStateSnapshotTest(unittest.TestCase):

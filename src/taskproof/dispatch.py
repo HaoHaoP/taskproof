@@ -517,21 +517,39 @@ def _execute(
 
     # ⑤ run the agent CLI, teeing its output to `log_path` as it goes.
     #
-    # Snapshot the protected paths first. The git change list consulted below
-    # cannot see inside `.git/` and omits ignored paths, so this snapshot is what
-    # actually covers `forbidden_paths`. A rule targeting `.git` itself is the
-    # exception: compare git state (HEAD/refs/stash), not its bookkeeping files.
+    # Snapshot both sides of the run before launching the adapter. The git
+    # change list is naturally a current-state snapshot, but the gate needs a
+    # difference: pre-existing dirty/untracked paths are not the adapter's
+    # work. The protected-path snapshots remain the backstop for ignored paths
+    # and `.git/`.
     git_rules = []
     file_rules = []
+    presence_rules = []
     for raw in project.forbidden_paths or []:
+        # Keep the historical untyped `.git/` spelling working: it has always
+        # meant the state probe since card 30. An explicit `file:.git/` opts
+        # back into the file fingerprint signal.
         if verify.is_git_forbidden_rule(run_dir, raw):
             git_rules.append(raw)
+            continue
+        rule = verify.parse_forbidden_rule(raw)
+        if rule is None:
+            continue
+        if rule.kind == "git":
+            git_rules.append(raw)
+        elif rule.kind == "presence":
+            presence_rules.append(rule)
         else:
-            file_rules.append(raw)
-    forbidden_before, forbidden_truncated = verify.snapshot_forbidden(
-        run_dir, file_rules
+            file_rules.append(rule)
+
+    forbidden_before, file_before_truncated = verify.snapshot_forbidden(
+        run_dir, [rule.path for rule in file_rules]
+    )
+    presence_before, presence_before_truncated = verify.snapshot_forbidden(
+        run_dir, [rule.path for rule in presence_rules]
     )
     git_state_before = verify.git_state_snapshot(run_dir) if git_rules else {}
+    changed_before = verify.changed_files_snapshot(run_dir)
 
     def _record_pgid(proc) -> None:
         """Persist the adapter's own group id the moment it exists.
@@ -593,8 +611,23 @@ def _execute(
     # exits, and BEFORE our own change detection runs. `git status` refreshes the
     # index and takes a lock file, so snapshotting after it would attribute our
     # own housekeeping to the agent: with a `.git/` rule that made every run fail.
-    forbidden_after, _ = verify.snapshot_forbidden(run_dir, file_rules)
+    forbidden_after, file_after_truncated = verify.snapshot_forbidden(
+        run_dir, [rule.path for rule in file_rules]
+    )
+    presence_after, presence_after_truncated = verify.snapshot_forbidden(
+        run_dir, [rule.path for rule in presence_rules]
+    )
+    # Take the git-state probe before our own `git status` snapshots: that call
+    # can refresh `.git/index`, which a state-only `.git/` rule must not read as
+    # the agent's doing (same reason the fingerprint snapshot runs first).
     git_state_after = verify.git_state_snapshot(run_dir) if git_rules else {}
+    changed_after = verify.changed_files_snapshot(run_dir)
+    forbidden_truncated = (
+        file_before_truncated
+        or file_after_truncated
+        or presence_before_truncated
+        or presence_after_truncated
+    )
 
     # ⑤ (cont.) parse the adapter's result. A parse failure is an adapter failure
     # (exit 70) — it must never be rounded up to success.
@@ -642,14 +675,17 @@ def _execute(
     )
 
     # ⑥ change + forbidden-path check, on the PROJECT workdir (or its worktree).
-    changed = verify.changed_files(run_dir)
+    changed = verify.diff_changed_files(changed_before, changed_after)
     files_changed = verify.detect_changes(run_dir)
-    # Two signals: the git change list plus the before/after fingerprint of the
-    # protected paths. A `.git` rule uses a third, state-only signal instead of
-    # the fingerprint, so index refreshes do not look like forbidden edits.
-    file_changes = sorted(
-        set(verify.check_forbidden(run_dir, file_rules, changed))
-        | set(verify.diff_snapshots(forbidden_before, forbidden_after))
+    # Three independent signals:
+    #   file       -> git status difference + size:mtime_ns fingerprints
+    #   presence   -> before/after file-set membership only
+    #   git-state  -> HEAD/refs/stash snapshot
+    file_snapshot_changes = verify.diff_snapshots(
+        forbidden_before, forbidden_after
+    )
+    presence_changes = verify.diff_presence_snapshots(
+        presence_before, presence_after
     )
     git_state_changes = (
         verify.diff_snapshots(git_state_before, git_state_after) if git_rules else []
@@ -657,19 +693,31 @@ def _execute(
 
     violations = []
     if git_state_changes:
-        violations.append(
-            {"rule": ".git", "kind": "git-state", "changed": git_state_changes}
-        )
-    for raw in file_rules:
-        if raw is None:
-            continue
+        for raw in git_rules:
+            label = ".git" if verify.is_git_forbidden_rule(run_dir, raw) else str(raw)
+            violations.append(
+                {"rule": label, "kind": "git-state", "changed": git_state_changes}
+            )
+    for rule in file_rules:
         rule_paths = sorted(
-            set(verify.check_forbidden(run_dir, [raw], changed))
-            | set(verify.check_forbidden(run_dir, [raw], file_changes))
+            set(verify.check_forbidden(run_dir, [rule.path], changed))
+            | set(
+                verify.check_forbidden(
+                    run_dir, [rule.path], file_snapshot_changes
+                )
+            )
         )
         if rule_paths:
             violations.append(
-                {"rule": str(raw), "kind": "file", "paths": rule_paths}
+                {"rule": rule.raw, "kind": "file", "paths": rule_paths}
+            )
+    for rule in presence_rules:
+        rule_paths = verify.check_forbidden(
+            run_dir, [rule.path], presence_changes
+        )
+        if rule_paths:
+            violations.append(
+                {"rule": rule.raw, "kind": "presence", "paths": rule_paths}
             )
 
     violation_paths = sorted(
