@@ -80,6 +80,10 @@ describe('settings.json migration', () => {
     expect(loaded.theme).toBe('dark')
     expect(loaded.portMode).toBe('auto')
     expect(loaded.launch).toBe('auto')
+    // Empty by default so `resolveLaunchCommand` auto-resolves (bundled runtime,
+    // then PATH, then python3); a fresh install must not be pinned to a bare
+    // `taskproof` that only a login shell could find.
+    expect(loaded.taskproofPath).toBe('')
   })
 
   it('persists a desktop-integration switch to disk for the next read', async () => {

@@ -58,6 +58,40 @@ describe('card 39 message keys', () => {
   })
 })
 
+describe('card 47 message keys (launch source + git honesty)', () => {
+  it('names each launch source once, in both locales', () => {
+    expect(at(en, 'settings.source.setting')).toBe('Custom')
+    expect(at(zhCN, 'settings.source.setting')).toBe('自定义')
+    expect(at(en, 'settings.source.bundled')).toBe('Bundled runtime (shipped with the app)')
+    expect(at(zhCN, 'settings.source.bundled')).toBe('随包运行时（应用自带）')
+    expect(at(en, 'settings.source.path')).toBe('taskproof on PATH')
+    expect(at(zhCN, 'settings.source.path')).toBe('PATH 上的 taskproof')
+    expect(at(en, 'settings.source.python3')).toBe('python3 -m taskproof')
+    expect(at(zhCN, 'settings.source.python3')).toBe('python3 -m taskproof')
+  })
+
+  it('labels the effective-command / argv / git rows in both locales', () => {
+    for (const key of ['settings.launchSource', 'settings.launchArgv', 'settings.git']) {
+      expect(at(en, key), `en:${key}`).toBeTruthy()
+      expect(at(zhCN, key), `zh:${key}`).toBeTruthy()
+    }
+  })
+
+  it('states the missing-git truth, verbatim, in both locales', () => {
+    expect(at(en, 'settings.gitMissing')).toBe(
+      "git not detected: the gate's worktrees and out-of-scope checks are unavailable; everything else runs as usual."
+    )
+    expect(at(zhCN, 'settings.gitMissing')).toBe(
+      '未检测到 git：闸门的作业树（worktree）与越界判断不可用，其余功能照常运行'
+    )
+  })
+
+  it('guides the empty board toward registering a project', () => {
+    expect(at(en, 'empty.hint')).toContain('register')
+    expect(at(zhCN, 'empty.hint')).toContain('register')
+  })
+})
+
 describe('card 45 message keys (the cap-reached note)', () => {
   it('adds the cap-reached note in both locales', () => {
     expect(at(en, 'board.capReached')).toBe('fetch limit reached')

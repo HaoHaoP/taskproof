@@ -214,7 +214,7 @@ export default {
 
   empty: {
     projects: 'No projects registered yet',
-    hint: 'Register a repository to give the console something to show.'
+    hint: 'No projects yet. Add one on the Projects page (or run taskproof register <path>) and the console fills in.'
   },
 
   theme: { dark: 'Dark', light: 'Light', system: 'System' },
@@ -263,6 +263,20 @@ export default {
     workspaceDesc: 'Where the data lives. Read-only here.',
     taskproof: 'taskproof executable',
     taskproofDesc: 'Leave empty to resolve from PATH.',
+    diagnostics: 'Diagnostics',
+    launchSource: 'Effective command',
+    launchSourceDesc: 'The launcher the app actually resolved, by the same rules it spawns with.',
+    source: {
+      setting: 'Custom',
+      bundled: 'Bundled runtime (shipped with the app)',
+      path: 'taskproof on PATH',
+      python3: 'python3 -m taskproof'
+    },
+    launchArgv: 'Full argv',
+    launchArgvDesc: 'Copy-paste it to run the local service by hand.',
+    git: 'git',
+    gitMissing:
+      "git not detected: the gate's worktrees and out-of-scope checks are unavailable; everything else runs as usual.",
     version: 'Version',
     contract: 'Contract',
     contractSynced: 'in sync with the Python constants',

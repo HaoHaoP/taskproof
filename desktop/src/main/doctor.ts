@@ -16,6 +16,8 @@ export interface DoctorSpec {
   /** Arguments that precede the global flags, e.g. `['-m', 'taskproof']`. */
   prefixArgs: string[]
   workspace: string
+  /** Extra environment for the child (the augmented PATH), merged over `process.env`. */
+  env: Record<string, string>
 }
 
 const DOCTOR_TIMEOUT_MS = 15_000
@@ -54,7 +56,7 @@ export function runDoctor(spec: DoctorSpec): Promise<AdapterStatus[] | null> {
       child = spawn(
         spec.command,
         [...spec.prefixArgs, '--workspace', spec.workspace, '--json', 'doctor'],
-        { stdio: ['ignore', 'pipe', 'ignore'] }
+        { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, ...spec.env } }
       )
     } catch {
       resolve(null)

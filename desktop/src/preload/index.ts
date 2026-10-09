@@ -42,6 +42,7 @@ const api: TpApi = {
     version: () => ipcRenderer.invoke('tp:app:version'),
     adapters: () => ipcRenderer.invoke('tp:app:adapters'),
     about: () => ipcRenderer.invoke('tp:app:about'),
+    diagnostics: () => ipcRenderer.invoke('tp:app:diagnostics'),
     copyText: (text: string) => ipcRenderer.invoke('tp:app:copy-text', text),
     onShowAbout: (listener) => {
       const handler = (): void => listener()

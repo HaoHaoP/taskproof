@@ -18,7 +18,9 @@ import { ApiService, type LaunchSpec } from './service'
 import { runDoctor } from './doctor'
 import { createProjectsClient, type ProjectsClient } from './projects'
 import { createTasksClient, type TasksClient } from './tasks'
-import { commandParts as splitCommand, launchArgs, spawnOnBoot } from './launch'
+import { launchFlags, resolveLaunchCommand, spawnOnBoot, type ResolvedLaunchCommand } from './launch'
+import { gitAvailable } from './git'
+import { ensureWorkspace } from './workspace'
 import {
   DONE,
   NOT_PASSING,
@@ -46,26 +48,54 @@ app.setPath('userData', userDataDir)
 
 let mainWindow: BrowserWindow | null = null
 
-/** The taskproof command, split into an executable and its leading arguments
- *  ("python3 -m taskproof" must not be treated as one file name). */
-function commandParts(): string[] {
-  return splitCommand(settings.get().taskproofPath)
+/**
+ * TEST SEAM, *not* a user setting: the acceptance harness points this at a fake
+ * bundled runtime (`<tmp>/res/python/bin/python3` plus `<resources>/src`). A
+ * shipped app always reads `process.resourcesPath`, the directory Electron
+ * fills beside the app bundle. It is never stored in settings.json and never
+ * shown in the UI.
+ */
+function resourcesPath(): string {
+  return process.env.TASKPROOF_RESOURCES || process.resourcesPath
+}
+
+/**
+ * Resolve the child's command for a given settings snapshot, from the live
+ * environment. Kept per-snapshot so a settings change can compare its before
+ * and after argv without the cached `settings.get()` having already moved on.
+ */
+function resolveFor(current: DesktopSettings): ResolvedLaunchCommand {
+  return resolveLaunchCommand({
+    setting: current.taskproofPath,
+    resourcesPath: resourcesPath(),
+    pathEnv: process.env.PATH ?? '',
+    platform: process.platform,
+    exists: existsSync
+  })
+}
+
+/** The full argv (resolved command + launch flags) for a settings snapshot. */
+function argvFor(current: DesktopSettings): string[] {
+  return [...resolveFor(current).argv, ...launchFlags(current)]
 }
 
 /**
  * The child's argv, recomputed on every spawn -- so a settings change that lands
  * mid-session is honoured by the restart the settings handler triggers, not only
- * on the next app launch. The `portMode` / `port` mapping lives in `launch.ts`
- * so it can be pinned by a unit test.
+ * on the next app launch. Every decision (setting vs bundled vs PATH vs python3,
+ * and the augmented PATH handed to the child) comes from `resolveLaunchCommand`,
+ * which is what makes the settings page's "source" line truthful.
  */
 function launchSpec(): LaunchSpec {
   const current = settings.get()
+  const resolved = resolveFor(current)
   const spec: LaunchSpec = {
-    command: splitCommand(current.taskproofPath)[0],
+    command: resolved.argv[0],
     // The global `--workspace` flag precedes the subcommand; `--allow-write`
     // belongs to `api` and opens the token-protected write surface.
-    args: launchArgs(current),
-    workspace: current.workspace
+    args: [...resolved.argv.slice(1), ...launchFlags(current)],
+    workspace: current.workspace,
+    env: resolved.env
   }
   diag(`spawn ${spec.command} ${spec.args.join(' ')}`)
   return spec
@@ -369,8 +399,7 @@ function onSettingsChanged(before: DesktopSettings, after: DesktopSettings): voi
   if (before.autostart !== after.autostart) syncAutostart()
   if (before.dockBadge !== after.dockBadge) applyBadge()
 
-  const argvChanged =
-    launchArgs(before).join('\u0000') !== launchArgs(after).join('\u0000')
+  const argvChanged = argvFor(before).join('\u0000') !== argvFor(after).join('\u0000')
   if (argvChanged) {
     // A changed argv only takes effect on a fresh child. A manual service that
     // is not running stays down -- the user starts it when they are ready.
@@ -402,12 +431,14 @@ const CLI_VERSION_TIMEOUT_MS = 5_000
 
 /** Run `taskproof --version` and return the parsed version, or null. */
 function runCliVersion(): Promise<string | null> {
-  const parts = commandParts()
+  const resolved = resolveFor(settings.get())
+  const argv = [...resolved.argv, '--version']
   return new Promise((resolve) => {
     let child
     try {
-      child = spawn(parts[0], [...parts.slice(1), '--version'], {
-        stdio: ['ignore', 'pipe', 'ignore']
+      child = spawn(argv[0], argv.slice(1), {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: { ...process.env, ...resolved.env }
       })
     } catch {
       resolve(null)
@@ -617,12 +648,24 @@ function registerIpc(): void {
   // The About group's adapter lamps. The API has no adapter endpoint, so this
   // is the CLI's own self-check; it resolves null when it cannot answer.
   ipcMain.handle('tp:app:adapters', () => {
-    const parts = commandParts()
+    const resolved = resolveFor(settings.get())
     return runDoctor({
-      command: parts[0],
-      prefixArgs: parts.slice(1),
-      workspace: settings.get().workspace
+      command: resolved.argv[0],
+      prefixArgs: resolved.argv.slice(1),
+      workspace: settings.get().workspace,
+      env: resolved.env
     })
+  })
+  // The settings page's read-only diagnostics: the *effective* launch command
+  // (its source and its full argv, so "which taskproof?" is checkable) and the
+  // git verdict. Both come from the same resolution the child uses -- no second,
+  // staler answer.
+  ipcMain.handle('tp:app:diagnostics', async () => {
+    const resolved = resolveFor(settings.get())
+    return {
+      launch: { source: resolved.source, argv: argvFor(settings.get()) },
+      gitAvailable: await gitAvailable(resolved.env)
+    }
   })
 
   // Registry writes. Each answers with a typed result; the token and the
@@ -662,9 +705,17 @@ api.onStatus((status) => {
 
 app.whenReady().then(async () => {
   app.setAppUserModelId('com.taskproof.desktop')
+  // First boot: make the workspace real (directory + a minimal, project-less
+  // registry) before anything reads it, so a fresh install is usable instead of
+  // quietly pointing at a directory that isn't there. Never touches tasks, never
+  // overwrites an existing file.
+  ensureWorkspace(settings.get().workspace)
   registerIpc()
   Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate(showAbout)))
   createWindow()
+  // Warm the git verdict in the background: a missing git is a settings-page
+  // notice, never a boot gate -- the app must come up with or without it.
+  void gitAvailable(resolveFor(settings.get()).env)
   // The desktop switches are aligned once at boot. `launch` is the only one that
   // decides whether a child exists at all.
   syncTray()

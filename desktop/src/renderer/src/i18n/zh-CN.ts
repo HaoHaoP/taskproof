@@ -205,7 +205,7 @@ export default {
 
   empty: {
     projects: '还没有登记项目',
-    hint: '登记一个仓库，调度台就有人可看。'
+    hint: '还没有项目。到「项目」页新增一个（或运行 taskproof register <path>），调度台就有人可看。'
   },
 
   theme: { dark: '深色', light: '浅色', system: '跟随系统' },
@@ -254,6 +254,19 @@ export default {
     workspaceDesc: '数据位置，只读展示。',
     taskproof: 'taskproof 可执行文件',
     taskproofDesc: '留空则从 PATH 找。',
+    diagnostics: '诊断',
+    launchSource: '生效命令',
+    launchSourceDesc: '应用最终选中的启动方式，与实际拉起子进程的判定同源。',
+    source: {
+      setting: '自定义',
+      bundled: '随包运行时（应用自带）',
+      path: 'PATH 上的 taskproof',
+      python3: 'python3 -m taskproof'
+    },
+    launchArgv: '完整 argv',
+    launchArgvDesc: '可复制到终端手动运行本地服务。',
+    git: 'git',
+    gitMissing: '未检测到 git：闸门的作业树（worktree）与越界判断不可用，其余功能照常运行',
     version: '版本',
     contract: '契约',
     contractSynced: '与 Python 常量同步',

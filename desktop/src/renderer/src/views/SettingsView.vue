@@ -20,6 +20,7 @@ import { useBoardStore } from '../stores/board'
 import { useSettingsStore } from '../stores/settings'
 import type {
   AdapterStatus,
+  DiagnosticsInfo,
   LanguageChoice,
   LaunchMode,
   PollChoice,
@@ -130,11 +131,44 @@ const launchOptions = computed(() => [
  * run, which the row shows as a dash rather than inventing a verdict.
  */
 const adapters = ref<AdapterStatus[] | null>(null)
+
+/**
+ * The settings page's diagnostic rows: the *effective* launch command (its
+ * source and full argv) and the git verdict. Both come from the main process,
+ * which resolves them the exact way it will spawn -- so "one install and it
+ * works" is checkable here, not a claim, and a missing git is visible without
+ * being a gate.
+ */
+const diagnostics = ref<DiagnosticsInfo | null>(null)
+
+async function loadDiagnostics(): Promise<void> {
+  const tp = window.tp
+  if (!tp) return
+  diagnostics.value = await tp.app.diagnostics()
+}
+
 onMounted(async () => {
   const tp = window.tp
   if (!tp) return
   adapters.value = await tp.app.adapters()
+  await loadDiagnostics()
 })
+
+// The launch source follows the `taskproof` box: editing it re-resolves, so the
+// "effective command" line never shows a stale answer.
+watch(
+  () => settings.settings.taskproofPath,
+  () => {
+    void loadDiagnostics()
+  }
+)
+
+const launchSourceLabel = computed(() => {
+  const source = diagnostics.value?.launch.source
+  return source ? t(`settings.source.${source}`) : '—'
+})
+const launchArgv = computed(() => diagnostics.value?.launch.argv.join(' ') ?? '')
+const gitMissing = computed(() => diagnostics.value?.gitAvailable === false)
 
 function onLanguage(value: unknown): void {
   settings.setLanguage(value as LanguageChoice)
@@ -290,6 +324,36 @@ function openRegistry(): void {
         </section>
 
         <section class="setgroup">
+          <h4>{{ t('settings.diagnostics') }}</h4>
+          <div class="setcard">
+            <div class="setrow">
+              <div class="lab">
+                <div class="t">{{ t('settings.launchSource') }}</div>
+                <div class="d">{{ t('settings.launchSourceDesc') }}</div>
+              </div>
+              <div class="ctl">
+                <span class="ro">{{ launchSourceLabel }}</span>
+              </div>
+            </div>
+            <div class="setrow">
+              <div class="lab">
+                <div class="t">{{ t('settings.launchArgv') }}</div>
+                <div class="d">{{ t('settings.launchArgvDesc') }}</div>
+              </div>
+              <div class="ctl wide">
+                <span class="ro argvcopy">{{ launchArgv || '—' }}</span>
+              </div>
+            </div>
+            <div v-if="gitMissing" class="setrow">
+              <div class="lab">
+                <div class="t">{{ t('settings.git') }}</div>
+                <div class="d gitmissing">{{ t('settings.gitMissing') }}</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="setgroup">
           <h4>{{ t('settings.desktop') }}</h4>
           <div class="setcard">
             <div class="setrow">
@@ -438,5 +502,17 @@ function openRegistry(): void {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+/* The full argv wraps instead of clipping, and stays selectable so the user can
+   copy it and run the service by hand -- the project's checkable style. */
+.argvcopy {
+  text-align: right;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+/* A missing git is a notice, not an alarm: amber, never the failure red. */
+.gitmissing {
+  color: var(--c-timeout);
 }
 </style>

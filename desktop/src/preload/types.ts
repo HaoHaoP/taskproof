@@ -257,6 +257,31 @@ export interface AdapterStatus {
 }
 
 /**
+ * Where the app's launch argv came from, in the pinned priority order. The
+ * settings page renders this so "one install and it works" is checkable, not a
+ * claim: the user can see it resolved the bundled runtime, the PATH, or the
+ * `python3` fallback.
+ */
+export type LaunchSource = 'setting' | 'bundled' | 'path' | 'python3'
+
+/** The resolved launch command: its origin and the full argv the app would run. */
+export interface LaunchInfo {
+  source: LaunchSource
+  /** The complete argv, including the launch flags -- copy-pasteable by hand. */
+  argv: string[]
+}
+
+/** The settings page's read-only diagnostics: the launch command and git. */
+export interface DiagnosticsInfo {
+  launch: LaunchInfo
+  /**
+   * False when `git --version` fails on the (augmented) PATH. A missing git
+   * disables the gate's worktree / out-of-scope checks but never blocks the app.
+   */
+  gitAvailable: boolean
+}
+
+/**
  * The three runtime versions the About sheet reports. Electron bundles a
  * specific Chromium and Node, so a bug report that only says "the app" is
  * hard to place -- these pin exactly which engine the user was running.
@@ -334,6 +359,11 @@ export interface TpApi {
     adapters(): Promise<AdapterStatus[] | null>
     /** App / CLI / runtime versions and the userData path, in one round trip. */
     about(): Promise<AboutInfo>
+    /**
+     * The resolved launch command (source + full argv) and the git verdict,
+     * for the settings page's diagnostic rows. Read-only; never a user setting.
+     */
+    diagnostics(): Promise<DiagnosticsInfo>
     /** Write the assembed diagnostic text to the system clipboard. */
     copyText(text: string): Promise<void>
     /**

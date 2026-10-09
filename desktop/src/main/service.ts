@@ -24,6 +24,9 @@ export interface LaunchSpec {
   command: string
   args: string[]
   workspace: string
+  /** Extra environment for the child (the augmented PATH, plus PYTHONPATH when
+   *  the bundled runtime is used). Merged over `process.env` at spawn. */
+  env: Record<string, string>
 }
 
 type Listener = (status: ServiceStatus) => void
@@ -103,7 +106,10 @@ export class ApiService {
 
     let child: ChildProcess
     try {
-      child = spawn(spec.command, spec.args, { stdio: ['ignore', 'pipe', 'pipe'] })
+      child = spawn(spec.command, spec.args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ...spec.env }
+      })
     } catch (error) {
       this.emit({ state: 'failed', detail: String(error) })
       return this.status

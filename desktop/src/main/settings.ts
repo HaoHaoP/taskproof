@@ -18,9 +18,12 @@ function defaults(): DesktopSettings {
     language: 'system',
     poll: '2s',
     workspace: join(app.getPath('home'), '.taskproof'),
-    // Resolved on PATH by default; the from-source workflow points this at a
-    // python interpreter script instead.
-    taskproofPath: process.env.TASKPROOF_CMD ?? 'taskproof',
+    // Empty by default: `resolveLaunchCommand` then auto-resolves -- the bundled
+    // runtime first, then `taskproof` on the (augmented) PATH, then
+    // `python3 -m taskproof`. A non-empty value is a user override and wins
+    // outright; the from-source / dev workflow still sets `TASKPROOF_CMD` to an
+    // interpreter + args ("python3 -m taskproof") and so keeps its say.
+    taskproofPath: process.env.TASKPROOF_CMD ?? '',
     portMode: 'auto',
     port: 8787,
     launch: 'auto',
