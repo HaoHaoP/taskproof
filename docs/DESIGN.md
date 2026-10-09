@@ -153,7 +153,8 @@ Same-group serial    only one task per group runs at a time
 Global cap           default 3 concurrent tasks
 Hard timeout         default 1800s; on expiry the task is judged stuck and
                      THAT task's process is killed
-Over-limit behaviour exit immediately (no queueing); the caller decides when to retry
+Over-limit behaviour a refused dispatch exits 75 (group busy / global cap);
+                     park it with `run --park` to queue it, or retry once a slot frees
 Process safety       only processes taskproof started are ever killed
 ```
 
@@ -259,7 +260,8 @@ taskproof register <path> [--dry-run]   probe a repo and register it
 taskproof projects                      list registered projects
 taskproof run <project|path> "<brief>"  dispatch (primary command)
           [--adapter X] [--model X] [--reasoning X]
-          [--read-only] [--worktree] [--no-verify] [--verify-only]
+          [--read-only] [--worktree] [--no-verify] [--timeout N]
+          [--park[=N]]  park it queued now; tail the queue, or pin wave N
 taskproof tasks [--status S] [--project P] [--limit N]
 taskproof show <task-id>                single task detail
 taskproof log <task-id>                 event stream
@@ -267,6 +269,7 @@ taskproof verify <task-id>              re-run acceptance (facts only; never mov
 taskproof accept <task-id>              clear a blocked card: done if acceptance passed, else failed
 taskproof rerun <task-id>               start a fresh, ledger-linked copy of a terminal task
 taskproof advance <task-id>             fire one queued task now, out of its wave
+taskproof queue                          resident daemon: push waves unattended (blocks)
 taskproof cancel <task-id>              stop a task (SIGTERM -> SIGKILL its own tree)
 taskproof rm <task-id>                  delete a terminal task's record, events and kept worktree
 taskproof board [--open | --serve PORT | --out FILE]
@@ -280,6 +283,30 @@ taskproof gc                            archive and rotate
 clean; if it still has changes it is kept, printed as
 `worktree kept: ... (N files changed)`, recorded as a `worktree` event, and
 deleted later by `taskproof rm <task-id>`.
+
+`--park[=N]` is the CLI entry to the queue: it writes a `queued` row
+(status `queued`, an explicit `queue_seq`) and returns at once — no concurrency
+slot is taken and no adapter is spawned. `--park` with no number **tails** the
+queue at `max(queue_seq) + 1`; `--park=N` pins wave `N`. Cards that share a
+`queue_seq` are one **wave**, and a wave only advances once every lower-numbered
+wave has drained. The run flags (`--worktree`, `--read-only`, `--no-verify`,
+`--timeout`, `--model`, `--reasoning`) are stored on the parked row and only take
+effect when it is advanced. A `run` with no `--park` keeps the old synchronous
+behaviour: it dispatches immediately.
+
+**Who advances the queue — two paths, a real trade-off:**
+
+* `taskproof queue` — a resident daemon that keeps pushing the current wave
+  unattended, retrying a same-group card that was refused (it stays `queued`,
+  never dropped). Convenient, but it will start the next card before the previous
+  one is committed, so two cards' diffs can blur together.
+* `taskproof advance <id>` — a human fires exactly one queued card, again and
+  again if they like; this preserves the per-card commit boundary, because the
+  next card only moves when the operator says so.
+
+Inside a wave, same-group mutual exclusion still applies: one card runs, the
+other is refused (exit 75) and **falls back to `queued` without being lost**; the
+daemon or a later `advance` picks it up.
 
 Human-readable output follows the locale; `--json` for machines.
 

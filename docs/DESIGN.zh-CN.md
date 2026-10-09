@@ -143,7 +143,8 @@ claims                          -- 并发守卫，带过期回收
 同组串行      每个分组同时只跑一个任务
 全局上限      默认 3 个并发任务
 硬超时        默认 1800 秒；超时判定卡死，只杀【该任务】的进程
-越限行为      立即退出（不排队），何时重试由调用方决定
+越限行为      被拒的派发退出 75（同组占用 / 全局上限）；
+              用 `run --park` 入队，或等一个槽释放后重试
 进程安全      只杀 taskproof 自己起的进程
 ```
 
@@ -229,7 +230,8 @@ taskproof register <path> [--dry-run]   探测仓库并登记
 taskproof projects                      列已登记项目
 taskproof run <project|path> "<brief>"  派活（主命令）
           [--adapter X] [--model X] [--reasoning X]
-          [--read-only] [--worktree] [--no-verify] [--verify-only]
+          [--read-only] [--worktree] [--no-verify] [--timeout N]
+          [--park[=N]]  只入队、先不发车；不写号=追尾，=N 指定波次
 taskproof tasks [--status S] [--project P] [--limit N]
 taskproof show <task-id>                单任务详情
 taskproof log <task-id>                 事件流
@@ -237,6 +239,7 @@ taskproof verify <task-id>              复跑验收（只更新事实，不动�
 taskproof accept <task-id>              放行 blocked 卡：验收过→done，否则→failed
 taskproof rerun <task-id>               从终态卡起一张新卡，并在账本里双向关联
 taskproof advance <task-id>             立刻发车：把一张排队卡单独越过波次推出去
+taskproof queue                          常驻守护进程：无人值守连推波次（阻塞）
 taskproof cancel <task-id>              停任务（对自己那棵进程树 SIGTERM→SIGKILL）
 taskproof rm <task-id>                  删除终态任务的记录、事件与保留的 worktree
 taskproof board [--open | --serve PORT | --out FILE]
@@ -249,6 +252,25 @@ taskproof gc                            归档与轮转
 （`<仓库父目录>/<仓库名>-wt-<任务id>`）。跑完干净就删除；若仍留有改动则保留，打印
 `worktree kept: ... (N files changed)`，追加一条 `worktree` 事件，之后由
 `taskproof rm <任务id>` 删除。
+
+`--park[=N]` 是队列的 CLI 入口：它只写一行 `queued` 记录（`status` 为
+`queued`，带一个显式 `queue_seq`）后立刻返回 —— 不占并发槽、不起适配器。
+`--park` 不带号是**追尾**：波次 = `max(queue_seq) + 1`；`--park=N` 显式钉在
+第 `N` 波。`queue_seq` 相同的卡属于**同一波**，只有所有更低编号的波全部排空，
+某一波才推进。运行开关（`--worktree`、`--read-only`、`--no-verify`、
+`--timeout`、`--model`、`--reasoning`）存进那张排队行，等它被推进时才生效。
+不带 `--park` 的 `run` 保持老的同步行为：立即发车。
+
+**谁推进队列 —— 两条路，各有取舍：**
+
+* `taskproof queue` —— 常驻守护进程，无人值守地把当前波次往前推；同组被拒的卡
+  （停在 `queued`、绝不丢弃）下一拍重试。省心，但它会在前一张还没提交时就开始
+  下一张，两张卡的 diff 会糊在一起。
+* `taskproof advance <id>` —— 人工一张一张地发；这样保住**逐卡提交边界**，下一张
+  只在操作者说发时才动。
+
+同一波内，同 group 互斥照旧生效：只跑一张，另一张被拒（exit 75）后**落回
+`queued` 不丢**，由守护进程或之后的 `advance` 接着推。
 
 人类可读输出跟随 locale；`--json` 给机器读。
 

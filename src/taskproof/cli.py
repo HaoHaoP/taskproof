@@ -89,6 +89,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--no-verify", action="store_true", help="skip acceptance (recorded as SKIPPED, not passed)")
     p.add_argument("--timeout", type=int, help="override the registry timeout (seconds)")
+    p.add_argument(
+        "--park",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="N",
+        help=(
+            "park the card queued instead of running it now (no concurrency slot, "
+            "no adapter); --park tails the queue at wave max(queue_seq)+1, "
+            "--park=N pins wave N; advance later with `taskproof queue` or `taskproof advance <id>`"
+        ),
+    )
 
     p = sub.add_parser("tasks", help="list tasks")
     p.add_argument("--status")
@@ -415,6 +427,22 @@ def cmd_projects(args):
 
 
 def cmd_run(args):
+    start = True
+    queue_seq = None
+    if args.park is not None:
+        # `--park` (no number) tails the queue at max(queue_seq)+1; `--park=N`
+        # pins wave N. Either way the card is only a row: no concurrency slot,
+        # no adapter, and no `started` event (card 22's queued branch).
+        start = False
+        if args.park == "":
+            queue_seq = dispatch.next_queue_seq(args.workspace)
+        else:
+            try:
+                queue_seq = int(args.park)
+            except (TypeError, ValueError):
+                raise UsageError(
+                    f"--park expects an integer wave number, got {args.park!r}"
+                )
     task_id = dispatch.dispatch(
         args.workspace,
         args.project,
@@ -426,10 +454,18 @@ def cmd_run(args):
         worktree=args.worktree,
         skip_verify=args.no_verify,
         timeout=args.timeout,
+        start=start,
+        queue_seq=queue_seq,
     )
     task = dispatch.task_detail(args.workspace, task_id).get("task") or {}
-    payload = {"task_id": task_id, "status": task.get("status"), "task": task}
-    emit(args, payload, f"{task_id}  {task.get('status', '')}  {args.project}")
+    status = task.get("status")
+    payload = {"task_id": task_id, "status": status, "task": task}
+    if start:
+        human = f"{task_id}  {status or ''}  {args.project}"
+    else:
+        payload["queue_seq"] = task.get("queue_seq")
+        human = f"parked {task_id} at wave {queue_seq}"
+    emit(args, payload, human)
     return 0
 
 

@@ -942,6 +942,78 @@ class AdvanceCapApiTest(_CapOneApiCase):
 
 
 # ---------------------------------------------------------------------------
+# Card 41: a global-cap refusal points at --park; a group refusal does not
+# ---------------------------------------------------------------------------
+
+
+class CapRefusalHintCliTest(unittest.TestCase):
+    """The CLI `run` refusal hint must name the way out, per refusal kind."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = self._tmp.name
+        self.ws = os.path.join(self.tmp, "workspace")
+        os.makedirs(self.ws)
+        self.alpha = os.path.join(self.tmp, "alpha-repo")
+        os.makedirs(self.alpha)
+        self.beta = os.path.join(self.tmp, "beta-repo")
+        os.makedirs(self.beta)
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write(
+                "[defaults]\nconcurrency = 1\ntimeout = 60\n\n"
+                '[[project]]\nid = "alpha"\n'
+                f"path = {_q(self.alpha)}\ngroup = \"alpha\"\n"
+                'verify = "exit 0"\nverify_kind = "check"\n\n'
+                '[[project]]\nid = "beta"\n'
+                f"path = {_q(self.beta)}\ngroup = \"beta\"\n"
+                'verify = "exit 0"\nverify_kind = "check"\n'
+            )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _run(self, *argv):
+        return subprocess.run(
+            [sys.executable, "-m", "taskproof", "--workspace", self.ws, *argv],
+            env=_env(),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    def _hold(self, group):
+        conn = storage.connect(storage.db_path(self.ws))
+        storage.migrate(conn)
+        lease = concurrency.acquire(conn, "holder", group, cap=1, ttl=120)
+
+        def _release():
+            concurrency.release(conn, lease)
+            conn.close()
+
+        return _release
+
+    def test_global_cap_refusal_hint_names_park(self):
+        release = self._hold("alpha")  # fills the only global slot
+        try:
+            proc = self._run("run", "beta", "brief", "--adapter", "custom:echo hi")
+        finally:
+            release()
+        self.assertEqual(proc.returncode, 75, proc.stderr)
+        self.assertIn("global cap", proc.stderr)
+        self.assertIn("--park", proc.stderr)
+
+    def test_same_group_refusal_hint_does_not_name_park(self):
+        release = self._hold("beta")  # beta's own group is busy
+        try:
+            proc = self._run("run", "beta", "brief", "--adapter", "custom:echo hi")
+        finally:
+            release()
+        self.assertEqual(proc.returncode, 75, proc.stderr)
+        self.assertIn("group", proc.stderr)
+        self.assertNotIn("--park", proc.stderr)
+
+
+# ---------------------------------------------------------------------------
 # --version
 # ---------------------------------------------------------------------------
 

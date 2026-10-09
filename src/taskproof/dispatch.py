@@ -33,7 +33,7 @@ from typing import Optional
 from . import concurrency, registry, storage, verify
 from .adapters import get as get_adapter
 from .adapters.base import ResultParseError
-from .errors import EXIT_VERIFY, AdapterError, UsageError, VerifyError
+from .errors import EXIT_VERIFY, AdapterError, ConcurrencyError, UsageError, VerifyError
 from .models import (
     STATUS_BLOCKED,
     STATUS_CANCELLED,
@@ -101,6 +101,47 @@ def prepare_workspace(workspace: str) -> None:
     if not os.path.exists(reg_path):
         with open(reg_path, "w", encoding="utf-8") as handle:
             handle.write(registry.SAMPLE_REGISTRY)
+
+
+def next_queue_seq(workspace: str) -> int:
+    """The wave a no-number tail-append should join: ``max(queue_seq) + 1``.
+
+    ``NULL`` seqs are skipped (the REST layer still permits a seq-less park),
+    and the tail never reuses a number another card already holds, so two
+    ``--park`` runs in a row land on two successive waves instead of quietly
+    overwriting each other. An empty queue starts at wave 1.
+    """
+    prepare_workspace(workspace)
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+        row = conn.execute("SELECT MAX(queue_seq) FROM tasks").fetchone()
+    finally:
+        conn.close()
+    top = row[0] if row is not None else None
+    return int(top) + 1 if top is not None else 1
+
+
+def _park_aware_refusal(exc: ConcurrencyError, cap: int) -> ConcurrencyError:
+    """Point a GLOBAL-cap refusal at ``--park`` instead of only "retry".
+
+    A same-group refusal is returned untouched: the queued card would sit in
+    the very same group and block again, so the honest hint there stays "wait
+    your turn". ``concurrency`` already phrases the two cases distinctly
+    ("global cap reached" vs "group '<g>' is busy") — the same signal the REST
+    layer turns into its ``reason`` field — so the reroute needs no change to
+    the concurrency module, and both the CLI ``run`` and the REST ``advance``
+    paths get it because both go through this module.
+    """
+    if str(exc).startswith("global cap"):
+        return ConcurrencyError(
+            str(exc),
+            hint=(
+                f"global cap of {cap} reached; queue it with --park, "
+                "or retry once a slot frees"
+            ),
+        )
+    return exc
 
 
 def dispatch(
@@ -211,9 +252,12 @@ def dispatch(
         # ③ claim the group slot + a slot under the global cap. A refusal is a
         # ConcurrencyError (exit 75) and nothing is queued.
         ttl = max(1, int(effective_timeout)) + 60
-        scopes = concurrency.acquire(
-            conn, task_id, project.group, cap=reg.concurrency, ttl=ttl
-        )
+        try:
+            scopes = concurrency.acquire(
+                conn, task_id, project.group, cap=reg.concurrency, ttl=ttl
+            )
+        except ConcurrencyError as exc:
+            raise _park_aware_refusal(exc, reg.concurrency) from None
 
         # ⑨ Whatever happens below — success, a recorded failure, or a raised
         # error — the exact credential from ③ is released. `release` verifies the
@@ -485,9 +529,12 @@ def run_queued(workspace: str, task_id: str) -> str:
         # 3. Claim the slot BEFORE flipping the row, so a refusal (exit 75)
         # leaves it exactly as the queue found it: `queued`, same seq, no pid.
         ttl = max(1, int(effective_timeout)) + 60
-        scopes = concurrency.acquire(
-            conn, task_id, project.group, cap=reg.concurrency, ttl=ttl
-        )
+        try:
+            scopes = concurrency.acquire(
+                conn, task_id, project.group, cap=reg.concurrency, ttl=ttl
+            )
+        except ConcurrencyError as exc:
+            raise _park_aware_refusal(exc, reg.concurrency) from None
         try:
             # 4. queued -> running, SAME id. Only status / pid / started_at are
             # rewritten; brief, queue_seq and created_at are left untouched.
