@@ -115,7 +115,7 @@ taskproof log <task-id> --follow
 **默认就该并行，不要习惯性串行。** 发车前：
 
 1. 先看 `group`：**不同 group 的任务应当同时发**。同一仓库注册多个条目本来就是为了这件事——只要文件范围不重叠，同时派发安全，也是压缩整体时间的主要手段。
-2. `[defaults] concurrency` 是**全局上限**（本机为 3）。先 `taskproof tasks --all` 数一下在跑几个，在 cap 之内就把独立工作一起发，别盲目发到槽满。
+2. **全局上限**是工作区级的，永远连同**生效值与来源**一起显示——`auto`（机器自动探测）、`toml`（`[defaults] concurrency`）、或 `cli`（一次性 `run --cap N`）。用 `taskproof config --show`（或 `taskproof doctor`）问它，别自己假设数字：全新工作区不带这个键，会自动探测 `clamp(2, cores // 4, 6)`，内存 < 8 GB 时为 2。先 `taskproof tasks --all` 数一下在跑几个，在 cap 之内就把独立工作一起发，别盲目发到槽满。改持久值用 `taskproof config --concurrency N`（保注释、不追溯）；只想抬高一次发车用 `run --cap N`。
 3. **新卡默认入队：`taskproof run --park`**（不带号 = 追尾，波次 = 当前最大 `queue_seq` + 1；`--park=N` 指定第 `N` 波）。`queue_seq` 相同的卡属于**同一波**，某一波只在所有更低编号的波排空后才推进。**同一 group 依旧同一时刻只允许一个任务**：被拒（exit 75）的同组卡**落回 `queued` 绝不丢**，下一拍重试。**谁推进由你定**：常驻的 `taskproof queue` 守护进程（无人值守连推），或人工 `taskproof advance <id>`。需要保住**逐卡提交边界**时选 `advance` —— 守护进程会在前一张还没提交时就开始下一张，两张卡的 diff 会糊在一起。
 4. 同 group 内确实要并行的唯一合法做法：另注册一个指向 **worktree** 的项目条目、给它不同的 group 名，运行时加 `--worktree`；且**只对文件范围不重叠的卡**这么做——两边 diff 事后由主智能体批量合并回主树。
 5. 因此**串行的判据只有一条：同一 group 且文件范围重叠**。其余情况都该并行。

@@ -34,7 +34,7 @@ import threading
 import tomllib
 from typing import List, Optional
 
-from . import verify
+from . import concurrency, verify
 from .errors import RegistryError
 from .models import Project
 
@@ -242,7 +242,10 @@ class Registry:
 
     @property
     def concurrency(self) -> int:
-        return int(self.defaults.get("concurrency", 3))
+        # The effective global cap: `[defaults] concurrency` when set, otherwise
+        # the machine fallback (card 42). Use `concurrency.resolve(...)` when the
+        # source has to be shown too.
+        return concurrency.resolve(self.defaults).value
 
     @property
     def timeout(self) -> int:
@@ -835,6 +838,127 @@ def delete_project(path: str, project_id: str, expected_hash: str):
         return project_id
 
 
+# ---------------------------------------------------------------------------
+# `[defaults]` writer (card 42) — surgical, comment-preserving.
+# ---------------------------------------------------------------------------
+#
+# `taskproof config --concurrency N` / `--timeout N` must NOT round-trip the
+# registry through a TOML renderer: that drops trailing comments such as
+#     `concurrency = 3   # global cap on simultaneous tasks`
+# Instead we locate the one assignment for the key inside `[defaults]` and swap
+# only its numeric value, keeping the key, the `=` spacing, the trailing comment
+# and the line ending byte-for-byte. Adding a key the table lacks inserts a
+# single line; everything else — blank lines, `[[project]]` blocks, every
+# comment and every other key — is carried through verbatim.
+#
+# The final write rides the same `tempfile.mkstemp` + `os.replace` path as the
+# project CRUD (`_atomic_replace`), so a crash mid-write can never truncate the
+# registry and a candidate the loader rejects never reaches disk.
+
+_DEFAULTS_HEADER_RE = re.compile(r"^\s*\[defaults\]\s*(?:#.*)?(?:\r?\n)?$")
+_DEFAULTS_KEYS = ("concurrency", "timeout")
+_ASSIGN_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<key>[A-Za-z0-9_-]+)\s*=")
+
+
+def _defaults_span(lines):
+    """``(start, end)`` line indices of the `[defaults]` table, or ``None``.
+
+    ``end`` is the next table header (any `[...]` / `[[...]]`) or EOF, so the
+    scan never strays into a `[[project]]` block.
+    """
+    for index, line in enumerate(lines):
+        if _DEFAULTS_HEADER_RE.match(line):
+            end = len(lines)
+            for probe in range(index + 1, len(lines)):
+                if _TABLE_HEADER_RE.match(lines[probe]):
+                    end = probe
+                    break
+            return index, end
+    return None
+
+
+def _swap_default_value(line: str, value: int) -> str:
+    """Return ``line`` with only the numeric value swapped for ``value``.
+
+    Keeps the key, the ``=`` spacing, any trailing comment and the line ending.
+    """
+    body, eol = line, ""
+    if body.endswith("\r\n"):
+        body, eol = body[:-2], "\r\n"
+    elif body.endswith("\n"):
+        body, eol = body[:-1], "\n"
+    head, sep, tail = body.partition("=")
+    comment = ""
+    if "#" in tail:
+        tail, _, comment = tail.partition("#")
+        comment = "#" + comment
+    lead = tail[: len(tail) - len(tail.lstrip())]
+    gap = tail[len(tail.rstrip()):]
+    return f"{head}{sep}{lead}{value}{gap}{comment}{eol}"
+
+
+def _upsert_default(lines, key: str, value: int) -> None:
+    """Replace, or else add, ``key``'s assignment inside `[defaults]`."""
+    span = _defaults_span(lines)
+    if span is None:
+        newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            lines[-1] += newline
+        if lines and lines[-1].strip():
+            lines.append(newline)
+        lines.append(f"[defaults]{newline}")
+        lines.append(f"{key} = {value}{newline}")
+        return
+
+    start, end = span
+    insert_at = start + 1
+    indent = ""
+    for index in range(start + 1, end):
+        match = _ASSIGN_RE.match(lines[index])
+        if match is None:
+            continue
+        if match.group("key") == key:
+            lines[index] = _swap_default_value(lines[index], value)
+            return
+        insert_at = index + 1
+        indent = match.group("indent")
+    newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+    lines.insert(insert_at, f"{indent}{key} = {value}{newline}")
+
+
+def set_default(path: str, key: str, value, *, expected_hash: Optional[str] = None) -> int:
+    """Set one `[defaults]` key in place, preserving every other byte.
+
+    Returns the integer written. Validates the key and the value here (the CLI
+    rejects out-of-range values first, so the error a caller actually sees names
+    the usable range). Creates the sample registry when the file is missing.
+    """
+    if key not in _DEFAULTS_KEYS:
+        raise RegistryError(f"unknown default key: {key}")
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise RegistryError(f"{key} must be an integer")
+    if number < 1:
+        raise RegistryError(f"{key} must be >= 1")
+    with _WRITE_LOCK:
+        if os.path.exists(path):
+            data = _read_bytes(path)
+            if expected_hash is not None:
+                _check_expected(path, data, expected_hash)
+            text = data.decode("utf-8")
+            parsed = _parsed_data(text)
+            count = len(parsed.get("project", []))
+        else:
+            text = SAMPLE_REGISTRY
+            count = 0
+        lines = text.splitlines(keepends=True)
+        _upsert_default(lines, key, number)
+        candidate = "".join(lines)
+        _atomic_replace(path, candidate, expected_count=count)
+        return number
+
+
 #: What a brand-new workspace starts from. Deliberately holds no projects.
 #:
 #: An example entry used to be seeded here, pointing at `/absolute/path/to/my-app`.
@@ -853,6 +977,9 @@ SAMPLE_REGISTRY = """\
 # Field reference: docs/REGISTRY.md
 
 [defaults]
-concurrency = 3   # global cap on simultaneous tasks
+# Global cap on simultaneous tasks. Left unset, taskproof auto-detects it from
+# this machine (clamp(2, cores // 4, 6); 2 when RAM < 8 GB). Uncomment and edit
+# to pin an explicit value, or use `taskproof config --concurrency N`.
+# concurrency = 3
 timeout = 1800    # seconds before a task is judged stuck
 """

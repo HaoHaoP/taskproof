@@ -12,7 +12,7 @@ import unittest
 import urllib.error
 import urllib.request
 
-from taskproof import dispatch, registry, storage
+from taskproof import concurrency, dispatch, registry, storage
 from taskproof.api import server
 from taskproof.models import Task
 
@@ -100,6 +100,21 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body["summary"]["done"], 1)
         self.assertIn("failed", body["summary"])
+
+    def test_health_exposes_the_effective_cap_and_source(self):
+        status, body = self._request("/api/health")
+        self.assertEqual(status, 200)
+        cap = body["concurrency"]
+        self.assertEqual(set(cap), {"value", "source", "detail"})
+        # No `concurrency` key in this workspace's registry -> auto.
+        self.assertEqual(cap["source"], "auto")
+        self.assertEqual(cap["value"], concurrency.detect())
+
+    def test_summary_exposes_the_effective_cap_and_source(self):
+        status, body = self._request("/api/summary")
+        self.assertEqual(status, 200)
+        self.assertEqual(set(body["concurrency"]), {"value", "source", "detail"})
+        self.assertEqual(body["concurrency"]["source"], "auto")
 
     def test_projects(self):
         status, body = self._request("/api/projects")

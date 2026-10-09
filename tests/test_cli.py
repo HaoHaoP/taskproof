@@ -6,14 +6,15 @@ The handlers are thin, so these tests pin the observable surface: return codes
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import os
 import tempfile
 import unittest
 
-from taskproof import cli, dispatch, registry
-from taskproof.models import STATUS_DONE, STATUS_QUEUED
+from taskproof import cli, concurrency, dispatch, registry, storage
+from taskproof.models import STATUS_DONE, STATUS_QUEUED, STATUS_RUNNING, Task
 
 
 def _q(value) -> str:
@@ -373,6 +374,210 @@ class RegisterTest(CliBase):
             "--workspace", self.ws, "register", self.proj, "--id", "dup"
         )
         self.assertEqual(code, 2)
+
+
+HANDWRITTEN_REGISTRY = """\
+# taskproof registry -- hand written, keep every comment
+
+[defaults]
+concurrency = 3   # global cap on simultaneous tasks
+timeout = 60    # seconds
+
+[[project]]
+id = "proj"
+path = "{path}"
+group = "proj"
+verify = "exit 0"
+verify_kind = "check"
+"""
+
+
+class ConfigCliTest(CliBase):
+    """Card 42: `taskproof config` shows source, writes in place, rejects bad input."""
+
+    def setUp(self):
+        super().setUp()
+        self.run_cli("--workspace", self.ws, "init")
+        self.reg_path = os.path.join(self.ws, "projects.toml")
+
+    def _hash(self):
+        with open(self.reg_path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+
+    def _write_handwritten(self):
+        os.makedirs(self.ws, exist_ok=True)
+        with open(self.reg_path, "w", encoding="utf-8") as fh:
+            fh.write(HANDWRITTEN_REGISTRY.format(path=self.proj))
+
+    def test_show_reports_auto_when_key_is_absent(self):
+        # `init` now ships the cap commented out, so a fresh workspace omits it.
+        code, out = self.run_cli("--workspace", self.ws, "--json", "config", "--show")
+        self.assertEqual(code, 0)
+        cap = json.loads(out)["concurrency"]
+        self.assertEqual(cap["source"], "auto")
+        self.assertEqual(cap["value"], concurrency.detect())
+        self.assertIn("核", cap["detail"])
+
+    def test_show_is_read_only(self):
+        self._write_handwritten()
+        before = self._hash()
+        code, out = self.run_cli("--workspace", self.ws, "config", "--show")
+        self.assertEqual(code, 0)
+        self.assertIn("concurrency = 3", out)
+        self.assertIn("projects.toml", out)  # the source is shown
+        self.assertEqual(self._hash(), before)
+
+    def test_set_writes_value_and_keeps_the_comment(self):
+        self._write_handwritten()
+        code, out = self.run_cli("--workspace", self.ws, "--json", "config", "--concurrency", "5")
+        self.assertEqual(code, 0, out)
+        payload = json.loads(out)
+        self.assertEqual(payload["concurrency"], {"value": 5, "source": "toml", "detail": "projects.toml"})
+        with open(self.reg_path, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn("concurrency = 5   # global cap on simultaneous tasks", text)
+        self.assertIn("timeout = 60    # seconds", text)
+        self.assertIn('id = "proj"', text)
+
+    def test_set_timeout(self):
+        code, out = self.run_cli("--workspace", self.ws, "config", "--timeout", "120")
+        self.assertEqual(code, 0, out)
+        reg = registry.load(self.reg_path)
+        self.assertEqual(reg.timeout, 120)
+
+    def test_non_integer_is_rejected_without_writing(self):
+        self._write_handwritten()
+        before = self._hash()
+        code, _ = self.run_cli("--workspace", self.ws, "config", "--concurrency", "abc")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self._hash(), before)
+
+    def test_below_one_is_rejected_without_writing(self):
+        self._write_handwritten()
+        before = self._hash()
+        code, _ = self.run_cli("--workspace", self.ws, "config", "--concurrency", "0")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self._hash(), before)
+
+    def test_lowering_prints_reminder_and_never_touches_running_cards(self):
+        self._write_handwritten()
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            storage.migrate(conn)
+            for i in range(3):
+                tid = f"t-hold{i}"
+                storage.insert_task(
+                    conn,
+                    Task(
+                        id=tid, project="proj", group=f"g{i}", brief="x",
+                        status=STATUS_RUNNING, adapter="codex",
+                        created_at=storage.now_iso(), started_at=storage.now_iso(),
+                    ),
+                )
+                concurrency.acquire(conn, tid, f"g{i}", cap=99, ttl=600)
+            before = {
+                row["id"]: row["status"]
+                for row in conn.execute("SELECT id, status FROM tasks").fetchall()
+            }
+        finally:
+            conn.close()
+
+        code, out = self.run_cli("--workspace", self.ws, "--json", "config", "--concurrency", "2")
+        self.assertEqual(code, 0, out)
+        payload = json.loads(out)
+        self.assertEqual(payload["concurrency"]["value"], 2)
+        self.assertEqual(len(payload["running_over_cap"]), 3)
+        self.assertEqual(
+            {row["id"] for row in payload["running_over_cap"]}, {"t-hold0", "t-hold1", "t-hold2"}
+        )
+
+        # The reminder (human view) names every running card and promises no kill.
+        code, human = self.run_cli("--workspace", self.ws, "config", "--concurrency", "2")
+        self.assertIn("不追溯", human)
+        self.assertIn("t-hold0", human)
+        self.assertIn("proj", human)
+
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            after = {
+                row["id"]: row["status"]
+                for row in conn.execute("SELECT id, status FROM tasks").fetchall()
+            }
+        finally:
+            conn.close()
+        self.assertEqual(after, before)
+
+
+class RunCapCliTest(CliBase):
+    """Card 42: `run --cap N` is a one-off override, recorded in the event stream."""
+
+    def setUp(self):
+        super().setUp()
+        self.run_cli("--workspace", self.ws, "init")
+        self.write_registry()  # concurrency = 3
+        self.reg_path = os.path.join(self.ws, "projects.toml")
+
+    def _hash(self):
+        with open(self.reg_path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+
+    def _hold(self, n):
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            storage.migrate(conn)
+            for i in range(n):
+                tid = f"t-hold{i}"
+                storage.insert_task(
+                    conn,
+                    Task(
+                        id=tid, project="proj", group=f"g{i}", brief="x",
+                        status=STATUS_RUNNING, adapter="codex",
+                        created_at=storage.now_iso(), started_at=storage.now_iso(),
+                    ),
+                )
+                concurrency.acquire(conn, tid, f"g{i}", cap=99, ttl=600)
+        finally:
+            conn.close()
+
+    def test_default_cap_refuses_but_cap_override_admits(self):
+        self._hold(3)  # fills the toml cap of 3
+        code, _ = self.run_cli(
+            "--workspace", self.ws, "run", "proj", "brief",
+            "--adapter", "custom:echo hi",
+        )
+        self.assertEqual(code, 75)
+
+        before = self._hash()
+        code, out = self.run_cli(
+            "--workspace", self.ws, "--json", "run", "proj", "brief",
+            "--adapter", "custom:echo hi", "--cap", "5",
+        )
+        self.assertEqual(code, 0, out)
+        task_id = json.loads(out)["task_id"]
+        self.assertEqual(self._hash(), before, "run --cap must not rewrite the registry")
+
+        detail = dispatch.task_detail(self.ws, task_id)
+        started = next(e for e in detail["events"] if e["event"] == "started")
+        self.assertEqual(started["payload"]["cap"], 5)
+        self.assertEqual(started["payload"]["cap_source"], "cli")
+
+    def test_park_records_the_cap_for_advance(self):
+        code, out = self.run_cli(
+            "--workspace", self.ws, "--json", "run", "proj", "brief",
+            "--adapter", "custom:echo hi", "--park", "--cap", "5",
+        )
+        self.assertEqual(code, 0, out)
+        task_id = json.loads(out)["task_id"]
+        detail = dispatch.task_detail(self.ws, task_id)
+        queued = next(e for e in detail["events"] if e["event"] == "queued")
+        self.assertEqual(queued["payload"]["cap"], 5)
+
+    def test_cap_below_one_is_a_usage_error(self):
+        code, _ = self.run_cli(
+            "--workspace", self.ws, "run", "proj", "brief",
+            "--adapter", "custom:echo hi", "--cap", "0",
+        )
+        self.assertEqual(code, 64)
 
 
 if __name__ == "__main__":

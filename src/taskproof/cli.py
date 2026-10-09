@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import time
 import webbrowser
+from datetime import datetime
 
 from . import (
     __version__,
@@ -90,6 +91,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-verify", action="store_true", help="skip acceptance (recorded as SKIPPED, not passed)")
     p.add_argument("--timeout", type=int, help="override the registry timeout (seconds)")
     p.add_argument(
+        "--cap",
+        type=int,
+        metavar="N",
+        help=(
+            "one-off global concurrency cap for THIS dispatch only (not written "
+            "to the registry); with --park it takes effect when the card is advanced"
+        ),
+    )
+    p.add_argument(
         "--park",
         nargs="?",
         const="",
@@ -165,6 +175,14 @@ def build_parser() -> argparse.ArgumentParser:
         "queue",
         help="run the resident queue daemon (advances parked tasks; blocks)",
     )
+
+    p = sub.add_parser(
+        "config",
+        help="show or set [defaults] (concurrency / timeout) without losing comments",
+    )
+    p.add_argument("--show", action="store_true", help="print the effective cap/timeout and where each came from")
+    p.add_argument("--concurrency", metavar="N", help="pin the global concurrency cap in [defaults] concurrency")
+    p.add_argument("--timeout", metavar="N", help="set [defaults] timeout (seconds)")
 
     sub.add_parser("doctor", help="environment self-check")
     sub.add_parser("gc", help="rotate the audit stream and prune old state")
@@ -443,6 +461,14 @@ def cmd_run(args):
                 raise UsageError(
                     f"--park expects an integer wave number, got {args.park!r}"
                 )
+    cap = None
+    if args.cap is not None:
+        if args.cap < 1:
+            raise UsageError(
+                f"--cap must be >= 1 (got {args.cap})",
+                hint="可用范围：整数且 >= 1（例如 --cap 5）",
+            )
+        cap = args.cap
     task_id = dispatch.dispatch(
         args.workspace,
         args.project,
@@ -456,6 +482,7 @@ def cmd_run(args):
         timeout=args.timeout,
         start=start,
         queue_seq=queue_seq,
+        cap=cap,
     )
     task = dispatch.task_detail(args.workspace, task_id).get("task") or {}
     status = task.get("status")
@@ -923,6 +950,17 @@ def _adapter_status() -> list:
     return results
 
 
+def _cap_source_text(cap) -> str:
+    """Doctor's source gloss for a concurrency dict (``auto``/``toml``/``cli``)."""
+    source = cap.get("source")
+    detail = cap.get("detail", "")
+    if source == concurrency.SOURCE_AUTO:
+        return f"自动探测 {detail}"
+    if source == concurrency.SOURCE_CLI:
+        return f"本次 {detail}"
+    return detail or str(source)
+
+
 def _doctor_human(report) -> str:
     lines = ["taskproof doctor", ""]
     python = report["python"]
@@ -946,6 +984,12 @@ def _doctor_human(report) -> str:
         )
     else:
         lines.append(f"  [!!] {reg['detail']}")
+    cap = report.get("concurrency")
+    if cap is not None:
+        lines.append(
+            f"  [ok] concurrency: {cap['value']} "
+            f"（来源：{_cap_source_text(cap)}）"
+        )
     lines.append("  adapters:")
     for item in report["adapters"]:
         mark = "ok" if item["installed"] else "!!"
@@ -958,6 +1002,161 @@ def _doctor_human(report) -> str:
     else:
         lines.append("all checks passed")
     return "\n".join(lines)
+
+
+_DEFAULT_TIMEOUT = 1800
+
+
+def _load_defaults(workspace):
+    """The `[defaults]` table of the workspace registry, or ``{}``.
+
+    Read-only and best-effort: a missing or broken registry simply means "no
+    configured defaults", which is exactly the auto-detect case (card 42)."""
+    try:
+        reg = registry.load(registry.workspace_registry_path(workspace))
+    except errors.TaskproofError:
+        return {}
+    return reg.defaults
+
+
+def _timeout_setting(defaults):
+    """The effective timeout plus its source, mirroring :func:`concurrency.resolve`."""
+    if "timeout" in (defaults or {}):
+        return {"value": int(defaults["timeout"]), "source": "toml", "detail": "projects.toml"}
+    return {"value": _DEFAULT_TIMEOUT, "source": "default", "detail": "内置默认"}
+
+
+def _positive_int(name, raw):
+    """Parse ``raw`` as an integer >= 1, or raise a UsageError naming the range.
+
+    Deliberately not delegated to argparse's ``type=int``: a rejected value must
+    produce a message that states the usable range (card 42) and, crucially, the
+    caller must be able to validate *every* flag before any write happens."""
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise UsageError(
+            f"{name} must be an integer >= 1 (got {raw!r})",
+            hint="可用范围：整数且 >= 1（例如 --concurrency 4）",
+        )
+    if value < 1:
+        raise UsageError(
+            f"{name} must be >= 1 (got {value})",
+            hint="可用范围：整数且 >= 1（例如 --concurrency 4）",
+        )
+    return value
+
+
+def _elapsed_seconds(iso_str):
+    if not iso_str:
+        return None
+    try:
+        then = datetime.fromisoformat(iso_str)
+    except (TypeError, ValueError):
+        return None
+    now = datetime.now(then.tzinfo) if then.tzinfo else datetime.now()
+    return max(0, int((now - then).total_seconds()))
+
+
+def _format_duration(seconds):
+    if seconds is None:
+        return "?"
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, sec = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m{sec}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes}m"
+
+
+def _active_running_tasks(workspace):
+    """Tasks currently holding a global slot: id / project / how long.
+
+    Reads the *claims* table, so it names exactly the cards the concurrency gate
+    is counting — never a card that merely looks busy. Strictly read-only: it
+    never creates the database, and opening an existing one touches only SQLite's
+    own sidecars."""
+    path = storage.db_path(workspace)
+    if not os.path.exists(path):
+        return []
+    conn = storage.connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT t.id AS id, t.project AS project, "
+            "       COALESCE(t.started_at, c.claimed_at) AS started_at "
+            "FROM claims c JOIN tasks t ON t.id = c.task_id "
+            "WHERE c.scope != ? AND julianday(c.expires_at) > julianday('now') "
+            "ORDER BY c.claimed_at",
+            (concurrency.GLOBAL_SCOPE,),
+        ).fetchall()
+    finally:
+        conn.close()
+    running = []
+    for row in rows:
+        started_at = row["started_at"]
+        running.append(
+            {
+                "id": row["id"],
+                "project": row["project"],
+                "started_at": started_at,
+                "elapsed_seconds": _elapsed_seconds(started_at),
+            }
+        )
+    return running
+
+
+def cmd_config(args):
+    """Show the effective `[defaults]`, or set `concurrency` / `timeout` in place.
+
+    Setting a value edits only the one line (comment-preserving) — see
+    `registry.set_default`. Every flag is validated before the first write, so a
+    bad value leaves the registry byte-identical. `--show` (and any rejected
+    input) is pure read."""
+    # Validate every write target *before* touching disk.
+    new_concurrency = None
+    new_timeout = None
+    if args.concurrency is not None:
+        new_concurrency = _positive_int("--concurrency", args.concurrency)
+    if args.timeout is not None:
+        new_timeout = _positive_int("--timeout", args.timeout)
+
+    reg_path = registry.workspace_registry_path(args.workspace)
+    if new_concurrency is not None:
+        registry.set_default(reg_path, "concurrency", new_concurrency)
+    if new_timeout is not None:
+        registry.set_default(reg_path, "timeout", new_timeout)
+
+    defaults = _load_defaults(args.workspace)
+    cap = concurrency.resolve(defaults)
+    timeout = _timeout_setting(defaults)
+    payload = {"concurrency": cap.as_dict(), "timeout": timeout}
+    human_lines = [
+        f"concurrency = {cap.value}（{concurrency.source_gloss(cap)}）",
+        f"timeout = {timeout['value']}（{timeout['detail']}）",
+    ]
+
+    # Non-retroactive (Q4): a *smaller* cap never touches a running card.
+    if new_concurrency is not None:
+        running = _active_running_tasks(args.workspace)
+        if len(running) > new_concurrency:
+            payload["running_over_cap"] = running
+            human_lines.append("")
+            human_lines.append(
+                f"注意：生效上限已降到 {new_concurrency}，但当前有 "
+                f"{len(running)} 张卡在跑（超过新上限）。"
+            )
+            human_lines.append("不追溯：这些卡照常跑完，状态不改、进程不杀。")
+            human_lines.append("在跑的卡：")
+            for row in running:
+                human_lines.append(
+                    f"  {row['id']}  {row['project']}  "
+                    f"{_format_duration(row['elapsed_seconds'])}"
+                )
+
+    emit(args, payload, "\n".join(human_lines))
+    return 0
 
 
 def cmd_doctor(args):
@@ -977,6 +1176,7 @@ def cmd_doctor(args):
 
     report["workspace"] = _check_workspace(args.workspace)
     report["registry"] = _check_registry(args.workspace)
+    report["concurrency"] = concurrency.resolve(_load_defaults(args.workspace)).as_dict()
     report["adapters"] = _adapter_status()
 
     problems = []
@@ -1039,6 +1239,7 @@ COMMANDS = {
     "queue": cmd_queue,
     "doctor": cmd_doctor,
     "gc": cmd_gc,
+    "config": cmd_config,
 }
 
 

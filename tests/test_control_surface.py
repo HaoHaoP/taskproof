@@ -981,16 +981,19 @@ class CapRefusalHintCliTest(unittest.TestCase):
             timeout=30,
         )
 
-    def _hold(self, group):
+    def _acquire(self, group, cap=1):
         conn = storage.connect(storage.db_path(self.ws))
         storage.migrate(conn)
-        lease = concurrency.acquire(conn, "holder", group, cap=1, ttl=120)
+        lease = concurrency.acquire(conn, "holder-" + group, group, cap=cap, ttl=120)
 
         def _release():
             concurrency.release(conn, lease)
             conn.close()
 
         return _release
+
+    def _hold(self, group):
+        return self._acquire(group, cap=1)
 
     def test_global_cap_refusal_hint_names_park(self):
         release = self._hold("alpha")  # fills the only global slot
@@ -1011,6 +1014,44 @@ class CapRefusalHintCliTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 75, proc.stderr)
         self.assertIn("group", proc.stderr)
         self.assertNotIn("--park", proc.stderr)
+
+    def test_global_cap_refusal_names_value_source_and_three_exits(self):
+        release = self._hold("alpha")  # fills the only global slot
+        try:
+            proc = self._run("run", "beta", "brief", "--adapter", "custom:echo hi")
+        finally:
+            release()
+        self.assertEqual(proc.returncode, 75, proc.stderr)
+        self.assertIn("上限 1", proc.stderr)
+        self.assertIn("来源：projects.toml", proc.stderr)
+        self.assertIn("--park", proc.stderr)
+        self.assertIn("run --cap", proc.stderr)
+        self.assertIn("taskproof config --concurrency", proc.stderr)
+
+    def test_global_cap_refusal_reports_the_auto_source(self):
+        # A registry with no `concurrency` key -> the effective cap (and the
+        # refusal that names it) come from the hardware probe.
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write(
+                "[defaults]\ntimeout = 60\n\n"
+                '[[project]]\nid = "alpha"\n'
+                f"path = {_q(self.alpha)}\ngroup = \"alpha\"\n"
+                'verify = "exit 0"\nverify_kind = "check"\n\n'
+                '[[project]]\nid = "beta"\n'
+                f"path = {_q(self.beta)}\ngroup = \"beta\"\n"
+                'verify = "exit 0"\nverify_kind = "check"\n'
+            )
+        n = concurrency.detect()
+        releases = [self._acquire(f"hold{i}", cap=n) for i in range(n)]
+        try:
+            proc = self._run("run", "beta", "brief", "--adapter", "custom:echo hi")
+        finally:
+            for release in releases:
+                release()
+        self.assertEqual(proc.returncode, 75, proc.stderr)
+        self.assertIn(f"上限 {n}", proc.stderr)
+        self.assertIn("来源：自动探测", proc.stderr)
+        self.assertIn("run --cap", proc.stderr)
 
 
 # ---------------------------------------------------------------------------

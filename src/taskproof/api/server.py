@@ -46,7 +46,7 @@ import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .. import __version__, dispatch, registry, storage
+from .. import __version__, concurrency, dispatch, registry, storage
 from ..errors import ConcurrencyError, RegistryError, UsageError
 
 #: Loopback only. Do not make this configurable to a routable address.
@@ -228,9 +228,18 @@ class _Handler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/") or "/"
 
         if path == "/api/health":
-            return 200, {"ok": True, "version": __version__}
+            return 200, {
+                "ok": True,
+                "version": __version__,
+                # Read-only effective cap + source (card 42). Card 39's desktop
+                # picks this up; the shape is `concurrency.CapSetting.as_dict()`.
+                "concurrency": self._concurrency(),
+            }
         if path == "/api/summary":
-            return 200, {"summary": self._summary()}
+            return 200, {
+                "summary": self._summary(),
+                "concurrency": self._concurrency(),
+            }
         if path == "/api/registry":
             return self._registry()
         if path == "/api/projects":
@@ -345,6 +354,20 @@ class _Handler(BaseHTTPRequestHandler):
         return 404, {"error": "not found", "path": parsed.path}
 
     # -- endpoints --------------------------------------------------------
+
+    def _concurrency(self):
+        """The effective global cap + its source, from the registry (never writes).
+
+        This is the one new *field* on an existing read-only endpoint — no new
+        write surface. Shape: ``{value: int, source: "auto"|"toml"|"cli",
+        detail: str}`` (see ``concurrency.CapSetting``).
+        """
+        try:
+            reg = registry.load(registry.workspace_registry_path(self.workspace))
+            defaults = reg.defaults
+        except RegistryError:
+            defaults = {}
+        return concurrency.resolve(defaults).as_dict()
 
     def _summary(self):
         conn = storage.connect(storage.db_path(self.workspace))

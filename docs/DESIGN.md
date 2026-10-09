@@ -150,11 +150,27 @@ Carried over from the predecessor, defaults configurable:
 
 ```
 Same-group serial    only one task per group runs at a time
-Global cap           default 3 concurrent tasks
+Global cap           the effective value is always shown WITH its source:
+                       auto  the machine fallback, clamp(2, cores // 4, 6);
+                             RAM < 8 GB -> 2; cores unknown -> 3. Workspace-wide,
+                             the default when no key is set. NEVER persisted (Q3).
+                       toml  `[defaults] concurrency` in the workspace registry
+                       cli   a one-off `run --cap N` for THIS dispatch only
+                     `taskproof config --show` prints value + source (auto shows
+                     the formula); `config --concurrency N` / `--timeout N` edits
+                     only that one line, preserving every comment and other byte;
+                     `taskproof doctor` and the read-only API expose the same
+                     `{value, source, detail}` shape.
 Hard timeout         default 1800s; on expiry the task is judged stuck and
                      THAT task's process is killed
 Over-limit behaviour a refused dispatch exits 75 (group busy / global cap);
-                     park it with `run --park` to queue it, or retry once a slot frees
+                     a GLOBAL-cap refusal names the effective value, its source
+                     and three ways out — wait (`--park`) / `run --cap N` /
+                     `taskproof config --concurrency N`. A same-group refusal
+                     stays silent on those: it is only "who runs", not capacity.
+Not retroactive      editing the cap never touches a running card; lowering it
+                     below the live count prints those cards and their elapsed
+                     time, and kills nothing.
 Process safety       only processes taskproof started are ever killed
 ```
 

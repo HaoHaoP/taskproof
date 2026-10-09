@@ -69,5 +69,79 @@ class ClaimTest(unittest.TestCase):
         self.assertEqual(concurrency.reap_expired(self.conn), 0)
 
 
+class AutoDetectTest(unittest.TestCase):
+    """Card 42: the auto-detected fallback cap — pure, conservative, stable."""
+
+    def test_one_slot_per_four_cores(self):
+        self.assertEqual(concurrency._auto_cap(14, 48 * 1024 ** 3)[0], 3)
+        self.assertEqual(concurrency._auto_cap(20, 48 * 1024 ** 3)[0], 5)
+
+    def test_floor_is_two(self):
+        self.assertEqual(concurrency._auto_cap(4, 32 * 1024 ** 3)[0], 2)
+        self.assertEqual(concurrency._auto_cap(2, 32 * 1024 ** 3)[0], 2)
+
+    def test_ceiling_is_six(self):
+        value, detail = concurrency._auto_cap(40, 256 * 1024 ** 3)
+        self.assertEqual(value, 6)
+        self.assertIn("40 核", detail)
+
+    def test_small_memory_is_two_regardless_of_cores(self):
+        value, detail = concurrency._auto_cap(64, 4 * 1024 ** 3)
+        self.assertEqual(value, 2)
+        self.assertIn("内存", detail)
+
+    def test_unknown_cores_falls_back_to_three(self):
+        self.assertEqual(concurrency._auto_cap(None, 48 * 1024 ** 3)[0], 3)
+        self.assertEqual(concurrency._auto_cap(0, None)[0], 3)
+        self.assertEqual(concurrency._auto_cap(-1, None)[0], 3)
+
+    def test_detect_is_stable_and_bounded(self):
+        first = concurrency.detect()
+        self.assertEqual(first, concurrency.detect())
+        self.assertGreaterEqual(first, 2)
+        self.assertLessEqual(first, 6)
+        self.assertIsInstance(concurrency.detect_detail(), str)
+
+    def test_memory_probe_never_raises(self):
+        value = concurrency._physical_memory_bytes()
+        self.assertTrue(value is None or value > 0)
+
+
+class ResolveTest(unittest.TestCase):
+    """Card 42: the three-state source resolution — cli > toml > auto."""
+
+    def test_cli_cap_wins_over_toml(self):
+        setting = concurrency.resolve({"concurrency": 5}, 1)
+        self.assertEqual((setting.value, setting.source), (1, "cli"))
+        self.assertIn("--cap 1", setting.detail)
+
+    def test_toml_beats_auto(self):
+        setting = concurrency.resolve({"concurrency": 5})
+        self.assertEqual((setting.value, setting.source), (5, "toml"))
+        self.assertEqual(setting.detail, "projects.toml")
+
+    def test_auto_when_unset(self):
+        for defaults in (None, {}):
+            setting = concurrency.resolve(defaults)
+            self.assertEqual(setting.source, "auto")
+            self.assertEqual(setting.value, concurrency.detect())
+
+    def test_wire_shape(self):
+        setting = concurrency.resolve({"concurrency": 4})
+        self.assertEqual(
+            setting.as_dict(),
+            {"value": 4, "source": "toml", "detail": "projects.toml"},
+        )
+
+    def test_source_labels_are_three_distinct_states(self):
+        auto = concurrency.CapSetting(3, concurrency.SOURCE_AUTO, "14 核 ÷ 4")
+        toml = concurrency.CapSetting(5, concurrency.SOURCE_TOML, "projects.toml")
+        cli = concurrency.CapSetting(7, concurrency.SOURCE_CLI, "--cap 7")
+        self.assertEqual(concurrency.source_label(auto), "自动探测 14 核 ÷ 4")
+        self.assertEqual(concurrency.source_label(toml), "projects.toml")
+        self.assertEqual(concurrency.source_label(cli), "本次 --cap 7")
+        self.assertEqual(concurrency.source_gloss(auto), "自动探测：14 核 ÷ 4")
+
+
 if __name__ == "__main__":
     unittest.main()

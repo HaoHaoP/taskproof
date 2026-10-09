@@ -27,6 +27,7 @@ import os
 import socket
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from typing import NamedTuple, Optional
 
 from .errors import ConcurrencyError
 from .storage import now_iso
@@ -38,6 +39,137 @@ GLOBAL_SCOPE = "global"
 # normalises them to UTC, so comparison never depends on the string offset.
 _ACTIVE = "julianday(expires_at) > julianday('now')"
 _EXPIRED = "julianday(expires_at) <= julianday('now')"
+
+
+# ---------------------------------------------------------------------------
+# The effective global cap: a value *and* where it came from (card 42).
+# ---------------------------------------------------------------------------
+#
+# The cap has three possible sources, in precedence order:
+#
+#   1. ``cli``   — a one-off ``run --cap N`` for this dispatch only, never
+#                  persisted;
+#   2. ``toml``  — ``[defaults] concurrency`` in the workspace registry;
+#   3. ``auto``  — the machine fallback below, used when the registry sets
+#                  nothing. It is NEVER written back (Q3): a fresh workspace
+#                  carries no ``concurrency`` key and the number an operator
+#                  sees comes from the hardware that actually runs the tasks.
+#
+# Whatever the source, every surface (doctor, ``config --show``, a refusal, the
+# read-only API) shows the *value plus source*, never a bare number.
+
+SOURCE_AUTO = "auto"
+SOURCE_TOML = "toml"
+SOURCE_CLI = "cli"
+
+# The fallback is deliberately conservative. A slot is a whole extra coding
+# agent, so on a box a human is also using we want a handful of lanes, not one
+# per core:
+#
+#     cap = clamp(2, cores // 4, 6)     # at most one slot per four cores
+#     if RAM < 8 GiB: cap = 2           # a small box cannot afford cores / 4
+#     if the core count is unknown: cap = 3   # the historic default, not a guess
+#
+# The floor keeps at least two lanes; the ceiling keeps a many-core box from
+# melting under a full house of agents.
+_AUTO_FLOOR = 2
+_AUTO_CEIL = 6
+_CORES_PER_SLOT = 4
+_AUTO_UNKNOWN_CORES = 3
+_MIN_MEMORY_BYTES = 8 * 1024 ** 3
+
+
+class CapSetting(NamedTuple):
+    """An effective global cap together with its provenance.
+
+    ``source`` is one of :data:`SOURCE_CLI` / :data:`SOURCE_TOML` /
+    :data:`SOURCE_AUTO`. ``detail`` is the short human gloss behind the source —
+    ``"14 核 ÷ 4"`` for auto, ``"projects.toml"`` for toml, ``"--cap 5"`` for
+    cli. ``as_dict`` is the wire shape the read-only API exposes (card 39
+    consumes it verbatim).
+    """
+
+    value: int
+    source: str
+    detail: str
+
+    def as_dict(self) -> dict:
+        return {"value": self.value, "source": self.source, "detail": self.detail}
+
+
+def _physical_memory_bytes() -> Optional[int]:
+    """Physical RAM in bytes, or ``None`` when the platform will not say."""
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        pages = os.sysconf("SC_PHYS_PAGES")
+    except (ValueError, OSError, AttributeError):
+        return None
+    if not isinstance(page_size, int) or not isinstance(pages, int):
+        return None
+    if page_size <= 0 or pages <= 0:
+        return None
+    return page_size * pages
+
+
+def _auto_cap(cores, memory_bytes):
+    """Pure: ``(logical cores, RAM bytes)`` -> ``(cap, detail)``.
+
+    Split out of :func:`detect` so the arithmetic — and the "small memory -> 2"
+    / "cores unknown -> 3" edges — can be exercised without reading the host.
+    """
+    if cores is None or cores < 1:
+        return _AUTO_UNKNOWN_CORES, "核数不可用"
+    if memory_bytes is not None and memory_bytes < _MIN_MEMORY_BYTES:
+        return _AUTO_FLOOR, f"内存 {memory_bytes / 1024 ** 3:.0f} GB < 8 GB"
+    value = min(max(cores // _CORES_PER_SLOT, _AUTO_FLOOR), _AUTO_CEIL)
+    return value, f"{cores} 核 ÷ {_CORES_PER_SLOT}"
+
+
+def detect() -> int:
+    """The machine-derived fallback global cap for **this** box.
+
+    Touches the hardware and nothing else — no file, no database, no write — so
+    it is safe on a read-only path (``config --show``, ``doctor``, an API GET)
+    and deterministic for a given machine.
+    """
+    return _auto_cap(os.cpu_count(), _physical_memory_bytes())[0]
+
+
+def detect_detail() -> str:
+    """The human gloss paired with :func:`detect` (e.g. ``"14 核 ÷ 4"``)."""
+    return _auto_cap(os.cpu_count(), _physical_memory_bytes())[1]
+
+
+def resolve(defaults, cap=None) -> CapSetting:
+    """The effective global cap for one dispatch, with its source.
+
+    ``cap`` (the CLI's ``--cap``) wins over ``[defaults] concurrency`` in
+    ``defaults``, which wins over the machine fallback. ``defaults`` is the
+    parsed registry ``[defaults]`` table, or ``None``.
+    """
+    if cap is not None:
+        number = int(cap)
+        return CapSetting(number, SOURCE_CLI, f"--cap {number}")
+    configured = (defaults or {}).get("concurrency")
+    if configured is not None:
+        return CapSetting(int(configured), SOURCE_TOML, "projects.toml")
+    return CapSetting(detect(), SOURCE_AUTO, detect_detail())
+
+
+def source_label(setting: "CapSetting") -> str:
+    """The phrase that follows ``来源：`` in a refusal (``自动探测 14 核 ÷ 4``)."""
+    if setting.source == SOURCE_AUTO:
+        return f"自动探测 {setting.detail}"
+    if setting.source == SOURCE_CLI:
+        return f"本次 {setting.detail}"
+    return setting.detail
+
+
+def source_gloss(setting: "CapSetting") -> str:
+    """The phrase inside ``config --show``'s parentheses."""
+    if setting.source == SOURCE_AUTO:
+        return f"自动探测：{setting.detail}"
+    return setting.detail
 
 
 def group_scope(group: str) -> str:

@@ -122,23 +122,28 @@ def next_queue_seq(workspace: str) -> int:
     return int(top) + 1 if top is not None else 1
 
 
-def _park_aware_refusal(exc: ConcurrencyError, cap: int) -> ConcurrencyError:
-    """Point a GLOBAL-cap refusal at ``--park`` instead of only "retry".
+def _park_aware_refusal(exc: ConcurrencyError, setting) -> ConcurrencyError:
+    """Point a GLOBAL-cap refusal at its value, its source, and three ways out.
 
-    A same-group refusal is returned untouched: the queued card would sit in
-    the very same group and block again, so the honest hint there stays "wait
-    your turn". ``concurrency`` already phrases the two cases distinctly
-    ("global cap reached" vs "group '<g>' is busy") — the same signal the REST
-    layer turns into its ``reason`` field — so the reroute needs no change to
-    the concurrency module, and both the CLI ``run`` and the REST ``advance``
-    paths get it because both go through this module.
+    A same-group refusal is returned untouched: the queued card would sit in the
+    very same group and block again, so the honest hint there stays "wait your
+    turn" and it never mentions ``--park``. ``concurrency`` already phrases the
+    two cases distinctly ("global cap reached" vs "group '<g>' is busy") — the
+    same signal the REST layer turns into its ``reason`` field — so the reroute
+    needs no change to the concurrency module, and both the CLI ``run`` and the
+    REST ``advance`` paths get it because both go through this module.
+
+    For a global-cap refusal we append the *effective* cap and where it came
+    from (card 42: ``上限 3，来源：自动探测 14 核 ÷ 4``) and name all three
+    exits — wait for a slot / ``run --cap N`` / ``taskproof config
+    --concurrency N`` — so the operator is never told "no" without a next step.
     """
     if str(exc).startswith("global cap"):
         return ConcurrencyError(
-            str(exc),
+            f"{exc}（上限 {setting.value}，来源：{concurrency.source_label(setting)}）",
             hint=(
-                f"global cap of {cap} reached; queue it with --park, "
-                "or retry once a slot frees"
+                "等空位（--park 排队）／临时抬高（run --cap N）／"
+                "改配置（taskproof config --concurrency N）"
             ),
         )
     return exc
@@ -159,6 +164,7 @@ def dispatch(
     start: bool = True,
     queue_seq: Optional[int] = None,
     rerun_of: Optional[str] = None,
+    cap: Optional[int] = None,
 ) -> str:
     """Run one task end to end (``start=True``) or park it queued.
 
@@ -190,6 +196,12 @@ def dispatch(
     project = reg.require(project_key)
 
     effective_timeout = timeout if timeout is not None else reg.timeout
+
+    # The effective global cap for this dispatch, with its source (card 42). A
+    # `--cap N` is a one-off override: it rides the event stream but is never
+    # written to the registry. Resolved up front so a parked card can remember
+    # the cap it was fired with — it takes effect when the card is advanced.
+    setting = concurrency.resolve(reg.defaults, cap)
 
     # Resolve the adapter object now (a bare constructor, no side effects): a bad
     # adapter name is a UsageError raised before any task row or slot exists, so
@@ -243,6 +255,10 @@ def dispatch(
                     "worktree": worktree,
                     "skip_verify": skip_verify,
                     "timeout": timeout,
+                    # A `run --cap N --park` records the cap here (no column):
+                    # the card takes no slot now, and the cap takes effect when
+                    # the queue advances it (see `run_queued`).
+                    "cap": cap,
                 },
             )
             if rerun_of:
@@ -254,10 +270,10 @@ def dispatch(
         ttl = max(1, int(effective_timeout)) + 60
         try:
             scopes = concurrency.acquire(
-                conn, task_id, project.group, cap=reg.concurrency, ttl=ttl
+                conn, task_id, project.group, cap=setting.value, ttl=ttl
             )
         except ConcurrencyError as exc:
-            raise _park_aware_refusal(exc, reg.concurrency) from None
+            raise _park_aware_refusal(exc, setting) from None
 
         # ⑨ Whatever happens below — success, a recorded failure, or a raised
         # error — the exact credential from ③ is released. `release` verifies the
@@ -295,6 +311,11 @@ def dispatch(
                     # rides in the event: `rerun` reads it back to reuse the same
                     # flag (See `_run_options`).
                     "timeout": effective_timeout,
+                    # The effective global cap *and its source* (card 42), so the
+                    # event stream can explain why a card was admitted — e.g. a
+                    # one-off `--cap 5` that let a fourth card run.
+                    "cap": setting.value,
+                    "cap_source": setting.source,
                 },
             )
 
@@ -427,9 +448,10 @@ def _queued_options(conn, task_id: str) -> dict:
 
     Card 22 parked a row with only its `tasks` columns (project, brief, adapter,
     model, reasoning, queue_seq); read_only / worktree / skip_verify / timeout
-    have no column, so they were recorded in the `queued` event payload. The
-    latest such event wins. A row parked by an older build (no payload) yields
-    `{}` and the queue advances it with the documented defaults.
+    and (card 42) a one-off `cap` have no column, so they were recorded in the
+    `queued` event payload. The latest such event wins. A row parked by an older
+    build (no payload) yields `{}` and the queue advances it with the documented
+    defaults.
     """
     row = conn.execute(
         "SELECT payload FROM events WHERE task_id = ? AND event = 'queued' "
@@ -518,6 +540,10 @@ def run_queued(workspace: str, task_id: str) -> str:
         effective_timeout = (
             options.get("timeout") if options.get("timeout") is not None else reg.timeout
         )
+        # A `--cap` the card was parked with takes effect *now*, when it leaves
+        # the queue: a parked card holds no slot, so the override belongs to the
+        # advance, not the park (card 42, Q1/`--park` semantics).
+        setting = concurrency.resolve(reg.defaults, options.get("cap"))
         # Resolve the adapter the row was parked with, before any claim exists.
         adapter_obj = get_adapter(
             row["adapter"],
@@ -531,10 +557,10 @@ def run_queued(workspace: str, task_id: str) -> str:
         ttl = max(1, int(effective_timeout)) + 60
         try:
             scopes = concurrency.acquire(
-                conn, task_id, project.group, cap=reg.concurrency, ttl=ttl
+                conn, task_id, project.group, cap=setting.value, ttl=ttl
             )
         except ConcurrencyError as exc:
-            raise _park_aware_refusal(exc, reg.concurrency) from None
+            raise _park_aware_refusal(exc, setting) from None
         try:
             # 4. queued -> running, SAME id. Only status / pid / started_at are
             # rewritten; brief, queue_seq and created_at are left untouched.
@@ -560,6 +586,11 @@ def run_queued(workspace: str, task_id: str) -> str:
                     # Distinguishes "left the queue" from a task that was born
                     # running via `dispatch(start=True)`.
                     "advanced": True,
+                    # The effective global cap *and its source* at advance time
+                    # (card 42). A cap recorded on the `queued` event rides
+                    # through here as source `cli`.
+                    "cap": setting.value,
+                    "cap_source": setting.source,
                 },
             )
             _execute_claimed(

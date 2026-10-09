@@ -180,5 +180,69 @@ class DeleteTest(_Base):
         self.assertIn("# an upstream note separated by a blank line", text)
 
 
+class SetDefaultTest(_Base):
+    """Card 42: `config` writes must not round-trip the file through TOML."""
+
+    def test_swap_keeps_the_trailing_comment_and_spacing(self):
+        registry.set_default(self.path, "concurrency", 7)
+        text = self.text()
+        self.assertIn("concurrency = 7   # tuned by hand", text)
+        # Only the one line changed: the hand-written comment survived.
+        self.assertNotIn("concurrency = 2", text)
+
+    def test_only_the_value_changes_byte_for_byte(self):
+        before = self.text().splitlines(keepends=True)
+        registry.set_default(self.path, "concurrency", 7)
+        after = self.text().splitlines(keepends=True)
+        changed = [pair for pair in zip(before, after) if pair[0] != pair[1]]
+        self.assertEqual(changed, [("concurrency = 2   # tuned by hand\n",
+                                    "concurrency = 7   # tuned by hand\n")])
+        self.assertEqual(len(before), len(after), "line count changed")
+
+    def test_project_blocks_are_untouched(self):
+        before = self.text()[self.text().index("# alpha"):]
+        registry.set_default(self.path, "timeout", 60)
+        after = self.text()[self.text().index("# alpha"):]
+        self.assertEqual(after, before)
+
+    def test_adds_a_key_the_table_lacks(self):
+        # timeout is absent from HANDWRITTEN's [defaults]; it must be inserted
+        # inside the table, not appended after the projects.
+        registry.set_default(self.path, "timeout", 60)
+        text = self.text()
+        self.assertIn("timeout = 60", text)
+        defaults_block = text.split("[[project]]", 1)[0]
+        self.assertIn("timeout = 60", defaults_block)
+        reg = registry.load(self.path)
+        self.assertEqual(reg.timeout, 60)
+        self.assertEqual([p.id for p in reg.projects], ["alpha", "beta"])
+
+    def test_rejects_non_integer_without_writing(self):
+        before = self.read()
+        with self.assertRaises(RegistryError):
+            registry.set_default(self.path, "concurrency", "abc")
+        self.assertEqual(self.read(), before)
+
+    def test_rejects_below_one_without_writing(self):
+        before = self.read()
+        with self.assertRaises(RegistryError):
+            registry.set_default(self.path, "concurrency", 0)
+        self.assertEqual(self.read(), before)
+
+    def test_rejects_unknown_key(self):
+        before = self.read()
+        with self.assertRaises(RegistryError):
+            registry.set_default(self.path, "nope", 3)
+        self.assertEqual(self.read(), before)
+
+    def test_sets_both_defaults_and_keeps_the_file_valid(self):
+        registry.set_default(self.path, "concurrency", 5)
+        registry.set_default(self.path, "timeout", 90)
+        reg = registry.load(self.path)
+        self.assertEqual(reg.concurrency, 5)
+        self.assertEqual(reg.timeout, 90)
+        self.assertIn("# tuned by hand", self.text())
+
+
 if __name__ == "__main__":
     unittest.main()

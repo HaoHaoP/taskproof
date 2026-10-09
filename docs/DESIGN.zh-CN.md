@@ -141,10 +141,21 @@ claims                          -- 并发守卫，带过期回收
 
 ```
 同组串行      每个分组同时只跑一个任务
-全局上限      默认 3 个并发任务
+全局上限      生效值始终连同来源一起显示：
+                auto  机器兜底，clamp(2, 核数 // 4, 6)；内存 < 8 GB → 2；
+                      核数取不到 → 3。工作区级缺省；不落盘（Q3）。
+                toml  工作区注册表的 [defaults] concurrency
+                cli   仅本次的 run --cap N
+              `taskproof config --show` 打印生效值与来源（auto 显示公式）；
+              `config --concurrency N` / `--timeout N` 只改那一行，保留注释与
+              其它所有字节；doctor 与只读 API 暴露同样的 {value, source, detail}。
 硬超时        默认 1800 秒；超时判定卡死，只杀【该任务】的进程
 越限行为      被拒的派发退出 75（同组占用 / 全局上限）；
-              用 `run --park` 入队，或等一个槽释放后重试
+              全局上限的拒绝带上生效值、来源与三条出路 —— 等空位（--park 排队）
+              ／临时抬高（run --cap N）／改配置（taskproof config --concurrency N）；
+              同组拒绝不套这段：它只是"谁能跑"，不是容量。
+不追溯        改值不动任何在跑的卡；改小到低于在跑数时打印这些卡与已跑时长，
+              一个进程都不杀。
 进程安全      只杀 taskproof 自己起的进程
 ```
 
