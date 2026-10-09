@@ -2,6 +2,8 @@
   "name": "taskproof-desktop",
   "version": "0.1.0",
   "description": "taskproof desktop console",
+  "homepage": "https://github.com/HaoHaoP/taskproof",
+  "author": "HaoHaoP <HaoHaoP@users.noreply.github.com>",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {
