@@ -70,7 +70,7 @@ nsis:
 linux:
   category: Development
   icon: build/icon.png
-  maintainer: HaoHaoP <HaoHaoP@users.noreply.github.com>
+  maintainer: HaoHaoP <HaoHaoP@HaoHaoP.com>   # deb's Maintainer field wants Name <email>
   target:
     - AppImage
     - deb
