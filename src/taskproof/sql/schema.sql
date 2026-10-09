@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     attempt       INTEGER NOT NULL DEFAULT 1,
     exit_code     INTEGER,
     pid           INTEGER,
+    pgid          INTEGER,
+    queue_seq     INTEGER,
     workdir       TEXT,
     result_path   TEXT,
     verify_cmd    TEXT,

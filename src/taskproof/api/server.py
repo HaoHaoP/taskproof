@@ -5,16 +5,24 @@ Security choices (deliberate, and the whole reason this module exists):
 * It binds to **127.0.0.1 only** — never ``0.0.0.0``. The API exposes task
   briefs, project paths and the audit trail; nothing here should ever be
   reachable from another machine. Loopback is the boundary.
-* It is read-only by default. Registry writes exist only after the caller
-  explicitly passes ``--allow-write``; without it every write verb is 405.
-* The write token is generated for the lifetime of this process, kept in
-  memory, and written only to the stdout pipe consumed by the parent process.
-  It is never stored, logged, or returned in an HTTP response. Command-line
-  arguments and environment variables are visible to other processes under the
-  same macOS account via ``ps``; a stdout pipe has only the parent as reader.
+* It is read-only by default. Writes exist only after the caller explicitly
+  passes ``--allow-write``; without it every write verb (registry CRUD *and*
+  the task-control endpoints) is 405. The read endpoints never change.
+* Writes open only behind a session token. The token is generated for the
+  lifetime of this process, kept in memory, and written only to the stdout pipe
+  consumed by the parent process. It is never stored, logged, or returned in an
+  HTTP response. Command-line arguments and environment variables are visible
+  to other processes under the same macOS account via ``ps``; a stdout pipe has
+  only the parent as reader.
+* The write surface has two families sharing one gate: registry create / edit /
+  delete, and task control. Task control is three action semantics —
+  ``POST /api/tasks`` (dispatch, or ``start=false`` to park a queued row),
+  ``POST /api/tasks/<id>/cancel`` (SIGTERM -> SIGKILL the task's own process
+  group, or drop a queued card), and ``DELETE /api/tasks/<id>`` (terminal only).
+  Reordering a queued card is field maintenance, not a fourth action:
+  ``PATCH /api/tasks/<id>`` accepts only ``queue_seq``.
 
-Standard library only (``http.server``). The frontend consumes these endpoints;
-the default read-only boundary is frozen here.
+Standard library only (``http.server``). The frontend consumes these endpoints.
 """
 
 import json
@@ -51,6 +59,21 @@ _PATCH_FIELDS = {
     "verify_kind",
     "forbidden_paths",
     "result_schema",
+}
+#: Body of `POST /api/tasks`. `start` names the two exits of the dispatch form
+#: (fire now vs park queued); everything else mirrors `dispatch()`.
+_TASK_CREATE_FIELDS = {
+    "project",
+    "brief",
+    "adapter",
+    "model",
+    "reasoning",
+    "read_only",
+    "worktree",
+    "skip_verify",
+    "timeout",
+    "start",
+    "queue_seq",
 }
 
 
@@ -148,7 +171,15 @@ class _Handler(BaseHTTPRequestHandler):
             }
         except registry.RegistryNotFoundError as exc:
             status, payload = 404, {"error": str(exc)}
+        except dispatch.TaskNotFoundError as exc:
+            status, payload = 404, {"error": str(exc)}
+        except dispatch.TaskStateError as exc:
+            # Illegal state for the action (e.g. cancel a terminal task, or rm a
+            # live one) is a conflict, not a malformed request: 409.
+            status, payload = 409, {"error": str(exc)}
         except RegistryError as exc:
+            status, payload = 400, {"error": str(exc)}
+        except UsageError as exc:
             status, payload = 400, {"error": str(exc)}
         except Exception:
             status, payload = 500, {"error": "internal server error"}
@@ -164,6 +195,15 @@ class _Handler(BaseHTTPRequestHandler):
                 return 200, registry.probe_repository(self._path(body))
             if path == "/api/projects":
                 return self._create_project(self._body())
+            if path == "/api/tasks":
+                return self._create_task(self._body())
+            if path.startswith("/api/tasks/") and path.endswith("/cancel"):
+                task_id = unquote(
+                    path[len("/api/tasks/"):-len("/cancel")]
+                )
+                if not task_id or "/" in task_id:
+                    return 404, {"error": "not found", "path": parsed.path}
+                return self._cancel_task(task_id)
             return 404, {"error": "not found", "path": parsed.path}
 
         if path.startswith("/api/projects/"):
@@ -174,6 +214,15 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._update_project(project_id, self._body())
             if method == "DELETE":
                 return self._delete_project(project_id, self._body())
+
+        if path.startswith("/api/tasks/"):
+            task_id = unquote(path[len("/api/tasks/"):])
+            if not task_id or "/" in task_id:
+                return 404, {"error": "not found", "path": parsed.path}
+            if method == "PATCH":
+                return self._patch_task(task_id, self._body())
+            if method == "DELETE":
+                return self._delete_task(task_id)
 
         if method == "PUT":
             return 405, {"error": "method not allowed"}
@@ -278,6 +327,81 @@ class _Handler(BaseHTTPRequestHandler):
         reg_path = registry.workspace_registry_path(self.workspace)
         registry.delete_project(reg_path, project_id, expected_hash)
         return 200, {"removed": project_id}
+
+    # -- task control -----------------------------------------------------
+
+    def _create_task(self, body):
+        unknown = set(body) - _TASK_CREATE_FIELDS
+        if unknown:
+            raise RegistryError(
+                f"unsupported field(s): {', '.join(sorted(unknown))}"
+            )
+        project = body.get("project")
+        brief = body.get("brief")
+        if not isinstance(project, str) or not project.strip():
+            raise RegistryError("project is required")
+        if not isinstance(brief, str) or not brief.strip():
+            raise RegistryError("brief is required")
+
+        start = body.get("start", True)
+        if not isinstance(start, bool):
+            raise RegistryError("start must be a boolean")
+        queue_seq = body.get("queue_seq")
+        if queue_seq is not None and (
+            isinstance(queue_seq, bool) or not isinstance(queue_seq, int)
+        ):
+            raise RegistryError("queue_seq must be an integer")
+        timeout = body.get("timeout")
+        if timeout is not None and (
+            isinstance(timeout, bool) or not isinstance(timeout, int)
+        ):
+            raise RegistryError("timeout must be an integer")
+
+        task_id = dispatch.dispatch(
+            self.workspace,
+            project,
+            brief,
+            adapter=body.get("adapter") or "codex",
+            model=body.get("model"),
+            reasoning=body.get("reasoning"),
+            read_only=bool(body.get("read_only", False)),
+            worktree=bool(body.get("worktree", False)),
+            skip_verify=bool(body.get("skip_verify", False)),
+            timeout=timeout,
+            start=start,
+            queue_seq=queue_seq,
+        )
+        return 201, {"task": self._task_record(task_id)}
+
+    def _cancel_task(self, task_id):
+        return 200, {"task": dispatch.cancel_task(self.workspace, task_id)}
+
+    def _delete_task(self, task_id):
+        return 200, {"removed": dispatch.remove_task(self.workspace, task_id)}
+
+    def _patch_task(self, task_id, body):
+        # Field maintenance, not an action: queue_seq is the only editable field.
+        unknown = set(body) - {"queue_seq"}
+        if unknown:
+            raise RegistryError(
+                f"unsupported field(s): {', '.join(sorted(unknown))}"
+            )
+        if "queue_seq" not in body:
+            raise RegistryError("queue_seq is required")
+        queue_seq = body["queue_seq"]
+        if queue_seq is not None and (
+            isinstance(queue_seq, bool) or not isinstance(queue_seq, int)
+        ):
+            raise RegistryError("queue_seq must be an integer")
+        task = dispatch.set_queue_seq(self.workspace, task_id, queue_seq)
+        return 200, {"task": task}
+
+    def _task_record(self, task_id):
+        detail = dispatch.task_detail(self.workspace, task_id)
+        task = detail.get("task")
+        if task is None:
+            raise dispatch.TaskNotFoundError(f"no such task: {task_id}")
+        return task
 
     def _project_record(self, project_id):
         reg_path = registry.workspace_registry_path(self.workspace)

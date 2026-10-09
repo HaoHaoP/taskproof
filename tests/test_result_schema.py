@@ -239,7 +239,7 @@ class PipelineSchemaWiringTest(unittest.TestCase):
         captured = {}
 
         def fake_run_adapter(adapter_obj, *, brief, workdir, log_path,
-                             schema_path=None, read_only=False):
+                             schema_path=None, read_only=False, on_spawn=None):
             captured["schema_path"] = schema_path
             return 0, '{"status": "done", "summary": "ok"}', ""
 

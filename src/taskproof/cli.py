@@ -99,6 +99,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("verify", help="re-run acceptance for a task")
     p.add_argument("task_id")
 
+    p = sub.add_parser(
+        "cancel", help="stop a task (kill its process tree) or drop a queued one"
+    )
+    p.add_argument("task_id")
+
+    p = sub.add_parser("rm", help="delete a terminal task's record and events")
+    p.add_argument("task_id")
+
     p = sub.add_parser("board", help="dashboard: static snapshot or live server")
     p.add_argument("--open", action="store_true",
                    help="serve the live board and open it in a browser (blocks)")
@@ -597,6 +605,19 @@ def cmd_verify(args):
     return 0
 
 
+def cmd_cancel(args):
+    task = dispatch.cancel_task(args.workspace, args.task_id)
+    payload = {"task_id": args.task_id, "status": task.get("status"), "task": task}
+    emit(args, payload, f"{args.task_id}  {task.get('status', '')}  cancelled")
+    return 0
+
+
+def cmd_rm(args):
+    removed = dispatch.remove_task(args.workspace, args.task_id)
+    emit(args, {"removed": removed}, f"removed {removed}")
+    return 0
+
+
 def board_handler_class(workspace):
     """HTTP handler for ``board --serve``: server-rendered board + events API.
 
@@ -906,6 +927,8 @@ COMMANDS = {
     "show": cmd_show,
     "log": cmd_log,
     "verify": cmd_verify,
+    "cancel": cmd_cancel,
+    "rm": cmd_rm,
     "board": cmd_board,
     "api": cmd_api,
     "doctor": cmd_doctor,

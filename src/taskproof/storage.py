@@ -42,15 +42,53 @@ def connect(path: str) -> sqlite3.Connection:
     return conn
 
 
+#: Schema level this build writes. Bump it whenever `migrate()` learns a new
+#: step that `schema.sql` alone cannot perform on an existing database.
+SCHEMA_VERSION = 2
+
+#: Columns added after v1. `schema.sql` is all ``CREATE TABLE IF NOT EXISTS``,
+#: so it can never add a column to a table that already exists — these are the
+#: PRAGMA-probed ``ALTER TABLE`` steps that upgrade a pre-existing workspace.
+#: (table, column, declared type); identifiers are module constants, never user
+#: input, so the f-string below is safe.
+_ADDED_COLUMNS = (
+    ("tasks", "pgid", "INTEGER"),
+    ("tasks", "queue_seq", "INTEGER"),
+)
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set:
+    """Column names of `table` (empty set when the table does not exist)."""
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
 def migrate(conn: sqlite3.Connection) -> None:
-    """Apply `sql/schema.sql` (idempotent — every statement is IF NOT EXISTS)."""
+    """Bring `conn`'s database up to the current schema (idempotent).
+
+    `schema.sql` builds a fresh database in full; the probes below are what
+    upgrade a database created before `pgid`/`queue_seq` existed. Both halves are
+    safe to run any number of times, and every step either applies cleanly or is
+    skipped because it is already present.
+    """
     with open(os.path.join(SCHEMA_DIR, "schema.sql"), encoding="utf-8") as fh:
         conn.executescript(fh.read())
+
+    for table, column, column_type in _ADDED_COLUMNS:
+        if column not in _table_columns(conn, table):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+
     row = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()
-    if row is None or row["v"] is None:
+    current = (row[0] if row is not None else None) or 0
+    if current < 1:
         conn.execute(
             "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
             (1, now_iso()),
+        )
+    if current < SCHEMA_VERSION:
+        # PRIMARY KEY on `version` makes the recording itself idempotent.
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (SCHEMA_VERSION, now_iso()),
         )
 
 
@@ -75,6 +113,8 @@ TASK_COLUMNS = frozenset(
         "attempt",
         "exit_code",
         "pid",
+        "pgid",
+        "queue_seq",
         "workdir",
         "result_path",
         "verify_cmd",
@@ -140,6 +180,17 @@ def update_task(conn: sqlite3.Connection, task_id: str, **fields) -> None:
 
 def get_task(conn: sqlite3.Connection, task_id: str) -> Optional[sqlite3.Row]:
     return conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+
+
+def delete_task(conn: sqlite3.Connection, task_id: str) -> None:
+    """Delete one task row AND its `events` rows.
+
+    The JSONL audit stream (`events-<month>.jsonl`) is append-only history and
+    is deliberately NOT touched: it is never read for logic, so leaving it
+    behind keeps the audit trail intact while removing the queryable record.
+    """
+    conn.execute("DELETE FROM events WHERE task_id = ?", (task_id,))
+    conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
 
 
 def list_tasks(conn, *, status=None, project=None, limit=50):

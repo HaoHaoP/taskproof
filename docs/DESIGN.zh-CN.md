@@ -98,6 +98,8 @@ tasks
   attempt       INTEGER
   exit_code     INTEGER
   pid           INTEGER
+  pgid          INTEGER     适配器自成一组，cancel 就定位这个 pgid
+  queue_seq     INTEGER     显式队列序号（仅 queued 可写）
   workdir       TEXT
   result_path   TEXT
   verify_cmd    TEXT
@@ -169,6 +171,8 @@ taskproof tasks [--status S] [--project P] [--limit N]
 taskproof show <task-id>                单任务详情
 taskproof log <task-id>                 事件流
 taskproof verify <task-id>              复跑验收
+taskproof cancel <task-id>              停任务（对自己那棵进程树 SIGTERM→SIGKILL）
+taskproof rm <task-id>                  删除终态任务的记录与事件
 taskproof board [--open | --serve PORT | --out FILE]
 taskproof api --port N [--allow-write]  本地 REST（stage 2 前端消费）
 taskproof doctor                        环境自检
@@ -194,7 +198,7 @@ stage 2  Vue 3 + Vite 前端 → Electron 薄壳（不内嵌 Python 运行时）
 静态看板**冻结**：它继续作为 `file://` 快照可用，但不再往下开发。stage 2 在
 `desktop/` 里另做一款 Electron 应用，消费同一个回环 REST API。该 API 默认
 只读；只有显式加上 `--allow-write`，才会在其上开出一个由「仅本次会话」令牌
-保护的写面（项目增 / 改 / 删）。Python 侧只增加下面这几处小改动，其余全是加法。
+保护的写面（项目增 / 改 / 删，以及任务控制：派发 / 停止 / 删除 / 改序号）。Python 侧只增加下面这几处小改动，其余全是加法。
 
 **技术选型。** TypeScript、Vue 3（`<script setup>`）、electron-vite
 （main / preload / renderer）、Pinia、vue-router（hash 模式 —— 生产走

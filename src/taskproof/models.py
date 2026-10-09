@@ -59,6 +59,14 @@ class Task:
     attempt: int = 1
     exit_code: Optional[int] = None
     pid: Optional[int] = None
+    #: Process-group id that locates the whole adapter tree (`_run_adapter`
+    #: spawns it with ``start_new_session=True``, so this is the adapter's own
+    #: session/group, not the dispatching process' group). `cancel` signals
+    #: exactly this group.
+    pgid: Optional[int] = None
+    #: Explicit queue order for a `queued` task. NULL for a task that was never
+    #: parked; same number = same wave (see control-plane design, section 3).
+    queue_seq: Optional[int] = None
     workdir: Optional[str] = None
     result_path: Optional[str] = None
     verify_cmd: Optional[str] = None

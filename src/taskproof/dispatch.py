@@ -27,6 +27,7 @@ import signal
 import subprocess
 import tempfile
 import threading
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -43,8 +44,23 @@ from .models import (
     STATUS_RUNNING,
     STATUS_TIMEOUT,
     STATUS_VERIFYING,
+    TERMINAL_STATUSES,
     Task,
 )
+
+#: Seconds to wait after SIGTERM before escalating to SIGKILL for a task tree.
+#: Mirrors the grace period `_terminate_tree` uses on the adapter-spawn path.
+TERMINATE_GRACE_SECONDS = 5.0
+
+
+class TaskNotFoundError(UsageError):
+    """No task with that id. The API maps this to HTTP 404."""
+
+
+class TaskStateError(UsageError):
+    """The task is not in a state that allows the action. The API maps this
+    to HTTP 409 (state conflict), the CLI to its usual usage exit code."""
+
 
 #: Every status the dashboard reports on, so a status with no rows still shows
 #: up as 0 instead of disappearing from the summary.
@@ -100,8 +116,15 @@ def dispatch(
     worktree: bool = False,
     skip_verify: bool = False,
     timeout: Optional[int] = None,
+    start: bool = True,
+    queue_seq: Optional[int] = None,
 ) -> str:
-    """Run one task end to end. Returns the task id.
+    """Run one task end to end (``start=True``) or park it queued.
+
+    With ``start=False`` this only builds the row: status ``queued``, the
+    requested ``queue_seq``, no concurrency claim, no adapter. The queue daemon
+    (card 24) is what later advances a queued row; a manual ``run`` still takes
+    the ``start=True`` path. Returns the task id either way.
 
     Raises the typed errors in `errors.py` so the CLI can map them to exit codes:
       ConcurrencyError -> 75, AdapterError -> 70, VerifyError -> 71, RegistryError -> 2
@@ -138,6 +161,38 @@ def dispatch(
         prefix_date = datetime.now().strftime("%Y%m%d")
         task_id = storage.next_task_id(conn, prefix_date=prefix_date)
 
+        # ②b A parked task is only a row: no slot, no adapter, no process. Its
+        # explicit `queue_seq` is the sole source of queue order (same number =
+        # same wave). `start=True` keeps the historic synchronous behaviour.
+        if not start:
+            storage.insert_task(
+                conn,
+                Task(
+                    id=task_id,
+                    project=project.id,
+                    group=project.group,
+                    brief=brief,
+                    status=STATUS_QUEUED,
+                    adapter=adapter,
+                    model=model,
+                    reasoning=reasoning,
+                    queue_seq=queue_seq,
+                    created_at=storage.now_iso(),
+                ),
+            )
+            storage.append_event(
+                conn,
+                task_id,
+                "queued",
+                {
+                    "project": project.id,
+                    "group": project.group,
+                    "adapter": adapter,
+                    "queue_seq": queue_seq,
+                },
+            )
+            return task_id
+
         # ③ claim the group slot + a slot under the global cap. A refusal is a
         # ConcurrencyError (exit 75) and nothing is queued.
         ttl = max(1, int(effective_timeout)) + 60
@@ -160,6 +215,7 @@ def dispatch(
                 model=model,
                 reasoning=reasoning,
                 pid=os.getpid(),
+                queue_seq=queue_seq,
                 created_at=storage.now_iso(),
                 started_at=storage.now_iso(),
             )
@@ -175,6 +231,7 @@ def dispatch(
                     "read_only": read_only,
                     "worktree": worktree,
                     "skip_verify": skip_verify,
+                    "queue_seq": queue_seq,
                 },
             )
 
@@ -285,6 +342,25 @@ def _execute(
     forbidden_before, forbidden_truncated = verify.snapshot_forbidden(
         run_dir, project.forbidden_paths
     )
+
+    def _record_pgid(proc) -> None:
+        """Persist the adapter's own group id the moment it exists.
+
+        `_run_adapter` spawns with ``start_new_session=True``, so the child leads
+        a brand-new session/process group and its pgid equals its pid. That is
+        the only group that contains the adapter and its descendants without
+        also containing this dispatcher or unrelated siblings — exactly what
+        `cancel <id>` must signal after a restart. The row's `pid` stays this
+        run process' ``os.getpid()`` (written before the adapter exists); the
+        pgid cannot be known until ``Popen`` returns, so it is recorded here,
+        immediately after the spawn and before we wait on the tree.
+        """
+        try:
+            pgid = os.getpgid(proc.pid)
+        except (ProcessLookupError, OSError):
+            return
+        storage.update_task(conn, task_id, pgid=pgid)
+
     try:
         exit_code, out, err = _run_adapter(
             adapter_obj,
@@ -293,8 +369,13 @@ def _execute(
             log_path=log_path,
             schema_path=schema_path,
             read_only=read_only,
+            on_spawn=_record_pgid,
         )
     except VerifyError as exc:
+        if _task_cancelled(conn, task_id):
+            # A concurrent `cancel` already recorded the terminal state; do not
+            # overwrite it or append a contradictory event.
+            return
         # timeout: `timeout` terminal state, exit code carries EXIT_VERIFY meaning.
         _finish_task(
             conn, task_id, status=STATUS_TIMEOUT, exit_code=EXIT_VERIFY, workdir=run_dir
@@ -304,11 +385,19 @@ def _execute(
         )
         raise
     except AdapterError as exc:
+        if _task_cancelled(conn, task_id):
+            return
         _finish_task(conn, task_id, status=STATUS_FAILED, workdir=run_dir)
         storage.append_event(
             conn, task_id, "failed", {"stage": "adapter", "reason": str(exc)}
         )
         raise
+
+    # The adapter is gone. If a `cancel` landed while it was running (e.g. it
+    # was signalled from another process), the row is already `cancelled`: stop
+    # here so the pipeline cannot round a cancelled task up to done/failed.
+    if _task_cancelled(conn, task_id):
+        return
 
     # Snapshot the protected paths again here — immediately after the agent
     # exits, and BEFORE our own change detection runs. `git status` refreshes the
@@ -504,6 +593,12 @@ def _skip_reason(read_only: bool, skip_verify: bool, verify_cmd) -> Optional[str
     return None
 
 
+def _task_cancelled(conn, task_id: str) -> bool:
+    """True when `cancel` has already recorded this task as terminal."""
+    row = conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    return row is not None and row[0] == STATUS_CANCELLED
+
+
 def _finish_task(
     conn,
     task_id: str,
@@ -516,7 +611,13 @@ def _finish_task(
     workdir=None,
     result_path=None,
 ) -> None:
-    """Patch the terminal columns of a task. Only non-None fields are written."""
+    """Patch the terminal columns of a task. Only non-None fields are written.
+
+    A task that `cancel` already marked terminal is left alone: the in-flight
+    dispatcher must never overwrite `cancelled` with a later done/failed state.
+    """
+    if _task_cancelled(conn, task_id):
+        return
     fields = {"status": status, "finished_at": storage.now_iso()}
     if exit_code is not None:
         fields["exit_code"] = exit_code
@@ -586,6 +687,61 @@ def _terminate_tree(proc) -> None:
         pass
 
 
+def _wait_group_gone(pgid: int, timeout: float) -> bool:
+    """Poll a process group until it is empty, or `timeout` elapses.
+
+    `os.killpg(pgid, 0)` is a pure liveness probe: it raises `ProcessLookupError`
+    once no process is left in the group. We cannot `wait()` for a group we may
+    not be the parent of, so polling is how the recorded-group path honours the
+    same SIGTERM -> grace -> SIGKILL timing as `_terminate_tree`.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except OSError:
+            # EPERM etc.: the group still exists as far as we can tell.
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
+def _terminate_recorded_group(pgid) -> None:
+    """SIGTERM -> 5s -> SIGKILL exactly the group recorded for a task.
+
+    This is the after-a-restart counterpart of `_terminate_tree`: it takes the
+    pgid persisted on the task row (the adapter's own new session — see
+    `_execute._record_pgid`) instead of a live `Popen` handle. The discipline is
+    identical — signal only that one group, never `pkill`, never a name/brief
+    match — and the `pgid == our own group` guard is kept so this can never take
+    down the caller. Where `_terminate_tree` falls back to signalling the single
+    child it owns, this path has no child handle to fall back to, so it signals
+    nothing rather than risk our own process group.
+    """
+    if pgid is None:
+        return
+    try:
+        own_group = os.getpgid(0)
+    except OSError:
+        own_group = None
+    if own_group is not None and pgid == own_group:
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, OSError):
+        return
+    if _wait_group_gone(pgid, TERMINATE_GRACE_SECONDS):
+        return
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, OSError):
+        return
+    _wait_group_gone(pgid, TERMINATE_GRACE_SECONDS)
+
+
 #: Loopback hosts that must never be sent to a forward proxy: a local service
 #: (e.g. a CC Switch endpoint on http://127.0.0.1:15721/v1) is not reachable
 #: through a proxy.
@@ -623,7 +779,8 @@ def _ensure_localhost_no_proxy(env: dict) -> dict:
 
 
 def _run_adapter(adapter_obj, *, brief: str, workdir: str, log_path: str,
-                 schema_path: Optional[str] = None, read_only: bool = False):
+                 schema_path: Optional[str] = None, read_only: bool = False,
+                 on_spawn=None):
     """Spawn the agent CLI, tee output to `log_path`, return (exit_code, out, err).
 
     * argv is a list and the shell is never used.
@@ -633,6 +790,9 @@ def _run_adapter(adapter_obj, *, brief: str, workdir: str, log_path: str,
     * `adapter_obj.timeout` is enforced; on expiry the process group this call
       created is terminated (SIGTERM then SIGKILL) and a `VerifyError` is raised
       (exit code 71 semantics).
+    * ``on_spawn(proc)`` (optional) runs immediately after the child exists and
+      before we wait on it — the hook the dispatcher uses to persist the child's
+      process-group id for a later ``cancel``.
     """
     try:
         argv = adapter_obj.build_command(
@@ -672,6 +832,11 @@ def _run_adapter(adapter_obj, *, brief: str, workdir: str, log_path: str,
             raise AdapterError(
                 f"adapter '{adapter_obj.name}': could not start '{argv[0]}': {exc}"
             )
+
+        if on_spawn is not None:
+            # Record the identity before we block on the child, so a cancel from
+            # another process can reach the tree even mid-run.
+            on_spawn(proc)
 
         def pump(stream, chunks):
             try:
@@ -857,6 +1022,114 @@ def task_detail(workspace: str, task_id: str) -> dict:
                     pass
             events.append(item)
         return {"task": task, "events": events}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Control: cancel / remove / queue_seq
+# ---------------------------------------------------------------------------
+
+
+def cancel_task(workspace: str, task_id: str) -> dict:
+    """Stop a task and record the terminal state `cancelled`.
+
+    * `running` / `verifying`: signal the recorded process group (SIGTERM, then
+      SIGKILL after a grace period). `queued`: nothing to kill, just record.
+    * The workdir is NEVER touched — matching "a failed dispatch does not roll
+      back its workspace".
+    * A task already in a terminal state is a readable error, never a silent
+      no-op.
+
+    Returns the updated task row.
+    """
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+        row = storage.get_task(conn, task_id)
+        if row is None:
+            raise TaskNotFoundError(f"no such task: {task_id}")
+        status = row["status"]
+        if status in TERMINAL_STATUSES:
+            raise TaskStateError(
+                f"task {task_id} is already {status}; nothing to cancel"
+            )
+        if status not in (STATUS_QUEUED, STATUS_RUNNING, STATUS_VERIFYING):
+            raise TaskStateError(
+                f"task {task_id} cannot be cancelled from state {status}"
+            )
+
+        pgid = row["pgid"]
+        pid = row["pid"]
+        # Record the terminal state BEFORE signalling. That way the in-flight
+        # dispatcher observes `cancelled` (via `_task_cancelled`) before its
+        # adapter dies, so it returns without appending a contradictory
+        # `failed`/`timeout` event for a task the user deliberately stopped.
+        storage.update_task(
+            conn,
+            task_id,
+            status=STATUS_CANCELLED,
+            finished_at=storage.now_iso(),
+        )
+        storage.append_event(
+            conn,
+            task_id,
+            "cancelled",
+            {"pid": pid, "pgid": pgid, "was": status},
+        )
+        if status in (STATUS_RUNNING, STATUS_VERIFYING) and pgid is not None:
+            # Only the group the adapter created; unrelated processes are safe.
+            _terminate_recorded_group(pgid)
+        return dict(storage.get_task(conn, task_id))
+    finally:
+        conn.close()
+
+
+def remove_task(workspace: str, task_id: str) -> str:
+    """Delete a terminal task's row and its `events` rows.
+
+    Non-terminal tasks are refused with a hint to cancel first. The append-only
+    JSONL audit stream is intentionally left in place (see `storage.delete_task`).
+    Returns the removed id.
+    """
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+        row = storage.get_task(conn, task_id)
+        if row is None:
+            raise TaskNotFoundError(f"no such task: {task_id}")
+        if row["status"] not in TERMINAL_STATUSES:
+            raise TaskStateError(
+                f"task {task_id} is {row['status']}; cancel it before removing",
+                hint=f"taskproof cancel {task_id}",
+            )
+        storage.delete_task(conn, task_id)
+        return task_id
+    finally:
+        conn.close()
+
+
+def set_queue_seq(workspace: str, task_id: str, queue_seq) -> dict:
+    """Set the explicit queue order of a task that is still `queued`.
+
+    Field-level maintenance, not a fourth action: same discipline as a registry
+    PATCH. Editing the order of a task that already left the queue is refused so
+    a stale UI cannot reorder history. Returns the updated task row.
+    """
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+        row = storage.get_task(conn, task_id)
+        if row is None:
+            raise TaskNotFoundError(f"no such task: {task_id}")
+        if row["status"] != STATUS_QUEUED:
+            raise TaskStateError(
+                f"task {task_id} is {row['status']}; "
+                "queue_seq is only editable while queued"
+            )
+        storage.update_task(conn, task_id, queue_seq=queue_seq)
+        storage.append_event(conn, task_id, "queue_seq", {"queue_seq": queue_seq})
+        return dict(storage.get_task(conn, task_id))
     finally:
         conn.close()
 

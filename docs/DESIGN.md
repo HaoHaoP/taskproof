@@ -107,6 +107,8 @@ tasks
   attempt       INTEGER
   exit_code     INTEGER
   pid           INTEGER
+  pgid          INTEGER     adapter's own process group (cancel signals this)
+  queue_seq     INTEGER     explicit queue order; set only while queued
   workdir       TEXT
   result_path   TEXT
   verify_cmd    TEXT
@@ -179,6 +181,8 @@ taskproof tasks [--status S] [--project P] [--limit N]
 taskproof show <task-id>                single task detail
 taskproof log <task-id>                 event stream
 taskproof verify <task-id>              re-run acceptance
+taskproof cancel <task-id>              stop a task (SIGTERM -> SIGKILL its own tree)
+taskproof rm <task-id>                  delete a terminal task's record and events
 taskproof board [--open | --serve PORT | --out FILE]
 taskproof api --port N [--allow-write]  local REST (consumed by the stage 2 frontend)
 taskproof doctor                        environment self-check
@@ -207,7 +211,8 @@ The static dashboard is **frozen**: it keeps working as a `file://` snapshot and
 is not developed further. Stage 2 builds a separate Electron application in
 `desktop/` that consumes the same loopback REST API. That API stays read-only by
 default; only an explicit `--allow-write` opens a session-token-gated write
-surface (project create / edit / delete) on top of it. The Python package gains
+surface (project create / edit / delete, plus task control: dispatch / cancel /
+remove / queue-seq edit) on top of it. The Python package gains
 only the small changes described below; everything else is additive.
 
 **Stack.** TypeScript, Vue 3 (`<script setup>`), electron-vite
