@@ -11,15 +11,66 @@
 REST API，以及 `desktop/` 里的 Electron 看板均已实现。完整设计与决策记录见
 [`docs/DESIGN.zh-CN.md`](docs/DESIGN.zh-CN.md)。
 
-### 快速上手
+## 安装
+
+两条路：不写代码就装桌面控制台，写代码就用命令行。
+
+### 桌面控制台（推荐给不写代码的人）
+
+到 [GitHub Releases](https://github.com/HaoHaoP/taskproof/releases) 页下载对应平台的安装包：
+
+- macOS arm64（Apple 芯片）—— `.dmg`
+- Windows x64 —— `.exe`
+- Linux x64 —— `.AppImage` / `.deb`
+
+安装包**未签名、未公证**：
+
+- **macOS 只有 arm64**（没有 Intel 版，也没有 Rosetta 版）：首次打开要右键点应用 → 打开，
+  或执行 `xattr -d com.apple.quarantine /Applications/Taskproof.app`。
+- **Windows 10+**：首次打开会有 SmartScreen 提示。
+
+最低版本：macOS 11+、Windows 10+，或较新的主流 Linux 发行版。安装包**自带 Python 运行时**，
+装完即用，不需要 `pip install`；但需要系统里有 **`git`**，作业树与禁改路径闸门靠它，没装 git
+时设置页会明说，其余功能照常。
+
+### 命令行版（开发者）
 
 ```bash
-pipx install taskproof        # 或从源码安装：pip install -e .
-taskproof init
-taskproof register /path/to/your/repo
-taskproof run your-repo "修掉那个挂掉的测试"
-taskproof board --open
+pipx install git+https://github.com/HaoHaoP/taskproof
 ```
+
+或从同一个 Release 下载 wheel，装本地文件：
+
+```bash
+pipx install ./taskproof-0.1.0-py3-none-any.whl
+```
+
+或从源码可编辑安装：
+
+```bash
+pip install -e .
+```
+
+**PyPI 上没有这个包。** 别去 PyPI 找；用上面三种方式之一。
+
+## 跑一条任务
+
+```bash
+taskproof init
+taskproof register /absolute/path/to/your/repo
+taskproof run <project> "修掉那个挂掉的测试"
+```
+
+`run` 一条命令就是完整生命周期：把卡**派发**给可插拔的适配器（codex / claude / gemini /
+opencode，或 `custom:<cmd>`），智能体退出后 taskproof **独立跑注册表里的验收命令**，最后把
+每一步**记账**进审计流水。智能体自称的"干完了"永远不算判定。
+
+`taskproof tasks` 列出在跑的卡；`taskproof show <id>` 与 `taskproof log <id>` 回读一张卡。
+
+桌面控制台和命令行共用同一个账本。桌面版首次启动会在 `~/.taskproof` 建一个**空工作区**
+—— 一张 `[defaults]` 表和一段注释示例，**不放任何示例项目、不放任何示例任务** —— 看板空态
+会把你引到「项目」页（或 `taskproof register <path>`）。因为控制台和 CLI 读的是同一个
+`~/.taskproof`，两边互相看得见对方的卡。
 
 [`docs/WALKTHROUGH.zh-CN.md`](docs/WALKTHROUGH.zh-CN.md) 把上面这条链在一个临时示例上从头跑到尾
 —— 包括"智能体报告成功、而验收命令不同意"的那种情形。
@@ -32,12 +83,16 @@ taskproof board --open
 
 ```
 skills/taskproof-dispatch/SKILL.md
+skills/taskproof-dispatch/SKILL.zh-CN.md
 ```
 
-它是写给**主智能体**（负责规划、注册仓库、写卡、发车的那一个）看的。taskproof 本身不做规划
-（见"不做什么"），这个 skill 补的正是另一半：怎样驱动这个工具，而不重蹈踩过的坑。
+它是**给 AI 编码 agent 的操作手册**，写给**主智能体**（负责规划、注册仓库、写卡、发车的那一个）。
+taskproof 本身不做规划（见"不做什么"），这个 skill 补的正是另一半：怎样驱动这个工具，而不重蹈
+踩过的坑。两种语言都随仓库发布：`SKILL.md`（英文）与 `SKILL.zh-CN.md`（简体中文）。
 
-它把本次开发沉淀的步骤写成可直接照做的清单：注册项目、把卡写进文件并用 `$(cat …)` 传入、
+它里面的规矩不是凭空写的，每一条都是踩坑换来的。比如排队的卡：brief 在入队那刻就**冻结**进了
+数据库行，所以**事后改卡文件对排队行无效** —— 这正是这个 skill 要沉淀的那种实战口径。它把本次
+开发沉淀的步骤写成可直接照做的清单：注册项目、把卡写进文件并用 `$(cat …)` 传入、
 带上明确的 `--adapter` 与 `--timeout` 发车、再用 `taskproof tasks --all` 和
 `taskproof log <id>` 回读状态。尤其钉死四条**踩过才知道**的纪律：
 
@@ -92,6 +147,82 @@ taskproof api --port 8787        # 给客户端用的本地只读 REST API
 - JSONL 审计流水，只写不查，按月轮转
 - 可插拔适配器（codex / claude / gemini / opencode + 任意命令）
 
+## 队列与放行
+
+`--park` 把卡放进队列，而不是立刻跑：
+
+```bash
+taskproof run <project> "<task>" --park       # 追尾，波次 = 当前最大 queue_seq + 1
+taskproof run <project> "<task>" --park=2     # 指定第 2 波
+```
+
+排队的卡只是一行记录：**不占并发槽**，也不会拉起适配器。三条规则：
+
+- **一波就是一个 `queue_seq`。** `queue_seq` 相同的卡属于同一波，某一波只在所有更低编号的波
+  排空后才推进。
+- **同一 group 一次仍只跑一张。** 同组两张卡不会重叠：一张占到 group，另一张被拒（exit 75）
+  并**落回 `queued`**，绝不丢，守护进程下一拍重试。
+- **排队卡的 brief 在入队那刻冻结。** `advance` 读的是库里存的那份；事后改卡文件对排队行无效。
+
+谁推进由你定：
+
+- `taskproof queue` —— 常驻守护进程，连续推（阻塞）。
+- `taskproof advance <id>` —— 人工放行一张。
+
+想逐张复核、逐张提交再放下张，就用 `advance`：守护进程会在前一张还没提交时就开始下一张，
+两张卡的 diff 会糊在一起。
+
+## 并发上限
+
+全局上限是工作区级的，而且**永远显示"生效值 + 来源"**，不给一个光秃秃的数字。来源按优先级三个：
+
+1. `run --cap N` —— 仅本次派发生效，不落盘；
+2. 注册表里的 `[defaults] concurrency`；
+3. 按机器自动探测。
+
+自动探测刻意保守 —— 一个槽就是多一个完整的编码智能体：
+
+```
+cap = clamp(2, 核数 // 4, 6)      # 每四核最多一个槽
+if RAM < 8 GiB: cap = 2           # 小内存机器扛不住 核数 // 4
+if 核数不可用: cap = 3            # 历史默认值
+```
+
+查生效值与来源：
+
+```bash
+taskproof config --show
+```
+
+改写落盘的值（保留注释）：
+
+```bash
+taskproof config --concurrency N
+```
+
+`run --cap N` 只对本次派发生效。**改小不追溯**：绝不动正在跑的卡 —— CLI 会把超出新上限的卡
+逐张打印出来，取消谁由你决定。
+
+## 终态与两把闸门
+
+两个终态刻意分开：
+
+- **`blocked`** —— 越界：动了注册表声明禁改的路径。验收可能都过了，是闸门把它拦下的。
+- **`failed`** —— 验收跑了且红了，或适配器本身失败；是活干砸了。
+
+两者都用 `accept` 清掉，而 accept 是**人工登记，不是重判**：
+
+```bash
+taskproof accept <id>                  # blocked：说明可选
+taskproof accept <id> --note "原因"     # failed：必须带 --note
+```
+
+`accept` **绝不重跑验收、绝不改写已记录的判定** —— 这次运行自己的事实保持权威。收尾一张
+`failed` 卡必须留说明，因为那是人工签字，理由得留在账里。`taskproof rerun <id>` 从一张终态卡
+起一张新卡，并双向关联（`rerun_of` / `rerun_as`）。
+
+看板上 `blocked` 独立成**「待复核」**列，不混进失败列。
+
 ## 桌面看板
 
 `desktop/` 是 stage 2 的看板：一个 **Electron + Vue 3** 应用（Element Plus、UnoCSS、
@@ -104,6 +235,18 @@ Pinia、vue-i18n），渲染的数据和静态看板同源，但是活的。中�
 只打印一次到 stdout、只存在于进程内存 —— 不写文件、不进 argv、不进环境变量、不进响应，
 也绝不交给渲染进程（写路径留在 Electron 主进程）。每次写入都带上读到的 `expected_hash`；
 文件在磁盘上变了就拒绝写入并返回 **409** 与当前内容，于是手改过的 `projects.toml` 永远不会被悄悄覆盖。
+
+控制台现在能干什么：
+
+- **7 列** —— 排队 / 运行中 / 验收中 / 完成 / 已取消 / 待复核 / 未通过。列头可用 `?hide=`
+  查询参数显隐。
+- **完成列默认折叠**到最近的几张，折叠条展开其余。
+- 验收已过的 blocked 卡上挂**「验收已过」徽标**。
+- **「放行」按钮**用于清掉 blocked 卡；写操作走 Electron 主进程持有的会话令牌，遇到
+  **409**（"已不是待复核"）就刷新看板而不是报错。
+- 设置页显示**生效值 + 来源**，以及解析出来的启动命令（随包运行时 / PATH 上的 `taskproof` /
+  自定义命令）。
+- **托盘**、**Dock 角标**（未通过计数）与**开机自启**开关。
 
 ## 注册表
 
@@ -144,6 +287,39 @@ TypeScript 侧直接 import，不手抄；Python 里有、前端里没有的状�
 PYTHONPATH=src python3 tools/gen_contract.py --check
 ```
 
+## 开发
+
+从源码跑：
+
+```bash
+pip install -e .
+taskproof --version
+```
+
+或免安装：
+
+```bash
+PYTHONPATH=src python3 -m taskproof doctor
+```
+
+两套测试，写这份文档时都全绿：
+
+- **Python** —— `PYTHONPATH=src python3 -m unittest discover -s tests`（448 个）。
+- **桌面** —— `cd desktop && npm install && npm test`（258 个）。`npm run build` 会跑类型检查，
+  并把三个目标都做一次生产构建。
+
+CI 跑三个检查：资产扫描（`tools/scan_assets.py`）、枚举契约一致性检查
+（`PYTHONPATH=src python3 tools/gen_contract.py --check`），以及桌面构建 + 测试。
+
+## 已知限制
+
+- **未签名、未公证。** macOS 首次打开会有 Gatekeeper 提示（右键 → 打开，或清掉 quarantine
+  标记）；Windows 会有 SmartScreen 提示。
+- **macOS 只有 arm64。** 没有 Intel 版，也没有 Rosetta 路径。
+- **闸门需要 `git`。** 没有系统 `git` 时，作业树与禁改路径闸门不可用；设置页会明说，其余功能照常。
+- **看板一次最多取回 2000 行。** 到顶时会显示**「已到取回上限」**，而不是假装自己拿全了。
+- **Windows / Linux 安装包由 CI 原生 runner 构建。** 本机只能打 macOS 包。
+
 ## 文档
 
 文档成对发布，英文与简体中文各一份：
@@ -155,7 +331,7 @@ PYTHONPATH=src python3 tools/gen_contract.py --check
 | [`docs/REGISTRY.md`](docs/REGISTRY.md) | [`docs/REGISTRY.zh-CN.md`](docs/REGISTRY.zh-CN.md) |
 | [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) | [`docs/WALKTHROUGH.zh-CN.md`](docs/WALKTHROUGH.zh-CN.md) |
 
-派活纪律是一个 skill：[`skills/taskproof-dispatch/SKILL.md`](skills/taskproof-dispatch/SKILL.md)。
+派活纪律是一个 skill：[`skills/taskproof-dispatch/SKILL.md`](skills/taskproof-dispatch/SKILL.md)（英文）与 [`skills/taskproof-dispatch/SKILL.zh-CN.md`](skills/taskproof-dispatch/SKILL.zh-CN.md)（简体中文）。
 
 ## 图标
 

@@ -13,17 +13,79 @@ engine, CLI, a static board, a local read-only REST API, and an Electron console
 in `desktop/` are implemented. See [`docs/DESIGN.md`](docs/DESIGN.md) for the
 full design and the decision log.
 
-### Quick start
+## Install
+
+Two ways in: the desktop console if you do not write code, the command line if
+you do.
+
+### Desktop console
+
+Download the installer for your platform from the
+[GitHub Releases](https://github.com/HaoHaoP/taskproof/releases) page:
+
+- macOS arm64 (Apple silicon) — `.dmg`
+- Windows x64 — `.exe`
+- Linux x64 — `.AppImage` / `.deb`
+
+The installers are **not signed and not notarised**:
+
+- **macOS is arm64 only** (no Intel or Rosetta build): on first launch,
+  right-click the app → Open, or run
+  `xattr -d com.apple.quarantine /Applications/Taskproof.app`.
+- **Windows 10+**: SmartScreen shows a warning on first launch.
+
+Minimum versions are macOS 11+, Windows 10+, or a current mainstream Linux
+distribution. Each installer **ships its own Python runtime**, so there is
+nothing to `pip install` — but it does need a system **`git`** for worktrees and
+the protected-path gate. Without git the settings page says so, and everything
+else keeps working.
+
+### Command line
 
 ```bash
-pipx install taskproof        # or, from a source checkout: pip install -e .
-taskproof init
-taskproof register /path/to/your/repo
-taskproof run your-repo "fix the failing test"
-taskproof board --open
+pipx install git+https://github.com/HaoHaoP/taskproof
 ```
 
-[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) runs that end to end on a throwaway
+Or download the wheel from the same Release and install the local file:
+
+```bash
+pipx install ./taskproof-0.1.0-py3-none-any.whl
+```
+
+Or run from a source checkout:
+
+```bash
+pip install -e .
+```
+
+**There is no `taskproof` package on PyPI.** Do not look for it there; use one of
+the three installs above.
+
+## Run a task
+
+```bash
+taskproof init
+taskproof register /absolute/path/to/your/repo
+taskproof run <project> "fix the failing test"
+```
+
+`run` is the whole lifecycle in one line: it **dispatches** the card to a
+pluggable adapter (codex / claude / gemini / opencode, or `custom:<cmd>`), then
+**independently runs the acceptance command** from the registry once the agent
+exits, and finally **records** every step in the audit ledger. The agent's own
+"done" is never the verdict.
+
+`taskproof tasks` lists what is in flight; `taskproof show <id>` and
+`taskproof log <id>` read one card back.
+
+The desktop console shares the same ledger. On first launch it creates
+`~/.taskproof` as an **empty workspace** — a `[defaults]` table and a commented
+example, with **no sample projects and no sample tasks** — and the board's empty
+state points you at the Projects page (or `taskproof register <path>`). Because
+the console and the CLI read the same `~/.taskproof`, either one sees the other's
+cards.
+
+[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) runs this end to end on a throwaway
 example — including the case where the agent reports success and the acceptance
 command disagrees.
 
@@ -36,14 +98,21 @@ hands out the cards*, and it now ships in the repository as a skill:
 
 ```
 skills/taskproof-dispatch/SKILL.md
+skills/taskproof-dispatch/SKILL.zh-CN.md
 ```
 
-It is written for the **orchestrating agent** — the one that plans the work,
-registers the repositories, writes each card, and dispatches it to a worker.
-Taskproof itself does not plan anything (see Non-goals); this skill is the
-missing half: how to drive the tool without the failure modes the hard way.
+It is the **operating manual for an AI coding agent** — the orchestrating one
+that plans the work, registers the repositories, writes each card, and dispatches
+it to a worker. Taskproof itself does not plan anything (see Non-goals); this
+skill is the missing half: how to drive the tool without the failure modes the
+hard way. Both languages ship: `SKILL.md` (English) and `SKILL.zh-CN.md`
+(简体中文).
 
-It turns the lessons of this build into steps you can copy: register a project,
+The rules in it are not invented; each is a lesson from breaking something. A
+parked card's brief, for instance, is frozen into its row at the moment it is
+enqueued, so **editing the card file afterwards has no effect on a queued row** —
+exactly the kind of practical rule the skill exists to record. It turns the
+lessons of this build into steps you can copy: register a project,
 put a card in a file and pass it with `$(cat …)`, fire it with an explicit
 `--adapter` and `--timeout`, then read state back with `taskproof tasks --all`
 and `taskproof log <id>`. Above all it pins four things that were learned by
@@ -112,6 +181,95 @@ taskproof api --port 8787            # local read-only REST API for clients
 - JSONL audit stream, write-only, rotated monthly
 - Pluggable adapters (codex / claude / gemini / opencode + any command)
 
+## Queue and advance
+
+`--park` puts a card in the queue instead of running it now:
+
+```bash
+taskproof run <project> "<task>" --park       # append at the tail wave
+taskproof run <project> "<task>" --park=2     # pin wave 2
+```
+
+A parked card is only a row: it takes **no concurrency slot** and no adapter
+runs. Three rules hold:
+
+- **A wave is one `queue_seq`.** Cards that share a `queue_seq` are one wave, and
+  a wave only advances after every lower-numbered wave has fully drained.
+- **A group still runs one card at a time.** Two same-group cards never overlap:
+  one takes the group, the other is refused (exit 75) and **falls back to
+  `queued`** — it is never dropped, and the daemon retries it on the next tick.
+- **A parked card's brief is frozen when it is enqueued.** `advance` reads the
+  stored brief; editing the card file afterwards does not change a queued row.
+
+Who advances the queue is your call:
+
+- `taskproof queue` — a resident daemon that pushes the queue continuously
+  (blocks).
+- `taskproof advance <id>` — fire one card by hand.
+
+Prefer `advance` when you want to review and commit each card before the next
+starts: the daemon starts the next card before the previous one is committed, so
+the two diffs blur together.
+
+## The concurrency cap
+
+The global cap is workspace-level and is always reported as a **value plus where
+it came from**, never a bare number. It has three sources, in precedence order:
+
+1. `run --cap N` — a one-off for this dispatch only, never persisted;
+2. `[defaults] concurrency` in the registry;
+3. auto-detected from the machine.
+
+The auto fallback is deliberately conservative — one slot is a whole extra
+coding agent:
+
+```
+cap = clamp(2, cores // 4, 6)     # at most one slot per four cores
+if RAM < 8 GiB: cap = 2           # a small box cannot afford cores // 4
+if the core count is unknown: cap = 3
+```
+
+Inspect the effective value and its source:
+
+```bash
+taskproof config --show
+```
+
+Change the persisted value, comment-preserving:
+
+```bash
+taskproof config --concurrency N
+```
+
+`run --cap N` overrides it for one dispatch only. **Lowering the cap is not
+retroactive**: it never touches a card already running — the CLI prints the cards
+that now exceed the new cap and leaves the decision to you.
+
+## Terminal states and the two gates
+
+Two terminal states are deliberately different:
+
+- **`blocked`** — a boundary breach: the run touched a path the registry forbids.
+  The acceptance may even have passed; the gate is what stopped it.
+- **`failed`** — the acceptance ran and went red, or the adapter itself failed;
+  the work went wrong.
+
+Both are cleared by `accept`, which is a human registration, not a fresh verdict:
+
+```bash
+taskproof accept <id>                 # blocked: a note is optional
+taskproof accept <id> --note "why"    # failed: a note is required
+```
+
+`accept` **never re-runs acceptance and never rewrites the recorded verdict** —
+the run's own facts stay authoritative. Closing a `failed` card requires a note,
+because that is a human sign-off and the reason has to survive in the ledger.
+`taskproof rerun <id>` starts a fresh card from a terminal one and links the two
+both ways (`rerun_of` / `rerun_as`).
+
+On the board, `blocked` gets its own **Needs review** column, kept out of the
+failure column.
+
 ## The desktop console
 
 `desktop/` is the stage-2 console: an **Electron + Vue 3** app (Element Plus,
@@ -131,6 +289,23 @@ to the renderer (the write path stays in the Electron main process). Every write
 carries the `expected_hash` it read; if the file changed on disk the write is
 refused with **409** and the current content is handed back, so a hand-edited
 `projects.toml` is never silently overwritten.
+
+What the console does today:
+
+- **Seven columns** — queued / running / verifying / done / cancelled / needs
+  review / not passing. A column header can be hidden with the `?hide=` query
+  parameter.
+- The **finished columns fold** to the most recent cards, with a bar to reveal
+  the rest.
+- A **"acceptance passed"** badge on a blocked card whose acceptance went green.
+- An **Accept** button to release a blocked card; the write goes through the
+  session token held in the Electron main process, and a **409** ("no longer
+  waiting for review") refreshes the board instead of erroring.
+- A settings page that shows the **effective cap and where it came from**, plus
+  the resolved launcher (bundled runtime / `taskproof` on PATH / a custom
+  command).
+- A **tray icon**, a **Dock badge** (the not-passing count) and a
+  **launch-at-login** switch.
 
 ## Registry
 
@@ -179,6 +354,45 @@ languages cannot drift:
 PYTHONPATH=src python3 tools/gen_contract.py --check
 ```
 
+## Development
+
+Run the CLI from a source checkout:
+
+```bash
+pip install -e .
+taskproof --version
+```
+
+Or, without installing:
+
+```bash
+PYTHONPATH=src python3 -m taskproof doctor
+```
+
+Two test suites, both green at the time of writing:
+
+- **Python** — `PYTHONPATH=src python3 -m unittest discover -s tests` (448 tests).
+- **Desktop** — `cd desktop && npm install && npm test` (258 tests). `npm run
+  build` runs the type-check and a production build of all three targets.
+
+CI runs three checks: the asset scan (`tools/scan_assets.py`), the enum-contract
+consistency check (`PYTHONPATH=src python3 tools/gen_contract.py --check`), and
+the desktop build + tests.
+
+## Known limitations
+
+- **Unsigned and not notarised.** macOS shows a Gatekeeper prompt on first launch
+  (right-click → Open, or clear the quarantine bit); Windows shows a SmartScreen
+  warning.
+- **macOS is arm64 only.** There is no Intel build and no Rosetta path.
+- **The gate needs `git`.** Without a system `git`, worktrees and the
+  protected-path gate are unavailable; the settings page says so and everything
+  else runs as usual.
+- **The board fetches at most 2000 rows at a time.** At that ceiling it shows
+  **"fetch limit reached"** rather than implying it has everything.
+- **Windows and Linux installers are built by CI's native runners.** A local
+  machine can only build the macOS package.
+
 ## Documentation
 
 The docs ship in pairs, English and Simplified Chinese:
@@ -190,7 +404,7 @@ The docs ship in pairs, English and Simplified Chinese:
 | [`docs/REGISTRY.md`](docs/REGISTRY.md) | [`docs/REGISTRY.zh-CN.md`](docs/REGISTRY.zh-CN.md) |
 | [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) | [`docs/WALKTHROUGH.zh-CN.md`](docs/WALKTHROUGH.zh-CN.md) |
 
-The dispatch discipline is a skill, in [`skills/taskproof-dispatch/SKILL.md`](skills/taskproof-dispatch/SKILL.md).
+The dispatch discipline is a skill, in [`skills/taskproof-dispatch/SKILL.md`](skills/taskproof-dispatch/SKILL.md) (English) and [`skills/taskproof-dispatch/SKILL.zh-CN.md`](skills/taskproof-dispatch/SKILL.zh-CN.md) (简体中文).
 
 ## Icon
 
