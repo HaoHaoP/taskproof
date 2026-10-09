@@ -261,9 +261,21 @@ export const useBoardStore = defineStore('board', () => {
     }
   }
 
-  /** Re-attempt from scratch: the service may have come back on a new port. */
-  function retry(): void {
+  /**
+   * Re-attempt from scratch. With `launch: 'manual'` the app deliberately does
+   * not spawn the child on open, so the offline banner's "retry" is the user's
+   * "start it now" gesture: ask the main process to (re)spawn the service, then
+   * rebuild the client against whatever port comes back. With the service
+   * already up this simply restarts it on the current argv.
+   */
+  async function retry(): Promise<void> {
     client = null
+    try {
+      await window.tp?.service.restart()
+    } catch {
+      // A refused spawn (a fixed port already taken) surfaces through the
+      // status channel; the reconnect below then reports it readably.
+    }
     start()
   }
 

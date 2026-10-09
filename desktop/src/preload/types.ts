@@ -277,6 +277,24 @@ export interface AboutInfo {
   userData: string
 }
 
+/**
+ * Test-only assertions of main-process state (the menu-bar mark, the real Dock
+ * badge, whether the window is hidden). It exists only when the app is launched
+ * with `TP_DESKTOP_DIAG`, so the shipped renderer surface stays the narrow,
+ * named set above -- this is the "IPC assertion" path the desktop-integration
+ * card allows for state a renderer cannot otherwise observe.
+ */
+export interface DiagApi {
+  state(): Promise<{
+    tray: boolean
+    trayTemplate: boolean
+    badge: string
+    windowVisible: boolean
+  }>
+  /** Invoke the exact handler the menu-bar click is wired to. */
+  trayClick(): Promise<boolean>
+}
+
 export interface TpApi {
   service: {
     status(): Promise<ServiceStatus>
@@ -329,4 +347,6 @@ export interface TpApi {
    * discipline as `projects`: named methods, typed results, no token, no verbs.
    */
   tasks: TasksApi
+  /** Present only with `TP_DESKTOP_DIAG`; see `DiagApi`. */
+  diag?: DiagApi
 }

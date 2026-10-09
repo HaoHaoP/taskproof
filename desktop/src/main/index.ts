@@ -4,7 +4,10 @@ import {
   clipboard,
   ipcMain,
   Menu,
+  nativeImage,
+  Notification,
   shell,
+  Tray,
   type MenuItemConstructorOptions
 } from 'electron'
 import { spawn } from 'child_process'
@@ -15,6 +18,15 @@ import { ApiService, type LaunchSpec } from './service'
 import { runDoctor } from './doctor'
 import { createProjectsClient, type ProjectsClient } from './projects'
 import { createTasksClient, type TasksClient } from './tasks'
+import { commandParts as splitCommand, launchArgs, spawnOnBoot } from './launch'
+import {
+  DONE,
+  NOT_PASSING,
+  NotificationTracker,
+  notPassingCount,
+  notificationBody,
+  type NotifiableTask
+} from './desktop'
 import type {
   AboutInfo,
   DesktopSettings,
@@ -37,19 +49,26 @@ let mainWindow: BrowserWindow | null = null
 /** The taskproof command, split into an executable and its leading arguments
  *  ("python3 -m taskproof" must not be treated as one file name). */
 function commandParts(): string[] {
-  return (settings.get().taskproofPath || 'taskproof').trim().split(/\s+/)
+  return splitCommand(settings.get().taskproofPath)
 }
 
+/**
+ * The child's argv, recomputed on every spawn -- so a settings change that lands
+ * mid-session is honoured by the restart the settings handler triggers, not only
+ * on the next app launch. The `portMode` / `port` mapping lives in `launch.ts`
+ * so it can be pinned by a unit test.
+ */
 function launchSpec(): LaunchSpec {
   const current = settings.get()
-  const parts = commandParts()
-  return {
-    command: parts[0],
-    // The global flag precedes the subcommand; `--allow-write` belongs to `api`
-    // and opens the token-protected write surface.
-    args: [...parts.slice(1), '--workspace', current.workspace, 'api', '--allow-write', '--port', '0'],
+  const spec: LaunchSpec = {
+    command: splitCommand(current.taskproofPath)[0],
+    // The global `--workspace` flag precedes the subcommand; `--allow-write`
+    // belongs to `api` and opens the token-protected write surface.
+    args: launchArgs(current),
     workspace: current.workspace
   }
+  diag(`spawn ${spec.command} ${spec.args.join(' ')}`)
+  return spec
 }
 
 const api = new ApiService(launchSpec)
@@ -93,14 +112,264 @@ function tasks(): TasksClient {
   return ensureClients().tasks
 }
 
+// ---------------------------------------------------------------------------
+// Desktop integration: tray, Dock badge, notifications, launch-at-login.
+//
+// These are the switches the settings page used to only persist. The renderer
+// owns the *data* it already polls, but the read endpoints are not token-gated,
+// so the main process reads `/api/summary` and `/api/tasks` itself -- one owner
+// for the badge and the notification de-duplication, and the write token stays
+// where it belongs (this process).
+// ---------------------------------------------------------------------------
+
+/** How often the main process re-reads the API while a switch needs the data. */
+const DESKTOP_POLL_MS = 2_000
+/** One poll's task window; the badge comes from the exact `/api/summary` counts
+ *  so a row beyond this window still can't undercount it. */
+const TASK_SCAN_LIMIT = 1_000
+
+let tray: Tray | null = null
+/** The loaded mark's template flag, cached for the diagnostic assertion. */
+let trayTemplate = false
+/** Set on `before-quit`, so the close-to-tray interceptor gets out of the way
+ *  and a real Quit actually tears the window (and the child) down. */
+let quitting = false
+let desktopTimer: ReturnType<typeof setInterval> | undefined
+let lastSummary: Record<string, number> | null = null
+const notifier = new NotificationTracker()
+
+/**
+ * Gated diagnostic trace. Off unless `TP_DESKTOP_DIAG` is set, so a normal run
+ * stays silent; when it is set the main process narrates the desktop state it
+ * cannot otherwise show -- the menu-bar mark, the Dock badge, the exact argv it
+ * spawns, every notification -- to stdout. This is how a headless check asserts
+ * the switches really took effect, rather than reading the UI by eye.
+ */
+function diag(message: string): void {
+  if (process.env.TP_DESKTOP_DIAG) process.stdout.write(`[diag] ${message}\n`)
+}
+
+/** True while at least one switch needs the API polled for it. */
+function desktopFeaturesOn(): boolean {
+  const current = settings.get()
+  return current.dockBadge || current.notifyFail || current.notifyDone
+}
+
+/** A child that exists (or is on its way up); a failed/stopped one does not. */
+function serviceRunning(): boolean {
+  const state = api.getStatus().state
+  return state === 'starting' || state === 'ready'
+}
+
+/** The menu-bar mark, loaded from the repo's `build/` beside the app icon. */
+function trayImage(): Electron.NativeImage {
+  const image = nativeImage.createFromPath(join(app.getAppPath(), 'build', 'trayTemplate.png'))
+  // The `Template` suffix already carries the macOS semantics; this is the belt
+  // to that suspenders, as the card asks.
+  image.setTemplateImage(true)
+  const size = image.getSize()
+  trayTemplate = image.isTemplateImage()
+  diag(
+    `trayImage template=${trayTemplate} empty=${image.isEmpty()} size=${size.width}x${size.height}`
+  )
+  return image
+}
+
+function showWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function hideWindow(): void {
+  mainWindow?.hide()
+}
+
+/** The menu-bar click and the diagnostic "click" share this one path. */
+function onTrayClick(): void {
+  showWindow()
+}
+
+/**
+ * Build or destroy the tray to match the switch. Idempotent: flipping the switch
+ * back and forth creates once and destroys once, never a second orphaned icon.
+ */
+function syncTray(): void {
+  if (settings.get().tray) {
+    if (tray) return
+    tray = new Tray(trayImage())
+    tray.setToolTip('Taskproof')
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: '唤回窗口', click: () => showWindow() },
+        { label: '隐藏窗口', click: () => hideWindow() },
+        { type: 'separator' },
+        { label: '退出 Taskproof', click: () => app.quit() }
+      ])
+    )
+    tray.on('click', () => onTrayClick())
+    diag('tray created')
+    return
+  }
+  if (tray) {
+    tray.destroy()
+    tray = null
+    diag('tray destroyed')
+  }
+}
+
+/**
+ * Paint the Dock badge from the latest summary. `n == 0` (and a missing summary,
+ * and the switch being off) all clear it, so a badge never outlives its facts.
+ */
+function applyBadge(): void {
+  if (process.platform !== 'darwin' || !app.dock) return
+  if (!settings.get().dockBadge || lastSummary === null) {
+    app.dock.setBadge('')
+    return
+  }
+  const n = notPassingCount(lastSummary)
+  app.dock.setBadge(n > 0 ? String(n) : '')
+  diag(`badge ${n > 0 ? n : '(clear)'}`)
+}
+
+/** Align the login item with the switch. macOS is the platform this is for. */
+function syncAutostart(): void {
+  if (process.platform !== 'darwin') return
+  const openAtLogin = Boolean(settings.get().autostart)
+  app.setLoginItemSettings({ openAtLogin })
+  diag(`autostart ${openAtLogin}`)
+}
+
+async function readJson(url: string): Promise<unknown> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`GET ${url} -> ${response.status}`)
+  return response.json()
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : null
+}
+
+function storeSummary(summary: unknown): void {
+  const record = asRecord(summary)
+  if (!record) {
+    lastSummary = null
+    return
+  }
+  const counts: Record<string, number> = {}
+  for (const [status, value] of Object.entries(record)) {
+    if (typeof value === 'number') counts[status] = value
+  }
+  lastSummary = counts
+}
+
+function raiseNotification(title: string, task: NotifiableTask): void {
+  if (!Notification.isSupported()) {
+    diag(`notify-unsupported ${task.id}`)
+    return
+  }
+  diag(`notify ${title} ${task.id}`)
+  new Notification({ title, body: notificationBody(task) }).show()
+}
+
+async function pollDesktop(): Promise<void> {
+  const port = api.getStatus().port
+  if (!port) {
+    lastSummary = null
+    applyBadge()
+    return
+  }
+  const current = settings.get()
+  const base = `http://127.0.0.1:${port}`
+  try {
+    if (current.dockBadge) {
+      storeSummary(asRecord(await readJson(`${base}/api/summary`))?.summary)
+    } else {
+      lastSummary = null
+    }
+    applyBadge()
+
+    if (current.notifyFail || current.notifyDone) {
+      const rawTasks = asRecord(await readJson(`${base}/api/tasks?limit=${TASK_SCAN_LIMIT}`))?.tasks
+      const rows: unknown[] = Array.isArray(rawTasks) ? rawTasks : []
+      const tasks: NotifiableTask[] = []
+      for (const row of rows) {
+        const record = asRecord(row)
+        if (!record) continue
+        tasks.push({
+          id: String(record.id ?? ''),
+          status: String(record.status ?? ''),
+          project: record.project ? String(record.project) : undefined
+        })
+      }
+      if (current.notifyFail) {
+        for (const task of notifier.claim(tasks, NOT_PASSING)) raiseNotification('验收未通过', task)
+      }
+      if (current.notifyDone) {
+        for (const task of notifier.claim(tasks, DONE)) raiseNotification('任务完成', task)
+      }
+    }
+  } catch {
+    // The service may be mid-restart; the next tick tries again rather than
+    // clearing a badge on one dropped read.
+    lastSummary = null
+    applyBadge()
+  }
+}
+
+/** Start the pump only while a switch needs it; stop it the moment they do not. */
+function syncDesktopPoll(): void {
+  if (desktopFeaturesOn()) {
+    if (!desktopTimer) {
+      void pollDesktop()
+      desktopTimer = setInterval(() => void pollDesktop(), DESKTOP_POLL_MS)
+    }
+    return
+  }
+  stopDesktopPoll()
+}
+
+function stopDesktopPoll(): void {
+  if (desktopTimer) clearInterval(desktopTimer)
+  desktopTimer = undefined
+}
+
+/**
+ * Reconcile everything a settings patch can touch. Called for every successful
+ * write, so the switches are true behaviour the instant they land -- no restart
+ * of the app required.
+ */
+function onSettingsChanged(before: DesktopSettings, after: DesktopSettings): void {
+  if (before.tray !== after.tray) syncTray()
+  if (before.autostart !== after.autostart) syncAutostart()
+  if (before.dockBadge !== after.dockBadge) applyBadge()
+
+  const argvChanged =
+    launchArgs(before).join('\u0000') !== launchArgs(after).join('\u0000')
+  if (argvChanged) {
+    // A changed argv only takes effect on a fresh child. A manual service that
+    // is not running stays down -- the user starts it when they are ready.
+    if (serviceRunning() || after.launch === 'auto') void api.start()
+  } else if (before.launch !== 'auto' && after.launch === 'auto') {
+    // Manual -> auto: the promise is "open the window and it is up".
+    void api.start()
+  }
+  syncDesktopPoll()
+}
+
 /**
  * The About sheet's version trio, part three: `taskproof --version`.
  *
  * The CLI may not be installed (the app is happy to run without it), may be a
  * wrapper that prints extra text, or may be pointed at a source checkout
  * (`python -m taskproof`). So the raw stdout is scraped for a semver-shaped
- * token and anything else -- a crash, a missing binary, a bare "command not
- * found" -- becomes null, which the sheet renders as an em dash. There is
+ * token and anything else -- a crash, a missing binary, a bare "command
+ * not found" -- becomes null, which the sheet renders as an em dash. There is
  * deliberately no error surface here: a missing CLI must never break the app.
  */
 export function parseCliVersion(raw: string | null | undefined): string | null {
@@ -245,6 +514,21 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
+  // Close-to-tray: while the switch is on, the close button hides the window
+  // instead of tearing it down, so the child keeps serving and the
+  // notifications keep firing. The application menu's Quit still exits -- the
+  // `quitting` flag is how it gets past this.
+  mainWindow.on('close', (event) => {
+    if (!quitting && settings.get().tray) {
+      event.preventDefault()
+      mainWindow?.hide()
+    }
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     // Never open a second Electron window for a link; hand it to the OS.
     void shell.openExternal(url)
@@ -259,10 +543,32 @@ function createWindow(): void {
 }
 
 function registerIpc(): void {
+  // Test-only assertions, present only under TP_DESKTOP_DIAG. They report the
+  // main-process state a renderer cannot observe otherwise (the menu-bar mark,
+  // the real Dock badge) and let a headless check drive the tray-click path.
+  if (process.env.TP_DESKTOP_DIAG) {
+    ipcMain.handle('tp:diag:state', () => ({
+      tray: tray !== null,
+      trayTemplate,
+      badge: process.platform === 'darwin' && app.dock ? app.dock.getBadge() : '',
+      windowVisible: Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible())
+    }))
+    ipcMain.handle('tp:diag:tray-click', () => {
+      onTrayClick()
+      return true
+    })
+  }
   ipcMain.handle('tp:service:status', () => api.getStatus())
   ipcMain.handle('tp:service:restart', () => api.start())
   ipcMain.handle('tp:settings:get', () => settings.get())
-  ipcMain.handle('tp:settings:set', (_event, patch: Partial<DesktopSettings>) => settings.set(patch))
+  ipcMain.handle('tp:settings:set', (_event, patch: Partial<DesktopSettings>) => {
+    const before = settings.get()
+    const next = settings.set(patch)
+    // The switches are behaviour, not decoration: reconcile the tray, the badge,
+    // the login item and (when the argv changed) the child right here.
+    onSettingsChanged(before, next)
+    return next
+  })
   ipcMain.handle('tp:shell:open-path', async (_event, target: string) => {
     await shell.openPath(String(target))
   })
@@ -326,6 +632,11 @@ function registerIpc(): void {
 
 api.onStatus((status) => {
   mainWindow?.webContents.send('tp:service:changed', status)
+  // A port change invalidates the last summary; re-read (or clear) on the next
+  // tick. The badge and the pump follow the service's own lifecycle.
+  if (!status.port) lastSummary = null
+  applyBadge()
+  syncDesktopPoll()
 })
 
 app.whenReady().then(async () => {
@@ -333,7 +644,16 @@ app.whenReady().then(async () => {
   registerIpc()
   Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate(showAbout)))
   createWindow()
-  await api.start()
+  // The desktop switches are aligned once at boot. `launch` is the only one that
+  // decides whether a child exists at all.
+  syncTray()
+  syncAutostart()
+  syncDesktopPoll()
+  if (spawnOnBoot(settings.get().launch)) {
+    await api.start()
+  } else {
+    applyBadge()
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -345,5 +665,13 @@ app.on('window-all-closed', () => {
 })
 
 // The child server must not outlive the app, however the app ends.
-app.on('before-quit', () => api.stop())
+app.on('before-quit', () => {
+  quitting = true
+  stopDesktopPoll()
+  if (tray) {
+    tray.destroy()
+    tray = null
+  }
+  api.stop()
+})
 process.on('exit', () => api.stop())

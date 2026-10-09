@@ -51,6 +51,15 @@ const api: TpApi = {
       }
     }
   },
+  // Test-only and off by default: the diagnostic channels are registered by the
+  // main process only when it was launched with TP_DESKTOP_DIAG, so the shipped
+  // renderer never sees this surface.
+  diag: process.env.TP_DESKTOP_DIAG
+    ? {
+        state: () => ipcRenderer.invoke('tp:diag:state'),
+        trayClick: () => ipcRenderer.invoke('tp:diag:tray-click')
+      }
+    : undefined,
   projects: {
     registry: () => ipcRenderer.invoke('tp:projects:registry'),
     probe: (path: string) => ipcRenderer.invoke('tp:projects:probe', path),

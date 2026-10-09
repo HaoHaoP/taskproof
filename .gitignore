@@ -24,6 +24,11 @@ web/dist/
 # itself un-ignored before a file inside it can come back, hence the four lines.
 !desktop/build/
 desktop/build/*
+# …but these are SOURCE assets that live there (they ship with the app), not build output:
+!desktop/build/icon.icns
+!desktop/build/icon.png
+!desktop/build/trayTemplate.png
+!desktop/build/trayTemplate@2x.png
 !desktop/build/icon.icns
 !desktop/build/icon.png
 
