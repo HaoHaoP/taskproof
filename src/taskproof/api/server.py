@@ -21,12 +21,23 @@ Security choices (deliberate, and the whole reason this module exists):
   group, or drop a queued card), and ``DELETE /api/tasks/<id>`` (terminal only).
   Reordering a queued card is field maintenance, not a fourth action:
   ``PATCH /api/tasks/<id>`` accepts only ``queue_seq``.
+* CORS is narrow on purpose. The browser renderer is never same-origin with
+  this API: the dev renderer is a Vite dev server, and a packaged renderer is a
+  ``file://`` page whose Origin is the literal string ``null``. Responses echo
+  ``Access-Control-Allow-Origin`` back to *allowed* callers only — that literal
+  ``null`` and loopback ``http`` origins (``http://localhost[:port]`` /
+  ``http://127.0.0.1[:port]``). Every other http(s) origin
+  (``https://evil.example`` …) gets no CORS header, and never ``*``. This opens
+  cross-origin *reads* to the renderer, but the write surface is unchanged:
+  ``OPTIONS`` answers the preflight without a token, yet every real write verb
+  still passes the token gate below.
 
 Standard library only (``http.server``). The frontend consumes these endpoints.
 """
 
 import json
 import os
+import re
 import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -76,6 +87,47 @@ _TASK_CREATE_FIELDS = {
     "queue_seq",
 }
 
+#: The origins the desktop renderer may legitimately present, and nothing else.
+#:
+#: * ``null`` — a packaged renderer fetched from a ``file://`` page: the browser
+#:   sends the literal string ``null`` as ``Origin``.
+#: * ``http://localhost[:port]`` and ``http://127.0.0.1[:port]`` — the Vite dev
+#:   server during development, which serves the renderer over loopback http.
+#:
+#: Everything else (``https://evil.example`` and any other routable http(s)
+#: origin) is refused a CORS header. We echo the caller's origin instead of
+#: sending ``*``: ``*`` would hand the API to any web page the user happens to
+#: have open. The write gate (``--allow-write`` + token) is unchanged by this.
+_LOOPBACK_ORIGIN = re.compile(
+    r"^http://(?:localhost|127\.0\.0\.1)(?::\d+)?$", re.IGNORECASE
+)
+
+#: Verbs a browser may use across origins. GET is the simple read; POST/PATCH/
+#: DELETE are the write surface. PUT and HEAD are not advertised (they are
+#: rejected shapes, not usable endpoints).
+_CORS_METHODS = "GET, POST, PATCH, DELETE"
+
+#: Request headers a cross-origin write may carry: the JSON content type (which
+#: is what makes the request non-simple and triggers a preflight) and the
+#: write-gate token. The browser matches these case-insensitively.
+_CORS_HEADERS = "Content-Type, X-Taskproof-Token"
+
+#: How long a browser may cache a successful preflight, in seconds.
+_CORS_MAX_AGE = "600"
+
+
+def _allowed_origin(origin):
+    """True when ``origin`` may receive an ``Access-Control-Allow-Origin`` echo.
+
+    Only the packaged ``file://`` renderer (origin ``null``) and loopback http
+    dev origins qualify; any other value is refused.
+    """
+    if not origin:
+        return False
+    if origin == "null":
+        return True
+    return bool(_LOOPBACK_ORIGIN.match(origin))
+
 
 def _json_default(value):
     # sqlite3.Row / datetime / etc. — keep the response always serialisable.
@@ -124,6 +176,25 @@ class _Handler(BaseHTTPRequestHandler):
         # HEAD was already a write-shaped rejection in the read-only API. Keep
         # that behaviour: it is not a registry mutation request.
         self._send(405, {"error": "method not allowed"})
+
+    def do_OPTIONS(self):  # noqa: N802
+        # CORS preflight. A browser sends it *before* any non-simple write
+        # (``content-type: application/json`` POST/PATCH/DELETE) and it never
+        # carries credentials, so it must not demand the token -- the real
+        # write verbs still go through the gate in ``_write_request``.
+        #
+        # An allowed origin gets the capability list; anyone else gets a bare
+        # 2xx with no ``Access-Control-Allow-Origin`` and the browser blocks the
+        # actual request. We do not 4xx a foreign origin: the browser owns that
+        # decision, and a different status would leak nothing useful anyway.
+        self.send_response(204)
+        self._send_cors_headers()
+        if _allowed_origin(self.headers.get("Origin")):
+            self.send_header("Access-Control-Allow-Methods", _CORS_METHODS)
+            self.send_header("Access-Control-Allow-Headers", _CORS_HEADERS)
+            self.send_header("Access-Control-Max-Age", _CORS_MAX_AGE)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     # -- routing ----------------------------------------------------------
 
@@ -490,6 +561,20 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- plumbing ---------------------------------------------------------
 
+    def _send_cors_headers(self):
+        """Emit the CORS headers, echoing the caller's origin only if allowed.
+
+        ``Vary: Origin`` is always sent: the response depends on the request's
+        ``Origin``, so a shared cache must not serve one origin's answer (with
+        its ``Access-Control-Allow-Origin``) to a caller with a different one.
+        ``Access-Control-Allow-Origin`` carries the request's own origin, never
+        ``*`` -- see ``_allowed_origin``.
+        """
+        self.send_header("Vary", "Origin")
+        origin = self.headers.get("Origin")
+        if _allowed_origin(origin):
+            self.send_header("Access-Control-Allow-Origin", origin)
+
     def _send(self, status, payload):
         body = json.dumps(
             payload, ensure_ascii=False, default=_json_default, indent=2
@@ -497,6 +582,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self._send_cors_headers()
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
