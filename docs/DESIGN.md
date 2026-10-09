@@ -185,7 +185,14 @@ whether the work itself was sound.
 Because `blocked` is terminal, the queue never advances it, `cancel` refuses it
 (there is no process to kill), and `rm` deletes it like any other terminal row.
 Clearing a `blocked` card is a human decision made in layer 3 via `accept <id>`;
-the dispatch pipeline never auto-promotes it to `done`.
+the dispatch pipeline never auto-promotes it to `done`. `accept` only touches a
+`blocked` row, and it is a verdict on the *breach* rather than the work: a green
+acceptance earns `done`, a red or skipped one earns `failed`, and either way one
+`accepted` event records who cleared it, the verify verdict and exit, and the
+breach summary that was confirmed. Re-running the work is a separate act: `rerun
+<id>` starts a fresh card from a terminal one, reusing its brief and run flags,
+and links the two in the ledger (`rerun_of` on the new card, `rerun_as` on the
+old) so `log <id> --json` shows the pair.
 
 ## Exit codes
 
@@ -256,7 +263,9 @@ taskproof run <project|path> "<brief>"  dispatch (primary command)
 taskproof tasks [--status S] [--project P] [--limit N]
 taskproof show <task-id>                single task detail
 taskproof log <task-id>                 event stream
-taskproof verify <task-id>              re-run acceptance
+taskproof verify <task-id>              re-run acceptance (facts only; never moves the status)
+taskproof accept <task-id>              clear a blocked card: done if acceptance passed, else failed
+taskproof rerun <task-id>               start a fresh, ledger-linked copy of a terminal task
 taskproof advance <task-id>             fire one queued task now, out of its wave
 taskproof cancel <task-id>              stop a task (SIGTERM -> SIGKILL its own tree)
 taskproof rm <task-id>                  delete a terminal task's record, events and kept worktree
@@ -295,7 +304,10 @@ is not developed further. Stage 2 builds a separate Electron application in
 `desktop/` that consumes the same loopback REST API. That API stays read-only by
 default; only an explicit `--allow-write` opens a session-token-gated write
 surface (project create / edit / delete, plus task control: dispatch / advance /
-cancel / remove / queue-seq edit) on top of it. The Python package gains
+accept / cancel / remove / queue-seq edit) on top of it. `accept` is written
+both ways — `POST /api/tasks/<id>/accept` and `taskproof accept <id>`; `rerun`
+is CLI-only on purpose (the v1 "run it again" affordance is a prefilled form,
+not a write the board needs to own). The Python package gains
 only the small changes described below; everything else is additive.
 
 **Stack.** TypeScript, Vue 3 (`<script setup>`), electron-vite

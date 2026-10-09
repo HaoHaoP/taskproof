@@ -15,13 +15,15 @@ Security choices (deliberate, and the whole reason this module exists):
   to other processes under the same macOS account via ``ps``; a stdout pipe has
   only the parent as reader.
 * The write surface has two families sharing one gate: registry create / edit /
-  delete, and task control. Task control is four action semantics —
+  delete, and task control. Task control is five action semantics —
   ``POST /api/tasks`` (dispatch, or ``start=false`` to park a queued row),
   ``POST /api/tasks/<id>/advance`` (fire ONE queued card now, out of its wave,
-  via ``dispatch.run_queued``), ``POST /api/tasks/<id>/cancel`` (SIGTERM ->
-  SIGKILL the task's own process group, or drop a queued card), and
+  via ``dispatch.run_queued``), ``POST /api/tasks/<id>/accept`` (clear a
+  ``blocked`` card: ``done`` when its acceptance passed, else ``failed``,
+  recorded as an ``accepted`` event), ``POST /api/tasks/<id>/cancel`` (SIGTERM
+  -> SIGKILL the task's own process group, or drop a queued card), and
   ``DELETE /api/tasks/<id>`` (terminal only). Reordering a queued card is field
-  maintenance, not a fifth action: ``PATCH /api/tasks/<id>`` accepts only
+  maintenance, not a sixth action: ``PATCH /api/tasks/<id>`` accepts only
   ``queue_seq``.
 * CORS is narrow on purpose. The browser renderer is never same-origin with
   this API: the dev renderer is a Vite dev server, and a packaged renderer is a
@@ -311,6 +313,13 @@ class _Handler(BaseHTTPRequestHandler):
                 if not task_id or "/" in task_id:
                     return 404, {"error": "not found", "path": parsed.path}
                 return self._advance_task(task_id)
+            if path.startswith("/api/tasks/") and path.endswith("/accept"):
+                task_id = unquote(
+                    path[len("/api/tasks/"):-len("/accept")]
+                )
+                if not task_id or "/" in task_id:
+                    return 404, {"error": "not found", "path": parsed.path}
+                return self._accept_task(task_id)
             return 404, {"error": "not found", "path": parsed.path}
 
         if path.startswith("/api/projects/"):
@@ -486,6 +495,11 @@ class _Handler(BaseHTTPRequestHandler):
         # ``_write_request`` and leaves the row queued.
         dispatch.run_queued(self.workspace, task_id)
         return 200, {"task": self._task_record(task_id)}
+
+    def _accept_task(self, task_id):
+        # The same human disposition as `taskproof accept <id>`; the audit event
+        # records that it came from the API surface (`by="api"`), not the CLI.
+        return 200, {"task": dispatch.accept_task(self.workspace, task_id, by="api")}
 
     def _cancel_task(self, task_id):
         return 200, {"task": dispatch.cancel_task(self.workspace, task_id)}

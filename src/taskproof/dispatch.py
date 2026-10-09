@@ -117,6 +117,7 @@ def dispatch(
     timeout: Optional[int] = None,
     start: bool = True,
     queue_seq: Optional[int] = None,
+    rerun_of: Optional[str] = None,
 ) -> str:
     """Run one task end to end (``start=True``) or park it queued.
 
@@ -124,6 +125,11 @@ def dispatch(
     requested ``queue_seq``, no concurrency claim, no adapter. The queue daemon
     (card 24) is what later advances a queued row; a manual ``run`` still takes
     the ``start=True`` path. Returns the task id either way.
+
+    ``rerun_of`` names the terminal card this run is a fresh copy of; when set,
+    the new card gets a ``rerun`` event carrying ``rerun_of`` and the old card
+    gets one carrying ``rerun_as``, both written before the adapter runs so the
+    link survives even a failed rerun. ``taskproof rerun`` is the only caller.
 
     Raises the typed errors in `errors.py` so the CLI can map them to exit codes:
       ConcurrencyError -> 75, AdapterError -> 70, VerifyError -> 71, RegistryError -> 2
@@ -198,6 +204,8 @@ def dispatch(
                     "timeout": timeout,
                 },
             )
+            if rerun_of:
+                _link_rerun(conn, task_id, rerun_of)
             return task_id
 
         # ③ claim the group slot + a slot under the global cap. A refusal is a
@@ -239,8 +247,15 @@ def dispatch(
                     "worktree": worktree,
                     "skip_verify": skip_verify,
                     "queue_seq": queue_seq,
+                    # The hard timeout this run enforces. It has no column, so it
+                    # rides in the event: `rerun` reads it back to reuse the same
+                    # flag (See `_run_options`).
+                    "timeout": effective_timeout,
                 },
             )
+
+            if rerun_of:
+                _link_rerun(conn, task_id, rerun_of)
 
             _execute_claimed(
                 conn,
@@ -351,6 +366,18 @@ def _execute_claimed(
                     )
 
 
+def _link_rerun(conn, new_id: str, old_id: str) -> None:
+    """Record the two-way link between a rerun and the card it was copied from.
+
+    Written through `storage.append_event`, so it lands in BOTH the `events`
+    table and the JSONL audit stream — `taskproof log <id> --json` reads the
+    stream, which is why the link has to be an event and not a column. The new
+    card carries ``rerun_of``, the old card carries ``rerun_as``.
+    """
+    storage.append_event(conn, new_id, "rerun", {"rerun_of": old_id})
+    storage.append_event(conn, old_id, "rerun", {"rerun_as": new_id})
+
+
 def _queued_options(conn, task_id: str) -> dict:
     """Recover the run flags a parked task carried in its `queued` event.
 
@@ -372,6 +399,41 @@ def _queued_options(conn, task_id: str) -> dict:
     except (json.JSONDecodeError, TypeError, ValueError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _run_options(conn, task_id: str) -> dict:
+    """Recover the run flags a task carried, for `rerun` to reuse.
+
+    Same idea as :func:`_queued_options`, but broader: a parked card records its
+    flags on the `queued` event, while a card born running (``dispatch`` with
+    ``start=True``) records read_only / worktree / skip_verify / timeout on the
+    `started` event. Both are read oldest-first and merged, so the newest value
+    of each key wins and a card advanced out of the queue keeps the flags the
+    queue remembered.
+
+    A flag missing from every event is simply absent; `rerun` then applies the
+    documented default (read_only / worktree / skip_verify false; timeout =
+    the registry timeout). A row written by an older build that recorded no
+    flags yields `{}` and reruns with those same defaults.
+    """
+    options: dict = {}
+    rows = conn.execute(
+        "SELECT payload FROM events WHERE task_id = ? "
+        "AND event IN ('queued', 'started') ORDER BY id ASC",
+        (task_id,),
+    ).fetchall()
+    for row in rows:
+        text = row[0]
+        try:
+            payload = json.loads(text) if text else {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for key in ("read_only", "worktree", "skip_verify", "timeout"):
+            if payload.get(key) is not None:
+                options[key] = payload[key]
+    return options
 
 
 def run_queued(workspace: str, task_id: str) -> str:
@@ -1389,6 +1451,164 @@ def cancel_task(workspace: str, task_id: str) -> dict:
         return dict(storage.get_task(conn, task_id))
     finally:
         conn.close()
+
+
+#: `verify` labels carried by an `accepted` event. They describe the acceptance
+#: result the human accepted the breach *alongside*, not a fresh verdict.
+_VERIFY_PASSED = "passed"
+_VERIFY_FAILED = "failed"
+_VERIFY_SKIPPED = "skipped"
+
+
+def _violation_summary(conn, task_id: str) -> dict:
+    """The breach an `accept` confirms: the rules and the paths they hit.
+
+    Read from the card's own `forbidden` / `blocked` events, so the `accepted`
+    event carries the facts the human actually looked at rather than a
+    re-derivation from the registry.
+    """
+    summary = {"rules": [], "paths": [], "violations": []}
+    for name in ("forbidden", "blocked"):
+        row = conn.execute(
+            "SELECT payload FROM events WHERE task_id = ? AND event = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (task_id, name),
+        ).fetchone()
+        if row is None or row[0] is None:
+            continue
+        try:
+            payload = json.loads(row[0])
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if not summary["violations"] and isinstance(payload.get("violations"), list):
+            summary["violations"] = payload["violations"]
+        if not summary["rules"] and isinstance(payload.get("rules"), list):
+            summary["rules"] = list(payload["rules"])
+        if not summary["paths"] and isinstance(payload.get("paths"), list):
+            summary["paths"] = list(payload["paths"])
+    # A `blocked` event may carry only the per-violation detail; derive the rule
+    # list from it so `rules` is never empty when a breach was recorded.
+    if not summary["rules"]:
+        summary["rules"] = sorted(
+            {
+                entry.get("rule")
+                for entry in summary["violations"]
+                if isinstance(entry, dict) and entry.get("rule")
+            }
+        )
+    return summary
+
+
+def accept_task(workspace: str, task_id: str, *, by: str = "cli") -> dict:
+    """Clear a `blocked` card — the human disposition of one boundary breach.
+
+    Only `blocked` is accepted; every other status (queued / running /
+    verifying / done / failed / timeout / cancelled) is refused with a readable
+    `TaskStateError`, so `accept` can never silently re-close a card.
+
+    `accept` is a verdict on the *breach*, not a pass on the work, so the new
+    terminal state follows the acceptance result already on the card:
+
+      * ``verify_exit == 0``            -> `done`   ("the work is sound; I
+        accept this crossing")
+      * anything else (red or skipped)  -> `failed` ("I accept the crossing,
+        but the work itself did not pass")
+
+    One `accepted` event records the actor (``by``), the verify verdict and
+    exit, the breach summary this acceptance confirms, and ``from`` / ``to``.
+    The card's `verify_*` columns and `finished_at` are left untouched — the
+    run's own facts do not change because a human later signed off. Returns the
+    updated task row.
+    """
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+        row = storage.get_task(conn, task_id)
+        if row is None:
+            raise TaskNotFoundError(f"no such task: {task_id}")
+        if row["status"] != STATUS_BLOCKED:
+            raise TaskStateError(
+                f"task {task_id} is {row['status']}; "
+                "only a blocked task can be accepted"
+            )
+
+        verify_exit = row["verify_exit"]
+        if verify_exit == 0:
+            verify_label, new_status = _VERIFY_PASSED, STATUS_DONE
+        elif verify_exit is None:
+            verify_label, new_status = _VERIFY_SKIPPED, STATUS_FAILED
+        else:
+            verify_label, new_status = _VERIFY_FAILED, STATUS_FAILED
+
+        summary = _violation_summary(conn, task_id)
+        storage.update_task(conn, task_id, status=new_status)
+        storage.append_event(
+            conn,
+            task_id,
+            "accepted",
+            {
+                "by": by,
+                "verify": verify_label,
+                "verify_exit": verify_exit,
+                "from": STATUS_BLOCKED,
+                "to": new_status,
+                # The breach this acceptance confirms, verbatim from the ledger.
+                "rules": summary["rules"],
+                "paths": summary["paths"],
+                "violations": summary["violations"],
+            },
+        )
+        return dict(storage.get_task(conn, task_id))
+    finally:
+        conn.close()
+
+
+def rerun_task(workspace: str, task_id: str) -> str:
+    """Start a fresh card from a terminal one, linked both ways in the ledger.
+
+    The new card reuses the old card's brief and run flags (adapter / model /
+    reasoning / timeout / read_only / worktree / skip_verify), recovered from
+    its row and its events by :func:`_run_options`. A flag the ledger never
+    captured falls back to the documented default (see `_run_options`).
+
+    Only a terminal card may be rerun, `blocked` included; a non-terminal card
+    is refused so two attempts of the same work can never overlap. The new card
+    goes down the normal ``dispatch(start=True)`` path (never queued, never a
+    wave) and gets ``rerun_of`` while the old card gets ``rerun_as``. Returns
+    the new task id.
+    """
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+        row = storage.get_task(conn, task_id)
+        if row is None:
+            raise TaskNotFoundError(f"no such task: {task_id}")
+        if row["status"] not in TERMINAL_STATUSES:
+            raise TaskStateError(
+                f"task {task_id} is {row['status']}; "
+                "only a terminal task can be rerun"
+            )
+        options = _run_options(conn, task_id)
+        old = dict(row)
+    finally:
+        conn.close()
+
+    return dispatch(
+        workspace,
+        old["project"],
+        old["brief"],
+        adapter=old["adapter"] or "codex",
+        model=old["model"],
+        reasoning=old["reasoning"],
+        read_only=bool(options.get("read_only")),
+        worktree=bool(options.get("worktree")),
+        skip_verify=bool(options.get("skip_verify")),
+        timeout=options.get("timeout"),
+        start=True,
+        rerun_of=task_id,
+    )
 
 
 def _kept_worktrees(conn, task_id: str):

@@ -169,7 +169,11 @@ cancelled                 被人主动停掉
 
 因为 `blocked` 是终态，队列不推进它，`cancel` 拒绝它（没有进程可杀），`rm` 像对待
 其它终态一样删掉它。放行一张 `blocked` 卡是人的决定，走层3 的 `accept <id>`；
-调度管线绝不自动把它升成 `done`。
+调度管线绝不自动把它升成 `done`。`accept` 只作用于 `blocked` 一行，而且它判决的是
+**越界**、不是活本身：验收绿才判 `done`，验收红或被跳过一律判 `failed`；两种情况都写
+一条 `accepted` 事件，记下是谁放行的、验收结论与退出码、以及被确认的那次越界摘要。
+重跑是另一件事：`rerun <id>` 从终态卡起一张新卡，复用它的 brief 与 run 旗标，并在账本
+里双向关联（新卡记 `rerun_of`、旧卡记 `rerun_as`），`log <id> --json` 两张卡能互相找到。
 
 ## 退出码
 
@@ -229,7 +233,9 @@ taskproof run <project|path> "<brief>"  派活（主命令）
 taskproof tasks [--status S] [--project P] [--limit N]
 taskproof show <task-id>                单任务详情
 taskproof log <task-id>                 事件流
-taskproof verify <task-id>              复跑验收
+taskproof verify <task-id>              复跑验收（只更新事实，不动终态）
+taskproof accept <task-id>              放行 blocked 卡：验收过→done，否则→failed
+taskproof rerun <task-id>               从终态卡起一张新卡，并在账本里双向关联
 taskproof advance <task-id>             立刻发车：把一张排队卡单独越过波次推出去
 taskproof cancel <task-id>              停任务（对自己那棵进程树 SIGTERM→SIGKILL）
 taskproof rm <task-id>                  删除终态任务的记录、事件与保留的 worktree
@@ -263,7 +269,7 @@ stage 2  Vue 3 + Vite 前端 → Electron 薄壳（不内嵌 Python 运行时）
 静态看板**冻结**：它继续作为 `file://` 快照可用，但不再往下开发。stage 2 在
 `desktop/` 里另做一款 Electron 应用，消费同一个回环 REST API。该 API 默认
 只读；只有显式加上 `--allow-write`，才会在其上开出一个由「仅本次会话」令牌
-保护的写面（项目增 / 改 / 删，以及任务控制：派发 / 立刻发车 / 停止 / 删除 / 改序号）。Python 侧只增加下面这几处小改动，其余全是加法。
+保护的写面（项目增 / 改 / 删，以及任务控制：派发 / 立刻发车 / 放行 / 停止 / 删除 / 改序号）。放行两处都写 —— `POST /api/tasks/<id>/accept` 与 `taskproof accept <id>`；`rerun` 刻意只给 CLI（v1 的「再跑一次」是预填表单，不是看板需要拥有的写口）。Python 侧只增加下面这几处小改动，其余全是加法。
 
 **技术选型。** TypeScript、Vue 3（`<script setup>`）、electron-vite
 （main / preload / renderer）、Pinia、vue-router（hash 模式 —— 生产走

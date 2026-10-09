@@ -114,6 +114,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("task_id")
 
     p = sub.add_parser(
+        "accept",
+        help="clear a blocked task: done if acceptance passed, else failed",
+    )
+    p.add_argument("task_id")
+
+    p = sub.add_parser(
+        "rerun",
+        help="start a fresh copy of a terminal task (same brief and run flags)",
+    )
+    p.add_argument("task_id")
+
+    p = sub.add_parser(
         "cancel", help="stop a task (kill its process tree) or drop a queued one"
     )
     p.add_argument("task_id")
@@ -632,6 +644,26 @@ def cmd_advance(args):
     return 0
 
 
+def cmd_accept(args):
+    task = dispatch.accept_task(args.workspace, args.task_id)
+    payload = {"task_id": args.task_id, "status": task.get("status"), "task": task}
+    emit(args, payload, f"{args.task_id}  {task.get('status', '')}  accepted")
+    return 0
+
+
+def cmd_rerun(args):
+    new_id = dispatch.rerun_task(args.workspace, args.task_id)
+    task = dispatch.task_detail(args.workspace, new_id).get("task") or {}
+    payload = {
+        "task_id": new_id,
+        "rerun_of": args.task_id,
+        "status": task.get("status"),
+        "task": task,
+    }
+    emit(args, payload, f"{new_id}  {task.get('status', '')}  rerun of {args.task_id}")
+    return 0
+
+
 def cmd_cancel(args):
     task = dispatch.cancel_task(args.workspace, args.task_id)
     payload = {"task_id": args.task_id, "status": task.get("status"), "task": task}
@@ -962,6 +994,8 @@ COMMANDS = {
     "log": cmd_log,
     "verify": cmd_verify,
     "advance": cmd_advance,
+    "accept": cmd_accept,
+    "rerun": cmd_rerun,
     "cancel": cmd_cancel,
     "rm": cmd_rm,
     "board": cmd_board,
