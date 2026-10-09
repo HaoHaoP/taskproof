@@ -68,10 +68,7 @@ export const useBoardStore = defineStore('board', () => {
     null
   )
 
-  /** Which projects the matrix shows. Absent means visible, so a project that
-   *  appears in the registry shows up without needing an entry here first. */
-  const visible = ref<Record<string, boolean>>({})
-  /** Polling is a setting rather than a constant, because the toolbar reports
+  /** Polling is a setting rather than a constant, because the mast reports
    *  its state: an indicator that cannot be off is decoration. */
   const poll = ref<PollChoice>('2s')
   const polling = ref(false)
@@ -104,20 +101,6 @@ export const useBoardStore = defineStore('board', () => {
   const total = computed(() =>
     Object.values(summary.value).reduce((sum, count) => sum + (count || 0), 0)
   )
-
-  function isVisible(id: string): boolean {
-    return visible.value[id] !== false
-  }
-
-  function toggleProject(id: string): void {
-    visible.value = { ...visible.value, [id]: !isVisible(id) }
-  }
-
-  function selectAllProjects(on: boolean): void {
-    const next: Record<string, boolean> = {}
-    for (const project of projects.value) next[project.id] = on
-    visible.value = next
-  }
 
   async function connect(): Promise<void> {
     const baseUrl = await resolveBaseUrl()
@@ -306,16 +289,12 @@ export const useBoardStore = defineStore('board', () => {
     fetchBudget,
     capped,
     detail,
-    visible,
     poll,
     polling,
     unknownWords,
     tasksByColumn,
     abnormalCount,
     inFlightCount,
-    isVisible,
-    toggleProject,
-    selectAllProjects,
     connect,
     refresh,
     openTask,

@@ -9,10 +9,9 @@ export default {
   board: {
     range: '范围',
     project: '项目',
-    allProjects: '全部项目',
     ranges: { today: '今天', '7d': '最近 7 天', '30d': '最近 30 天', all: '全部' },
-    fetched: '已取回 {n} 条',
-    capped: '已达取回上限 {n} 条，可能还有更老的未显示',
+    capped: '仅取回最近 {n} 条 · 更早的还没取到',
+    continue: '继续取回',
     expand: '还有 {n} 张 · 展开',
     collapse: '收起',
     taken: '已取回 {n} / 共 {m}',

@@ -287,8 +287,8 @@ const waveClass = computed(() => `w${waveSlot(props.task.queue_seq)}`)
 </style>
 
 <!-- The dropdown is teleported out of this component, so scoped styles cannot
-     reach it. Keyed off the menu's own class, like FilterBar's, so it cannot
-     leak into any other Element Plus dropdown. -->
+     reach it. Keyed off the menu's own class so it cannot leak into any other
+     Element Plus dropdown. -->
 <style>
 .tp-card-menu .el-dropdown-menu__item.danger {
   color: var(--c-failed);

@@ -1,21 +1,21 @@
 /**
- * The toolbar's rules -- the reasoning the UI depends on.
+ * The store's own rules -- the reasoning the UI depends on but that is not tied
+ * to a particular view.
  *
- * A project nobody has hidden must be visible, hiding must survive a refresh,
- * and switching polling off must actually stop the pump rather than merely
- * relabelling it (an indicator that cannot turn off is decoration).
+ * The board's project selection lives in the address bar now (the matrix's
+ * multi-select), so the store no longer keeps a visibility map; what is left
+ * here is the pump: switching polling off must actually stop it rather than
+ * merely relabelling it, and a launch that is merely slow must not be reported
+ * as offline.
  *
  * No sockets: the local API is stubbed to fail, which is also the state the app
  * has to survive on its own start-up.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { Project } from '../api/client'
 import { useBoardStore } from './board'
 
-const fakeProject = (id: string): Project => ({ id }) as unknown as Project
-
-describe('matrix project filter', () => {
+describe('polling and start-up', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     ;(globalThis as unknown as { window: unknown }).window = { tp: undefined }
@@ -31,45 +31,6 @@ describe('matrix project filter', () => {
     useBoardStore().stop()
     vi.useRealTimers()
     vi.unstubAllGlobals()
-  })
-
-  it('shows a project that has no entry in the map', () => {
-    // Absent means visible, so a project registered while the app is open shows
-    // up without anything having to seed the map first.
-    expect(useBoardStore().isVisible('anything')).toBe(true)
-  })
-
-  it('remembers a hidden project', () => {
-    const store = useBoardStore()
-    store.toggleProject('a')
-    expect(store.isVisible('a')).toBe(false)
-    expect(store.isVisible('b')).toBe(true)
-    store.toggleProject('a')
-    expect(store.isVisible('a')).toBe(true)
-  })
-
-  it('does not drop the previous state when toggling once', () => {
-    // The map is replaced rather than mutated, so a toggle must carry the rest
-    // of the entries over. Losing them would silently un-hide every other lane.
-    const store = useBoardStore()
-    store.toggleProject('a')
-    store.toggleProject('b')
-    expect(store.isVisible('a')).toBe(false)
-    expect(store.isVisible('b')).toBe(false)
-    store.toggleProject('b')
-    expect(store.isVisible('b')).toBe(true)
-    expect(store.isVisible('a')).toBe(false)
-  })
-
-  it('select all / none applies to the projects in the registry', () => {
-    const store = useBoardStore()
-    store.projects = [fakeProject('a'), fakeProject('b')]
-    store.selectAllProjects(false)
-    expect(store.isVisible('a')).toBe(false)
-    expect(store.isVisible('b')).toBe(false)
-    store.selectAllProjects(true)
-    expect(store.isVisible('a')).toBe(true)
-    expect(store.isVisible('b')).toBe(true)
   })
 
   it('turning polling off stops the pump, and on restarts it', () => {

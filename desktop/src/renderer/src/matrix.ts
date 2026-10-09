@@ -14,7 +14,7 @@
  *    ordering key, so the fetch-coverage check and the filter agree on what
  *    "older" means.
  */
-import type { Task } from './api/client'
+import type { Project, Task } from './api/client'
 import { COLUMNS, columnFor } from './contract'
 
 /** How many cards a windowed terminal column (done, cancelled) shows before the
@@ -36,15 +36,21 @@ export const DONE_EXPANDED = 'expanded'
 
 export interface BoardFilter {
   range: RangeChoice
-  /** A single project id to scope to, or null for "every project". */
-  project: string | null
+  /**
+   * The selected project ids, in the order the multi-select handed them over.
+   * `null` is the default and means "every project"; an array -- even an empty
+   * one -- is an explicit narrowing, so toggling a project off is not the same
+   * as never having chosen. One set drives both the lanes the board draws
+   * (`visibleProjects`) and the cards it keeps (`filterBoard`).
+   */
+  projects: string[] | null
   /** Whether the finished column has been unfolded past its window. */
   expanded: boolean
 }
 
 export const DEFAULT_FILTER: BoardFilter = {
   range: DEFAULT_RANGE,
-  project: null,
+  projects: null,
   expanded: false
 }
 
@@ -77,11 +83,38 @@ function readParam(query: QueryLike, key: string): string | null {
   return null
 }
 
+/**
+ * The selected projects, from the one canonical `?projects=` key. The comma is
+ * the separator; the value is percent-encoded by `URLSearchParams` on the way
+ * out, so an id containing a comma would be ambiguous -- project ids are slugs,
+ * so this is the documented syntax rather than a hidden one.
+ *
+ * An absent key means "every project" (`null`), which is also the default and
+ * therefore the state that writes no query at all. A present-but-empty key
+ * (`?projects=`) is an explicit "none", which is different.
+ *
+ * Legacy `?project=<id>` (the single-select this board used to carry) is still
+ * read as a one-element narrowing so an old bookmark lands on a real board; it
+ * is never written again -- the multi-select always writes `?projects=`.
+ */
+function readProjects(query: QueryLike): string[] | null {
+  const multi = readParam(query, 'projects')
+  if (multi !== null) {
+    if (multi.trim() === '') return []
+    return multi
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0)
+  }
+  const single = readParam(query, 'project')
+  return single ? [single] : null
+}
+
 export function parseBoardFilter(query: QueryLike): BoardFilter {
   const rawRange = readParam(query, 'range')
   return {
     range: isRange(rawRange) ? rawRange : DEFAULT_RANGE,
-    project: readParam(query, 'project') || null,
+    projects: readProjects(query),
     expanded: readParam(query, 'done') === DONE_EXPANDED
   }
 }
@@ -94,9 +127,11 @@ export function parseBoardFilter(query: QueryLike): BoardFilter {
 export function boardQuery(filter: BoardFilter): string {
   const params = new URLSearchParams()
   if (filter.range !== DEFAULT_RANGE) params.set('range', filter.range)
-  if (filter.project) params.set('project', filter.project)
+  if (filter.projects !== null) params.set('projects', filter.projects.join(','))
   if (filter.expanded) params.set('done', DONE_EXPANDED)
-  return params.toString()
+  // URLSearchParams percent-encodes the comma; a plain comma is the documented
+  // separator and keeps the address bar readable.
+  return params.toString().replace(/%2C/g, ',')
 }
 
 /** Epoch milliseconds, or null when the value is missing or unparseable. */
@@ -222,13 +257,26 @@ export function inRange(task: Task, range: RangeChoice, now: number): boolean {
   return created >= rangeStart(range, now)
 }
 
-/** The whole board's filter, applied together: range, then project. */
+/** The whole board's filter, applied together: range, then project set. */
 export function filterBoard(tasks: Task[], filter: BoardFilter, now: number): Task[] {
   return tasks.filter(
     (task) =>
       inRange(task, filter.range, now) &&
-      (filter.project === null || task.project === filter.project)
+      (filter.projects === null || filter.projects.includes(task.project))
   )
+}
+
+/**
+ * The projects whose lane the board draws. This reads the *same* `filter.projects`
+ * set `filterBoard` uses to keep cards, so a lane can never disagree with the
+ * cards inside it -- the defect card 38 exists to fix, where a lane could be
+ * hidden while its cards stayed behind in another lane. `null` (the default)
+ * draws every project, in registry order.
+ */
+export function visibleProjects(projects: Project[], filter: BoardFilter): Project[] {
+  if (filter.projects === null) return [...projects]
+  const chosen = new Set(filter.projects)
+  return projects.filter((project) => chosen.has(project.id))
 }
 
 /**

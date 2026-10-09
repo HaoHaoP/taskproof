@@ -22,13 +22,13 @@ import type { Task } from '../api/client'
 import { COLUMNS } from '../contract'
 import {
   DONE_WINDOW,
-  MAX_BUDGET,
   RANGES,
   boardQuery,
   doneWindow,
   filterBoard,
   groupColumns,
   parseBoardFilter,
+  visibleProjects,
   type BoardFilter,
   type RangeChoice
 } from '../matrix'
@@ -45,15 +45,18 @@ const { t } = useI18n()
 /** The board's filter, read straight off the address bar. */
 const filter = computed(() => parseBoardFilter(route.query))
 
-/** Every project the matrix draws a lane for: visible in the toolbar, and, when
- *  a board-level project is chosen, that one alone. */
-const projects = computed(() =>
-  store.projects.filter(
-    (project) =>
-      store.isVisible(project.id) &&
-      (filter.value.project === null || project.id === filter.value.project)
-  )
-)
+/** Every 项目 (project row) the matrix draws a lane for. This is the *same*
+ *  selected set `filterBoard` keeps cards by -- so a project the multi-select
+ *  drops loses its row and its cards together, never one without the other. */
+const projects = computed(() => visibleProjects(store.projects, filter.value))
+
+/** The registry's ids, in order: what "all selected" means. `filter.projects`
+ *  is null in that default state, so the multi-select model falls back to this
+ *  full list rather than to an empty selection. */
+const allProjectIds = computed(() => store.projects.map((project) => project.id))
+
+/** What the multi-select shows as checked. */
+const selectedProjects = computed(() => filter.value.projects ?? allProjectIds.value)
 
 /** The narrowed board, grouped and ordered -- the source of every cell. */
 const columns = computed(() => groupColumns(filterBoard(store.tasks, filter.value, Date.now())))
@@ -123,8 +126,15 @@ function onRange(value: string): void {
   applyFilter({ range: value as RangeChoice })
 }
 
-function onProject(value: string): void {
-  applyFilter({ project: value || null })
+/**
+ * Write the multi-select's checked set back to the address bar. Checking every
+ * project is the default, so it clears the query instead of pinning the full
+ * list -- a registry that grows later still reads as "all".
+ */
+function onProjects(value: string[]): void {
+  const all = allProjectIds.value
+  const isAll = value.length === all.length && all.every((id) => value.includes(id))
+  applyFilter({ projects: isAll ? null : [...value] })
 }
 
 // Keep the store's fetch budget in step with the address bar's range. A change
@@ -134,7 +144,29 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
 
 <template>
   <div class="matrix-view">
+    <!-- The matrix row is exactly two controls: 项目 (rows and cards, one set)
+         and 范围. Nothing else lives here in the normal state -- in particular
+         no "已取回 N 条" readout. -->
     <div class="boardbar">
+      <label class="fld">
+        <span>{{ t('board.project') }}</span>
+        <el-select
+          class="sel sel-projects"
+          size="small"
+          multiple
+          collapse-tags
+          collapse-tags-tooltip
+          :model-value="selectedProjects"
+          @change="onProjects"
+        >
+          <el-option
+            v-for="project in store.projects"
+            :key="project.id"
+            :value="project.id"
+            :label="project.id"
+          />
+        </el-select>
+      </label>
       <label class="fld">
         <span>{{ t('board.range') }}</span>
         <el-select
@@ -146,25 +178,16 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
           <el-option v-for="r in RANGES" :key="r" :value="r" :label="t(`board.ranges.${r}`)" />
         </el-select>
       </label>
-      <label class="fld">
-        <span>{{ t('board.project') }}</span>
-        <el-select
-          class="sel"
-          size="small"
-          :model-value="filter.project ?? ''"
-          @change="onProject"
-        >
-          <el-option value="" :label="t('board.allProjects')" />
-          <el-option
-            v-for="project in store.projects"
-            :key="project.id"
-            :value="project.id"
-            :label="project.id"
-          />
-        </el-select>
-      </label>
-      <span class="fetched">{{ t('board.fetched', { n: store.tasks.length }) }}</span>
-      <span v-if="store.capped" class="cap">{{ t('board.capped', { n: MAX_BUDGET }) }}</span>
+
+      <!-- Only when the fetch was cut off by the budget: say so, and offer to
+           pull an older window rather than leave the reader thinking this is
+           all there is. -->
+      <div v-if="store.capped" class="cap">
+        <span>{{ t('board.capped', { n: store.tasks.length }) }}</span>
+        <button type="button" class="grow" @click="store.growBudget()">
+          {{ t('board.continue') }}
+        </button>
+      </div>
     </div>
 
     <!-- A refused spawn (429) changes nothing: the card stays queued at its
@@ -274,8 +297,9 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   min-height: 0;
   flex: 1;
 }
-/* The board filter: the two dimensions (project, time range) plus the honest
-   fetch readout. It scopes the whole board, six columns at once. */
+/* The matrix row: the project multi-select and the time range. Both scope the
+   whole board, six status columns (泳道) at once; there is no third control in
+   the normal state. */
 .boardbar {
   flex: none;
   display: flex;
@@ -294,13 +318,32 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
 .boardbar .sel {
   width: 128px;
 }
-.boardbar .fetched {
-  font: 11.5px/1 var(--mono);
-  color: var(--ink-2);
+.boardbar .sel-projects {
+  width: 240px;
 }
+/* The capped warning is a note, not an alarm: the amber of "incomplete", not
+   the red of "failed". It carries its own "继续取回" so the reader can pull the
+   older window rather than only being told it is missing. */
 .boardbar .cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  font: 11.5px/1.2 var(--sans);
+  color: var(--c-timeout);
+}
+.boardbar .cap .grow {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  color: inherit;
   font: 11.5px/1 var(--sans);
-  color: var(--c-failed);
+  cursor: pointer;
+}
+.boardbar .cap .grow:hover {
+  background: var(--raise);
 }
 /* The "retry later" strip: a refused spawn is not a failure, so this reads as
    a note, not an alarm -- the amber of "timed out", not the red of "failed". */

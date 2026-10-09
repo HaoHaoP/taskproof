@@ -16,10 +16,9 @@ export default {
   board: {
     range: 'Range',
     project: 'Project',
-    allProjects: 'All projects',
     ranges: { today: 'Today', '7d': 'Last 7 days', '30d': 'Last 30 days', all: 'All' },
-    fetched: 'taken {n}',
-    capped: 'hit the cap of {n} — older rows may not be shown',
+    capped: 'only the most recent {n} — older rows are not fetched yet',
+    continue: 'Fetch earlier',
     expand: '{n} more · expand',
     collapse: 'collapse',
     taken: 'taken {n} of {m}',

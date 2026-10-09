@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Task } from './api/client'
+import type { Project, Task } from './api/client'
 import {
   DEFAULT_FILTER,
   DONE_WINDOW,
@@ -10,7 +10,8 @@ import {
   inRange,
   needsMoreBudget,
   parseBoardFilter,
-  sortColumn
+  sortColumn,
+  visibleProjects
 } from './matrix'
 
 /** A task with only the fields these rules read; the rest are inert. */
@@ -173,7 +174,11 @@ describe('time range', () => {
       task('b', { project: 'two', created_at: new Date(NOW - 60 * 1000).toISOString() }),
       task('c', { project: 'two', created_at: new Date(NOW - 20 * DAY).toISOString() })
     ]
-    const filtered = filterBoard(rows, { ...DEFAULT_FILTER, range: 'today', project: 'two' }, NOW)
+    const filtered = filterBoard(
+      rows,
+      { ...DEFAULT_FILTER, range: 'today', projects: ['two'] },
+      NOW
+    )
     expect(filtered.map((t) => t.id)).toEqual(['b'])
   })
 })
@@ -207,34 +212,96 @@ describe('fetch budget coverage', () => {
 })
 
 describe('address-bar filter', () => {
-  it('reads a full query', () => {
-    expect(parseBoardFilter('range=7d&project=core&done=expanded')).toEqual({
+  it('reads a full query, projects comma-separated', () => {
+    expect(parseBoardFilter('range=7d&projects=core,web&done=expanded')).toEqual({
       range: '7d',
-      project: 'core',
+      projects: ['core', 'web'],
       expanded: true
     })
   })
 
-  it('reads the empty query as the defaults', () => {
+  it('reads the empty query as the defaults (all projects)', () => {
     expect(parseBoardFilter('')).toEqual(DEFAULT_FILTER)
     expect(parseBoardFilter(undefined)).toEqual(DEFAULT_FILTER)
+    expect(parseBoardFilter('').projects).toBeNull()
+  })
+
+  it('reads an explicit empty selection as "none", not "all"', () => {
+    expect(parseBoardFilter('projects=').projects).toEqual([])
   })
 
   it('ignores a range it does not know', () => {
     expect(parseBoardFilter('range=forever').range).toBe('all')
   })
 
-  it('writes only the non-default pieces', () => {
-    expect(boardQuery(DEFAULT_FILTER)).toBe('')
-    expect(boardQuery({ range: '7d', project: 'core', expanded: true })).toBe(
-      'range=7d&project=core&done=expanded'
-    )
-    expect(boardQuery({ range: 'all', project: null, expanded: false })).toBe('')
+  it('still reads the legacy single ?project= as a one-element set', () => {
+    // Old bookmarks keep working; the board never writes `project` again.
+    expect(parseBoardFilter('project=core').projects).toEqual(['core'])
+    // The new key wins when both are present.
+    expect(parseBoardFilter('projects=web&project=core').projects).toEqual(['web'])
   })
 
-  it('round-trips', () => {
-    const filter = { range: '30d' as const, project: 'x y', expanded: true }
+  it('writes only the non-default pieces, never the legacy key', () => {
+    expect(boardQuery(DEFAULT_FILTER)).toBe('')
+    expect(boardQuery({ range: '7d', projects: ['core', 'web'], expanded: true })).toBe(
+      'range=7d&projects=core,web&done=expanded'
+    )
+    // All-selected is the default and writes nothing.
+    expect(boardQuery({ range: 'all', projects: null, expanded: false })).toBe('')
+    // None-selected is a real (non-default) narrowing, so it is written.
+    expect(boardQuery({ range: 'all', projects: [], expanded: false })).toBe('projects=')
+  })
+
+  it('round-trips the project set', () => {
+    const filter = { range: '30d' as const, projects: ['x y', 'web'], expanded: true }
     expect(parseBoardFilter(boardQuery(filter))).toEqual(filter)
+  })
+})
+
+/** A project row with only the field these rules read. */
+function project(id: string): Project {
+  return { id } as unknown as Project
+}
+
+describe('rows and cards read one set', () => {
+  const projects = [project('one'), project('two'), project('three')]
+  const rows = [
+    task('a', { project: 'one' }),
+    task('b', { project: 'two' }),
+    task('c', { project: 'two' }),
+    task('d', { project: 'three' })
+  ]
+
+  it('draws every lane when the set is the default (null)', () => {
+    expect(visibleProjects(projects, DEFAULT_FILTER).map((p) => p.id)).toEqual([
+      'one',
+      'two',
+      'three'
+    ])
+  })
+
+  it('keeps exactly the selected lanes, in registry order', () => {
+    const filter = { ...DEFAULT_FILTER, projects: ['three', 'one'] }
+    expect(visibleProjects(projects, filter).map((p) => p.id)).toEqual(['one', 'three'])
+  })
+
+  it('a lane dropped from the set has no cards left anywhere', () => {
+    // The defect card 38 fixes: hiding a lane used to leave its cards behind in
+    // another row. Now one set feeds both, so the two can never disagree.
+    const filter = { ...DEFAULT_FILTER, projects: ['one', 'three'] }
+    const lanes = visibleProjects(projects, filter).map((p) => p.id)
+    const kept = filterBoard(rows, filter, NOW)
+    for (const hidden of ['two']) {
+      expect(lanes).not.toContain(hidden)
+      expect(kept.some((t) => t.project === hidden)).toBe(false)
+    }
+    expect(kept.map((t) => t.id)).toEqual(['a', 'd'])
+  })
+
+  it('an empty set draws no lanes and keeps no cards', () => {
+    const filter = { ...DEFAULT_FILTER, projects: [] }
+    expect(visibleProjects(projects, filter)).toEqual([])
+    expect(filterBoard(rows, filter, NOW)).toEqual([])
   })
 })
 

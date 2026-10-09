@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import AboutDialog from './components/AboutDialog.vue'
-import FilterBar from './components/FilterBar.vue'
 import TaskConsole from './components/TaskConsole.vue'
 import { ICONS } from './icons'
 import { shellPlaceholder } from './shell'
@@ -39,8 +38,16 @@ const settingsView = { name: 'settings', key: 'nav.settings', path: '/settings' 
 /** The rail collapses the whole nav away; shown by default. */
 const rail = ref(true)
 
-//: The toolbar belongs to the three data views; settings has nothing to filter.
+/**
+ * The three data views carry the mast's action (新增任务) and status (●实时)
+ * controls; settings has none of them. The old toolbar row that used to hold
+ * them is gone -- its two surviving pieces live in the mast, and its per-board
+ * project filter moved into the matrix's own row.
+ */
 const isDataView = computed(() => ['matrix', 'projects', 'tasks'].includes(String(route.name)))
+/** Settings never shows the mast controls; an empty/offline board hides them too
+ *  (there is nothing to dispatch and no project to dispatch it to). */
+const showMastControls = computed(() => isDataView.value && !blank.value)
 
 /**
  * Which placeholder the matrix body shows, if any.
@@ -88,6 +95,14 @@ onBeforeUnmount(() => store.dispose())
         ></button>
         <div class="id">Taskproof <em>· {{ t('app.subtitle') }}</em></div>
         <div class="spacer"></div>
+        <!-- Status area: the polling indicator and the tallies. -->
+        <span
+          v-if="showMastControls"
+          class="live"
+          :data-off="store.polling ? null : ''"
+        >
+          <i />{{ store.polling ? t('live.on') : t('live.off') }}
+        </span>
         <div class="tally">
           <span>{{ t('tally.tasks') }}<b>{{ store.tasks.length }}</b></span>
           <span>{{ t('tally.flying') }}<b>{{ store.inFlightCount }}</b></span>
@@ -98,6 +113,17 @@ onBeforeUnmount(() => store.dispose())
           <span v-if="store.connected">{{ t('service.local') }} :{{ store.service.port ?? '—' }}</span>
           <span v-else>{{ t('service.offline') }}</span>
         </div>
+        <!-- Action area: the one truly global write, reachable from every data
+             view. Settings deliberately has none. -->
+        <el-button
+          v-if="showMastControls"
+          class="masttask"
+          type="primary"
+          size="small"
+          @click="tasks.openCompose()"
+        >
+          {{ t('task.new') }}
+        </el-button>
       </header>
 
       <div class="shell">
@@ -123,16 +149,6 @@ onBeforeUnmount(() => store.dispose())
         </nav>
 
         <main class="content">
-          <FilterBar
-            v-if="isDataView && !blank"
-            :projects="store.projects"
-            :visible="store.visible"
-            :polling="store.polling"
-            @toggle="store.toggleProject"
-            @select-all="store.selectAllProjects"
-            @compose="tasks.openCompose()"
-          />
-
           <!-- The API reported a status word this build does not know. It is still
                rendered; this banner is how the drift becomes visible instead of
                silently mislabelling a task. Not in the prototype: there the word
@@ -166,7 +182,7 @@ onBeforeUnmount(() => store.dispose())
            open it from any page; the settings row raises the same shared flag. -->
       <AboutDialog />
       <!-- The console sheets (dispatch / stop / delete) are shell-level too: the
-           toolbar's "New task" button can raise them from any data view. -->
+           mast's 新增任务 button can raise them from any data view. -->
       <TaskConsole />
     </div>
   </el-config-provider>
@@ -269,6 +285,48 @@ onBeforeUnmount(() => store.dispose())
 .svc[data-state='off'] i {
   background: var(--c-failed);
   box-shadow: none;
+}
+/* The polling indicator, moved out of the deleted toolbar into the mast's status
+   area. Amber for "live", muted for "paused" -- the same vocabulary as before. */
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 11.5px/1 var(--sans);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.live i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-running);
+  animation: tp-live 1.6s ease-in-out infinite;
+}
+.live[data-off] i {
+  background: var(--ink-4);
+  animation: none;
+}
+@keyframes tp-live {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live i {
+    animation: none;
+  }
+}
+/* The mast is a drag region; the one new control in it opts back out so it can
+   still be clicked. */
+.masttask {
+  flex: none;
+  height: 26px;
+  -webkit-app-region: no-drag;
 }
 .shell {
   display: flex;
