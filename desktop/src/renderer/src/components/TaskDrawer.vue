@@ -12,10 +12,11 @@
  * printing an empty verdict box for a task that was never verified would
  * invent a judgement that was never made.
  */
-import { computed, watch } from 'vue'
+import { computed, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import StatusMark from './StatusMark.vue'
+import { ABNORMAL } from '../contract'
 import { duration, eventSummary, isBadEvent, shortTime } from '../format'
 import { useBoardStore } from '../stores/board'
 
@@ -66,6 +67,31 @@ function onVisible(value: boolean): void {
 }
 
 /**
+ * The worker's own account is only worth the space when the outcome is in
+ * doubt. On a passing or cancelled card it is noise -- the operator just needs
+ * to know it passed -- so it renders only for the failure-like states.
+ */
+const showClaim = computed(() => ABNORMAL.includes(task.value?.status ?? ''))
+
+/**
+ * The drawer is modal, so focus must move into it on open and come back to
+ * whatever opened it (a task card, a table row) on close. Element Plus' focus
+ * trap already restores to the element focused when it activated, but we pin
+ * that element ourselves too, so the round trip never depends on the trap's
+ * timing.
+ */
+let lastFocused: HTMLElement | null = null
+watch(open, (isOpen) => {
+  if (isOpen) {
+    lastFocused = (document.activeElement as HTMLElement | null) ?? null
+  } else {
+    const target = lastFocused
+    lastFocused = null
+    void nextTick(() => target?.focus?.())
+  }
+})
+
+/**
  * The route owns which task is open, so this is where the detail gets loaded.
  *
  * Nothing else did: the cards and the table rows only push the route, and the
@@ -88,7 +114,6 @@ watch(
     :size="520"
     direction="rtl"
     :with-header="false"
-    :modal="false"
     class="tp-drawer"
     @update:model-value="onVisible"
   >
@@ -135,15 +160,30 @@ watch(
           </ol>
         </section>
 
-        <!-- Claim is what the worker said; evidence is what taskproof observed.
-             They sit side by side on purpose: the point is that they are
-             independent, so the split is drawn with a rule. -->
-        <div class="duel">
-          <div class="side claim">
-            <h5>{{ t('drawer.claim') }}<em>— {{ t('drawer.claimNote') }}</em></h5>
+        <!-- No verification ran -> no verdict block at all. When it ran it
+             always leads the outcome, so the worker's own account can only
+             ever follow it. -->
+        <section v-if="verify != null" class="sec">
+          <h4>{{ t('drawer.verdict') }}<em>— {{ t('verdict.by') }}</em></h4>
+          <div class="vrow">
+            <span class="vdot" :class="{ bad: verify !== 0 }"></span>
+            <span class="vlabel">{{ t(verify === 0 ? 'verdict.passed' : 'verdict.failed') }}</span>
+            <span class="vcode" :class="{ bad: verify !== 0 }">exit {{ verify }}</span>
+          </div>
+          <p v-if="task.verify_cmd" class="vcmd">{{ task.verify_cmd }}</p>
+        </section>
+
+        <!-- What the worker said vs what taskproof observed. They sit side by
+             side on purpose: the point is that the self-report and the observed
+             evidence are independent. The self-report is only rendered for the
+             failure-like states -- on anything else it is noise -- so the duel
+             collapses to the evidence alone otherwise. -->
+        <div class="duel" :class="{ solo: !showClaim }">
+          <div v-if="showClaim" class="side claim">
+            <h5>{{ t('drawer.claim') }}</h5>
             <p class="body">{{ task.reasoning || t('drawer.noClaim') }}</p>
           </div>
-          <div class="rule"></div>
+          <div v-if="showClaim" class="rule"></div>
           <div class="side ev">
             <h5>{{ t('drawer.evidence') }}</h5>
             <dl>
@@ -162,17 +202,6 @@ watch(
             </dl>
           </div>
         </div>
-
-        <!-- No verification ran -> no verdict block at all. -->
-        <section v-if="verify != null" class="sec">
-          <h4>{{ t('drawer.verdict') }}<em>— {{ t('verdict.by') }}</em></h4>
-          <div class="vrow">
-            <span class="vdot" :class="{ bad: verify !== 0 }"></span>
-            <span class="vlabel">{{ t(verify === 0 ? 'verdict.passed' : 'verdict.failed') }}</span>
-            <span class="vcode" :class="{ bad: verify !== 0 }">exit {{ verify }}</span>
-          </div>
-          <p v-if="task.verify_cmd" class="vcmd">{{ task.verify_cmd }}</p>
-        </section>
       </div>
     </template>
     <p v-else class="none">{{ t('drawer.noTask') }}</p>
@@ -354,6 +383,9 @@ watch(
   font-style: normal;
   font-weight: 400;
   color: var(--ink-4);
+}
+.duel.solo {
+  grid-template-columns: 1fr;
 }
 .duel .rule {
   background: var(--rule-2);

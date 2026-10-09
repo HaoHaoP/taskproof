@@ -12,7 +12,7 @@
  * are wired up in a later card -- but a switch that never reached the file would
  * be decoration, so these write through the main process like every other row.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { openAbout } from '../components/about'
 import { STATUS_IDS, VERIFY_KINDS } from '../contract'
@@ -47,6 +47,59 @@ const registryPath = computed(() => {
   const ws = (settings.settings.workspace || '~/.taskproof').replace(/\/+$/, '')
   return `${ws}/projects.toml`
 })
+
+/**
+ * The effective global cap and where it came from (card 42). The read-only API
+ * reports it on every board read as `concurrency: {value, source, detail}`. We
+ * read the same `/api/health` the store already talks to, from this route
+ * container, because the frozen client shape and the store's plumbing for it
+ * are outside this card's file scope.
+ */
+interface ConcurrencySetting {
+  value: number
+  source: string
+  detail: string
+}
+
+const cap = ref<ConcurrencySetting | null>(null)
+
+/** The one line the row renders, e.g. `并发上限 3（自动探测：14 核 ÷ 4）`. */
+const capLine = computed(() => {
+  const setting = cap.value
+  if (!setting || typeof setting.value !== 'number') return '—'
+  const gloss =
+    setting.source === 'auto'
+      ? t('settings.capAuto', { detail: setting.detail })
+      : setting.source === 'cli'
+        ? t('settings.capCli', { detail: setting.detail })
+        : setting.detail
+  return `${t('settings.capLabel')} ${setting.value}（${gloss}）`
+})
+
+async function loadCap(): Promise<void> {
+  const port = board.service.port
+  if (!port) return
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+      headers: { accept: 'application/json' }
+    })
+    if (!response.ok) return
+    const body = (await response.json()) as { concurrency?: ConcurrencySetting }
+    if (body.concurrency && typeof body.concurrency.value === 'number') {
+      cap.value = body.concurrency
+    }
+  } catch {
+    // A service that is not up yet leaves the row at its dash, never a guess.
+  }
+}
+
+watch(
+  () => board.service.port,
+  (port) => {
+    if (port) void loadCap()
+  },
+  { immediate: true }
+)
 
 const languageOptions = computed(() => [
   { label: t('lang.system'), value: 'system' },
@@ -343,22 +396,22 @@ function openRegistry(): void {
             </div>
             <div class="setrow">
               <div class="lab">
-                <div class="t">{{ t('settings.limits') }}</div>
-                <div class="d">{{ t('settings.limitsDesc') }}</div>
+                <div class="t">{{ t('settings.contract') }}</div>
+                <div class="d">{{ contractLine }}</div>
               </div>
-              <!-- No API or registry source for these yet: show a dash, not a number. -->
               <div class="ctl">
-                <span class="ro">—</span>
+                <span class="ro">
+                  {{ STATUS_IDS.length }} {{ t('status.label') }} · {{ VERIFY_KINDS.join(' / ') }}
+                </span>
               </div>
             </div>
             <div class="setrow">
               <div class="lab">
-                <div class="t">{{ t('settings.token') }}</div>
-                <div class="d">{{ t('settings.tokenDesc') }}</div>
+                <div class="t">{{ t('settings.limits') }}</div>
+                <div class="d">{{ t('settings.limitsDesc') }}</div>
               </div>
-              <!-- The token itself lives only in the main process; never render it. -->
               <div class="ctl">
-                <span class="ro">{{ t('settings.tokenValue') }}</span>
+                <span class="ro">{{ capLine }}</span>
               </div>
             </div>
             <div class="setrow">
@@ -370,17 +423,6 @@ function openRegistry(): void {
                 <el-button size="small" @click="openRegistry">
                   {{ t('settings.openRegistry') }}
                 </el-button>
-              </div>
-            </div>
-            <div class="setrow">
-              <div class="lab">
-                <div class="t">{{ t('settings.contract') }}</div>
-                <div class="d">{{ contractLine }}</div>
-              </div>
-              <div class="ctl">
-                <span class="ro">
-                  {{ STATUS_IDS.length }} {{ t('status.label') }} · {{ VERIFY_KINDS.join(' / ') }}
-                </span>
               </div>
             </div>
           </div>
