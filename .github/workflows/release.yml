@@ -1,0 +1,289 @@
+name: release
+
+# Cut a release by pushing a tag like `v0.1.0`. The same pipeline can be run by
+# hand from the Actions tab (workflow_dispatch) — pick the tag ref when you do.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# Create/update the GitHub Release and attach every artefact to it.
+permissions:
+  contents: write
+
+# The bundled Python runtime is pinned inside `desktop/scripts/fetch-runtime.mjs`
+# (RELEASE = '20261003'); the cache keys below use the same fixed number so a
+# 24-45 MB download is not repeated on every run.
+jobs:
+  # ---------------------------------------------------------------------------
+  # Command-line distribution: sdist + wheel. `taskproof` is pure stdlib, so a
+  # plain `python -m build` on a stock runner is all there is to it.
+  # ---------------------------------------------------------------------------
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: build sdist and wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: upload python packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          if-no-files-found: error
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+  # ---------------------------------------------------------------------------
+  # macOS: Apple silicon only. There is deliberately no x64 and no universal
+  # build — macOS 28 drops Rosetta — so `--arm64` is the whole story here.
+  # ---------------------------------------------------------------------------
+  mac:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: cache bundled python runtime
+        uses: actions/cache@v4
+        with:
+          path: desktop/build/cache
+          key: python-runtime-20261003-mac-arm64
+
+      - run: npm ci
+
+      - name: fetch bundled python runtime (mac-arm64)
+        run: npm run runtime:fetch -- --target mac-arm64
+
+      - run: npm run build
+
+      - name: package (dmg + zip)
+        run: npx electron-builder --mac --arm64 --publish never
+
+      - name: upload mac installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-dist
+          if-no-files-found: error
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+
+  # ---------------------------------------------------------------------------
+  # Windows: NSIS x64. Built on a native runner because the NSIS cross-build
+  # needs wine + Rosetta, which no Mac runner offers.
+  # ---------------------------------------------------------------------------
+  win:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: cache bundled python runtime
+        uses: actions/cache@v4
+        with:
+          path: desktop/build/cache
+          key: python-runtime-20261003-win-x64
+
+      - run: npm ci
+
+      - name: fetch bundled python runtime (win-x64)
+        run: npm run runtime:fetch -- --target win-x64
+
+      - run: npm run build
+
+      - name: package (nsis x64)
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: upload windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-dist
+          if-no-files-found: error
+          path: desktop/dist/*.exe
+
+  # ---------------------------------------------------------------------------
+  # Linux: AppImage + deb, x64, on a native runner for the usual reasons
+  # (AppImage tooling and the deb helpers do not cross-compile cleanly).
+  # ---------------------------------------------------------------------------
+  linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: cache bundled python runtime
+        uses: actions/cache@v4
+        with:
+          path: desktop/build/cache
+          key: python-runtime-20261003-linux-x64
+
+      - run: npm ci
+
+      - name: fetch bundled python runtime (linux-x64)
+        run: npm run runtime:fetch -- --target linux-x64
+
+      - run: npm run build
+
+      - name: package (AppImage + deb)
+        run: npx electron-builder --linux --x64 --publish never
+
+      - name: upload linux installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-dist
+          if-no-files-found: error
+          path: |
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+
+  # ---------------------------------------------------------------------------
+  # Publish: runs only after every build job succeeds (needs: all of them), so
+  # a failure anywhere means no Release is created or half-updated.
+  # ---------------------------------------------------------------------------
+  release:
+    needs: [python, mac, win, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: download all artefacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: list assets
+        run: ls -lh release-assets
+
+      - name: create or update the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: taskproof ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            release-assets/*.whl
+            release-assets/*.tar.gz
+            release-assets/*.dmg
+            release-assets/*.zip
+            release-assets/*.exe
+            release-assets/*.AppImage
+            release-assets/*.deb
+          body: |
+            **Version / 版本:** `${{ github.ref_name }}`
+
+            **English**
+
+            taskproof is a conveyor belt for AI coding agents: it dispatches
+            work, independently verifies it, and records the result.
+
+            #### Download
+
+            - **macOS — Apple silicon (arm64) only, macOS 11+.** No Intel and no
+              Rosetta build. Grab the `*.dmg`.
+            - **Windows 10+ (x64).** Grab the `*.exe` installer.
+            - **Linux (x64).** Grab the `*.AppImage` (portable) or the `*.deb`
+              (Debian/Ubuntu).
+
+            #### These builds are unsigned
+
+            There is no signing or notarisation certificate yet, so your OS will
+            warn you the first time:
+
+            - **macOS:** Gatekeeper blocks the app. Right-click it → **Open**,
+              then confirm — or run
+              `xattr -d com.apple.quarantine /Applications/Taskproof.app`.
+            - **Windows:** SmartScreen shows a warning. Click **More info** →
+              **Run anyway**.
+
+            Every installer **ships its own Python runtime**, so the app works
+            as soon as it is installed — there is nothing to `pip install`. It
+            does need a system **`git`** for worktrees and the protected-path
+            gate; without git, the settings page says so.
+
+            #### Command line
+
+            ```bash
+            pipx install git+https://github.com/HaoHaoP/taskproof
+            ```
+
+            Or install the wheel attached to this release:
+
+            ```bash
+            pipx install ./taskproof-<version>-py3-none-any.whl
+            ```
+
+            See the README for full usage.
+
+            **中文**
+
+            taskproof 是给 AI 编程代理用的传送带：派活、独立验证、留下记录。
+
+            #### 下载
+
+            - **macOS —— 仅 Apple 芯片（arm64），最低 macOS 11。** 不提供 Intel
+              或 Rosetta 版本。请下载 `*.dmg`。
+            - **Windows 10+（x64）。** 请下载 `*.exe` 安装包。
+            - **Linux（x64）。** 请下载 `*.AppImage`（免安装）或 `*.deb`
+              （Debian/Ubuntu）。
+
+            #### 这些安装包未签名
+
+            目前还没有签名或公证证书，所以第一次打开时系统会提示：
+
+            - **macOS：** Gatekeeper 会拦截应用。右键点击 → **打开**，再确认；
+              或执行
+              `xattr -d com.apple.quarantine /Applications/Taskproof.app`。
+            - **Windows：** SmartScreen 会弹出警告。点击 **更多信息** →
+              **仍要运行**。
+
+            每个安装包都**自带 Python 运行时**，安装完即可使用，无需
+            `pip install`。但需要系统 **`git`** 才能使用作业树（worktree）与受保护
+            路径闸门；没有 git 时，设置页会明确说明。
+
+            #### 命令行
+
+            ```bash
+            pipx install git+https://github.com/HaoHaoP/taskproof
+            ```
+
+            也可以安装本 Release 附件里的 wheel：
+
+            ```bash
+            pipx install ./taskproof-<version>-py3-none-any.whl
+            ```
+
+            完整用法见 README。
