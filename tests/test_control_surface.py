@@ -21,7 +21,7 @@ import unittest
 import urllib.error
 import urllib.request
 
-from taskproof import cli, dispatch, ledger, storage
+from taskproof import cli, concurrency, dispatch, ledger, storage
 from taskproof.api import server
 from taskproof.models import (
     STATUS_CANCELLED,
@@ -413,6 +413,22 @@ class CliControlTest(_WorkspaceCase):
         self.assertIn("cancel", err)
         self.assertIn(f"taskproof cancel {task_id}", err)
 
+    def test_cli_advance_fires_a_queued_card(self):
+        task_id = self.park(queue_seq=4)
+        code, out, err = self.run_cli("advance", task_id)
+        self.assertEqual(code, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["task_id"], task_id)
+        self.assertEqual(payload["status"], STATUS_DONE)
+        self.assertEqual(payload["task"]["queue_seq"], 4)
+
+    def test_cli_advance_non_queued_is_nonzero(self):
+        task_id = self.park(queue_seq=1)
+        self.assertEqual(self.run_cli("advance", task_id)[0], 0)
+        code, _out, err = self.run_cli("advance", task_id)
+        self.assertNotEqual(code, 0)
+        self.assertIn("only a queued task", err)
+
 
 # ---------------------------------------------------------------------------
 # Real process: cancel reaches the whole adapter tree
@@ -501,8 +517,36 @@ class CancelRealProcessTest(_WorkspaceCase):
         self.assertEqual(out["status"], STATUS_CANCELLED)
 
 
+class AdvanceRealProcessTest(_WorkspaceCase):
+    """`taskproof advance` as a real subprocess: the documented CLI door."""
+
+    def _run_cli(self, *argv, timeout=30):
+        return subprocess.run(
+            [sys.executable, "-m", "taskproof", "--workspace", self.ws, *argv],
+            env=_env(),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+    def test_advance_runs_a_queued_card_to_done(self):
+        task_id = self.park("advance me", queue_seq=9)
+        proc = self._run_cli("advance", task_id)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        detail = dispatch.task_detail(self.ws, task_id)
+        self.assertEqual(detail["task"]["status"], STATUS_DONE)
+        self.assertEqual(detail["task"]["queue_seq"], 9)
+
+    def test_advance_non_queued_exits_nonzero(self):
+        task_id = self.park("advance me", queue_seq=1)
+        self.assertEqual(self._run_cli("advance", task_id).returncode, 0)
+        proc = self._run_cli("advance", task_id)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("only a queued task", proc.stderr)
+
+
 # ---------------------------------------------------------------------------
-# Write API: three action endpoints + PATCH, behind --allow-write + token
+# Write API: four action endpoints + PATCH, behind --allow-write + token
 # ---------------------------------------------------------------------------
 
 _API_REGISTRY = (
@@ -576,6 +620,49 @@ class _TaskApiCase(unittest.TestCase):
         self.assertEqual(status, 201, payload)
         return payload["task"]["id"]
 
+    def _park(self, project="alpha", *, brief="park me", queue_seq=None):
+        # A harmless custom: adapter, so ADVANCING it can never reach a real
+        # agent even though it runs the task end to end.
+        body = {
+            "project": project,
+            "brief": brief,
+            "adapter": "custom:echo hi",
+            "start": False,
+        }
+        if queue_seq is not None:
+            body["queue_seq"] = queue_seq
+        status, payload = self._request("/api/tasks", method="POST", body=body)
+        self.assertEqual(status, 201, payload)
+        return payload["task"]["id"]
+
+    def open_conn(self):
+        conn = storage.connect(storage.db_path(self.ws))
+        storage.migrate(conn)
+        return conn
+
+    def _hold(self, group, *, cap):
+        """Pin one live claim so the next spawn of `group` is refused.
+
+        A committed claim is visible to the server thread's own connection, so
+        the refusal is the real gate, not a mock.
+        """
+        conn = self.open_conn()
+        lease = concurrency.acquire(conn, "holder", group, cap=cap, ttl=120)
+
+        def _release():
+            concurrency.release(conn, lease)
+            conn.close()
+
+        self.addCleanup(_release)
+        return conn
+
+    def _row(self, task_id):
+        conn = self.open_conn()
+        try:
+            return dict(storage.get_task(conn, task_id))
+        finally:
+            conn.close()
+
 
 class TaskWriteDisabledTest(_TaskApiCase):
     allow_write = False
@@ -583,6 +670,7 @@ class TaskWriteDisabledTest(_TaskApiCase):
     def test_all_task_writes_are_405(self):
         cases = [
             ("/api/tasks", "POST", {"project": "alpha", "brief": "x"}),
+            ("/api/tasks/t-1/advance", "POST", None),
             ("/api/tasks/t-1/cancel", "POST", None),
             ("/api/tasks/t-1", "PATCH", {"queue_seq": 1}),
             ("/api/tasks/t-1", "DELETE", None),
@@ -594,6 +682,59 @@ class TaskWriteDisabledTest(_TaskApiCase):
 
 
 class TaskWriteApiTest(_TaskApiCase):
+    # -- advance: fire ONE queued card now, out of its wave ---------------
+
+    def test_advance_fires_a_queued_card_keeping_id_and_queue_seq(self):
+        task_id = self._park("alpha", brief="fire me", queue_seq=6)
+        status, payload = self._request(f"/api/tasks/{task_id}/advance", method="POST")
+        self.assertEqual(status, 200, payload)
+        task = payload["task"]
+        self.assertEqual(task["id"], task_id)          # id unchanged
+        self.assertEqual(task["queue_seq"], 6)         # queue_seq unchanged
+        self.assertEqual(task["status"], STATUS_DONE)  # actually ran
+
+        # the same id / queue_seq are what the persisted row holds
+        row = self._row(task_id)
+        self.assertEqual(row["id"], task_id)
+        self.assertEqual(row["queue_seq"], 6)
+        self.assertEqual(row["status"], STATUS_DONE)
+
+    def test_advance_non_queued_is_409(self):
+        task_id = self._park("alpha")
+        self.assertEqual(
+            self._request(f"/api/tasks/{task_id}/advance", method="POST")[0], 200
+        )
+        status, payload = self._request(f"/api/tasks/{task_id}/advance", method="POST")
+        self.assertEqual(status, 409, payload)
+        self.assertIn("only a queued task", payload["error"])
+
+    def test_advance_unknown_id_is_404(self):
+        status, payload = self._request("/api/tasks/t-nope/advance", method="POST")
+        self.assertEqual(status, 404, payload)
+        self.assertIn("error", payload)
+
+    def test_advance_without_token_is_403(self):
+        task_id = self._park("alpha")
+        status, _payload = self._request(
+            f"/api/tasks/{task_id}/advance", method="POST", token=None
+        )
+        self.assertEqual(status, 403)
+
+    def test_advance_group_busy_is_429_and_leaves_row_queued(self):
+        task_id = self._park("alpha", queue_seq=3)
+        # Pin the group: the card's own group is busy, so the spawn is refused.
+        self._hold("alpha", cap=3)
+        status, payload = self._request(f"/api/tasks/{task_id}/advance", method="POST")
+        self.assertEqual(status, 429, payload)
+        self.assertEqual(payload["reason"], "group")
+        self.assertIn("busy", payload["detail"])
+
+        # The refusal left the row exactly as it was: still queued, same seq.
+        row = self._row(task_id)
+        self.assertEqual(row["status"], STATUS_QUEUED)
+        self.assertEqual(row["queue_seq"], 3)
+
+
     def test_create_queued_returns_201_visible_via_api(self):
         status, payload = self._request(
             "/api/tasks",
@@ -743,6 +884,61 @@ class TaskWriteApiTest(_TaskApiCase):
             for name in files:
                 with open(os.path.join(root, name), "rb") as fh:
                     self.assertNotIn(self.token.encode("utf-8"), fh.read(), name)
+
+
+# ---------------------------------------------------------------------------
+# advance: the 429 body must name WHICH limit bit (group vs global cap)
+# ---------------------------------------------------------------------------
+
+
+class _CapOneApiCase(_TaskApiCase):
+    """cap = 1 with two projects in different groups.
+
+    Pinning one group's claim then fills the single global slot *without*
+    touching the other group -- the exact shape that tells the two refusals
+    apart.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = self._tmp.name
+        self.ws = os.path.join(self.tmp, "workspace")
+        os.makedirs(self.ws)
+        self.proj = os.path.join(self.tmp, "alpha-repo")
+        os.makedirs(self.proj)
+        self.beta_proj = os.path.join(self.tmp, "beta-repo")
+        os.makedirs(self.beta_proj)
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write(
+                "[defaults]\nconcurrency = 1\ntimeout = 60\n\n"
+                '[[project]]\nid = "alpha"\n'
+                f"path = {_q(self.proj)}\ngroup = \"alpha\"\n"
+                'verify = "exit 0"\nverify_kind = "check"\n\n'
+                '[[project]]\nid = "beta"\n'
+                f"path = {_q(self.beta_proj)}\ngroup = \"beta\"\n"
+                'verify = "exit 0"\nverify_kind = "check"\n'
+            )
+        self.httpd = server.make_server(
+            self.ws, port=0, allow_write=True, token=self.token
+        )
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+
+
+class AdvanceCapApiTest(_CapOneApiCase):
+    def test_advance_cap_full_is_429_naming_the_cap(self):
+        beta_id = self._park("beta", queue_seq=2)
+        # alpha holds the only global slot; beta's own group is still free.
+        self._hold("alpha", cap=1)
+        status, payload = self._request(f"/api/tasks/{beta_id}/advance", method="POST")
+        self.assertEqual(status, 429, payload)
+        self.assertEqual(payload["reason"], "cap")
+        self.assertIn("global cap", payload["detail"])
+
+        row = self._row(beta_id)
+        self.assertEqual(row["status"], STATUS_QUEUED)
+        self.assertEqual(row["queue_seq"], 2)
 
 
 # ---------------------------------------------------------------------------

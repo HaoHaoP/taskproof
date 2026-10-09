@@ -15,12 +15,14 @@ Security choices (deliberate, and the whole reason this module exists):
   to other processes under the same macOS account via ``ps``; a stdout pipe has
   only the parent as reader.
 * The write surface has two families sharing one gate: registry create / edit /
-  delete, and task control. Task control is three action semantics —
+  delete, and task control. Task control is four action semantics —
   ``POST /api/tasks`` (dispatch, or ``start=false`` to park a queued row),
-  ``POST /api/tasks/<id>/cancel`` (SIGTERM -> SIGKILL the task's own process
-  group, or drop a queued card), and ``DELETE /api/tasks/<id>`` (terminal only).
-  Reordering a queued card is field maintenance, not a fourth action:
-  ``PATCH /api/tasks/<id>`` accepts only ``queue_seq``.
+  ``POST /api/tasks/<id>/advance`` (fire ONE queued card now, out of its wave,
+  via ``dispatch.run_queued``), ``POST /api/tasks/<id>/cancel`` (SIGTERM ->
+  SIGKILL the task's own process group, or drop a queued card), and
+  ``DELETE /api/tasks/<id>`` (terminal only). Reordering a queued card is field
+  maintenance, not a fifth action: ``PATCH /api/tasks/<id>`` accepts only
+  ``queue_seq``.
 * CORS is narrow on purpose. The browser renderer is never same-origin with
   this API: the dev renderer is a Vite dev server, and a packaged renderer is a
   ``file://`` page whose Origin is the literal string ``null``. Responses echo
@@ -43,7 +45,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .. import __version__, dispatch, registry, storage
-from ..errors import RegistryError, UsageError
+from ..errors import ConcurrencyError, RegistryError, UsageError
 
 #: Loopback only. Do not make this configurable to a routable address.
 HOST = "127.0.0.1"
@@ -140,6 +142,27 @@ def _first(query, key):
         return None
     value = values[0]
     return value if value != "" else None
+
+
+def _concurrency_payload(exc):
+    """429 body for a refused spawn.
+
+    The two refusals mean different things to a caller — "this project's group
+    is busy, wait for it" vs "the global cap is full, wait for any slot" — so the
+    body names the reason. ``concurrency.describe_blocker`` already phrases the
+    distinct cases ("group '<g>' is busy" vs "global cap reached"); we surface
+    that phrasing as a machine-readable ``reason`` rather than re-deriving the
+    claim state here.
+    """
+    detail = str(exc)
+    payload = {
+        "error": "concurrency refused",
+        "reason": "cap" if detail.startswith("global cap") else "group",
+        "detail": detail,
+    }
+    if getattr(exc, "hint", None):
+        payload["hint"] = exc.hint
+    return payload
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -248,6 +271,12 @@ class _Handler(BaseHTTPRequestHandler):
             # Illegal state for the action (e.g. cancel a terminal task, or rm a
             # live one) is a conflict, not a malformed request: 409.
             status, payload = 409, {"error": str(exc)}
+        except ConcurrencyError as exc:
+            # Same-group serialisation or the global cap refused the spawn: the
+            # caller should retry, not fix its request. 429, and the body says
+            # which limit bit (see _concurrency_payload). An `advance` leaves the
+            # queued row untouched, so retrying it later is safe.
+            status, payload = 429, _concurrency_payload(exc)
         except RegistryError as exc:
             status, payload = 400, {"error": str(exc)}
         except UsageError as exc:
@@ -275,6 +304,13 @@ class _Handler(BaseHTTPRequestHandler):
                 if not task_id or "/" in task_id:
                     return 404, {"error": "not found", "path": parsed.path}
                 return self._cancel_task(task_id)
+            if path.startswith("/api/tasks/") and path.endswith("/advance"):
+                task_id = unquote(
+                    path[len("/api/tasks/"):-len("/advance")]
+                )
+                if not task_id or "/" in task_id:
+                    return 404, {"error": "not found", "path": parsed.path}
+                return self._advance_task(task_id)
             return 404, {"error": "not found", "path": parsed.path}
 
         if path.startswith("/api/projects/"):
@@ -443,6 +479,13 @@ class _Handler(BaseHTTPRequestHandler):
             queue_seq=queue_seq,
         )
         return 201, {"task": self._task_record(task_id)}
+
+    def _advance_task(self, task_id):
+        # Fire ONE queued row now, out of its wave. ``run_queued`` keeps the id
+        # and queue_seq; a concurrency refusal (exit 75) surfaces as 429 in
+        # ``_write_request`` and leaves the row queued.
+        dispatch.run_queued(self.workspace, task_id)
+        return 200, {"task": self._task_record(task_id)}
 
     def _cancel_task(self, task_id):
         return 200, {"task": dispatch.cancel_task(self.workspace, task_id)}

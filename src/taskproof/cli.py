@@ -108,6 +108,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("task_id")
 
     p = sub.add_parser(
+        "advance",
+        help="fire a queued task now, out of its wave (keeps its id and queue_seq)",
+    )
+    p.add_argument("task_id")
+
+    p = sub.add_parser(
         "cancel", help="stop a task (kill its process tree) or drop a queued one"
     )
     p.add_argument("task_id")
@@ -618,6 +624,14 @@ def cmd_verify(args):
     return 0
 
 
+def cmd_advance(args):
+    task_id = dispatch.run_queued(args.workspace, args.task_id)
+    task = dispatch.task_detail(args.workspace, task_id)["task"]
+    payload = {"task_id": task_id, "status": task.get("status"), "task": task}
+    emit(args, payload, f"{task_id}  {task.get('status', '')}  advanced")
+    return 0
+
+
 def cmd_cancel(args):
     task = dispatch.cancel_task(args.workspace, args.task_id)
     payload = {"task_id": args.task_id, "status": task.get("status"), "task": task}
@@ -947,6 +961,7 @@ COMMANDS = {
     "show": cmd_show,
     "log": cmd_log,
     "verify": cmd_verify,
+    "advance": cmd_advance,
     "cancel": cmd_cancel,
     "rm": cmd_rm,
     "board": cmd_board,
