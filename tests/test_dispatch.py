@@ -536,6 +536,112 @@ class ForbiddenSignalDiffTest(DispatchBase):
         self.assertIn("protected/keep.txt", payload["violations"][0]["paths"])
 
 
+class PythonBytecodeGateTest(DispatchBase):
+    """Card 46: running Python must not trip a forbidden source-directory rule.
+
+    Reproduces card 45: a desktop card (forbidden ``t/`` == "do not touch the
+    Python source") ran Python inside its worktree, which dropped a ``.pyc``
+    under ``t/__pycache__/``; the real gate then reported ``blocked``. The
+    byte-code exemption makes that a ``done`` run while a genuine edit under the
+    same rule is still caught.
+    """
+
+    def _init_repo(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "probe@example.invalid"],
+            cwd=self.proj,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "probe"],
+            cwd=self.proj,
+            check=True,
+        )
+
+    def _commit_file(self, relative, content):
+        path = os.path.join(self.proj, relative)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        subprocess.run(["git", "add", relative], cwd=self.proj, check=True)
+        subprocess.run(["git", "commit", "-qm", "seed"], cwd=self.proj, check=True)
+
+    def _forbidden_payload(self, task_id):
+        detail = task_detail(self.ws, task_id)
+        event = next(e for e in detail["events"] if e["event"] == "forbidden")
+        return event["payload"]
+
+    def test_bytecode_under_a_forbidden_dir_is_not_a_breach(self):
+        # `t/` is in .gitignore so only the fingerprint backstop can see it.
+        self._init_repo()
+        self._commit_file("t/keep.py", "keep")
+        self.write_registry(verify="exit 0", forbidden=["t/"])
+        with open(os.path.join(self.proj, ".gitignore"), "w") as handle:
+            handle.write("__pycache__/\n")
+        subprocess.run(["git", "add", ".gitignore"], cwd=self.proj, check=True)
+        subprocess.run(["git", "commit", "-qm", "ignore"], cwd=self.proj, check=True)
+
+        task_id = dispatch(
+            self.ws,
+            "proj",
+            "x",
+            adapter=(
+                "custom:sh -c 'mkdir -p t/__pycache__ && "
+                "echo x > t/__pycache__/mod.cpython-314.pyc && echo ok'"
+            ),
+        )
+
+        detail = task_detail(self.ws, task_id)
+        self.assertEqual(detail["task"]["status"], STATUS_DONE)
+        self.assertFalse(any(e["event"] == "forbidden" for e in detail["events"]))
+
+    def test_new_python_source_under_a_forbidden_dir_is_still_blocked(self):
+        self._init_repo()
+        self._commit_file("t/keep.py", "keep")
+        self.write_registry(verify="exit 0", forbidden=["t/"])
+
+        with self.assertRaises(VerifyError) as ctx:
+            dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter=(
+                    "custom:sh -c 'printf evil > t/evil.py && echo ok'"
+                ),
+            )
+
+        self.assertEqual(ctx.exception.exit_code, 71)
+        self.assertEqual(
+            task_detail(self.ws, self.latest_task_id())["task"]["status"],
+            STATUS_BLOCKED,
+        )
+        self.assertIn(
+            "t/evil.py", self._forbidden_payload(self.latest_task_id())["violations"][0]["paths"]
+        )
+
+    def test_existing_tracked_file_under_a_forbidden_dir_is_still_blocked(self):
+        self._init_repo()
+        self._commit_file("t/keep.py", "keep")
+        self.write_registry(verify="exit 0", forbidden=["t/"])
+
+        with self.assertRaises(VerifyError) as ctx:
+            dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter=(
+                    "custom:sh -c 'printf changed > t/keep.py && echo ok'"
+                ),
+            )
+
+        self.assertEqual(ctx.exception.exit_code, 71)
+        self.assertEqual(
+            task_detail(self.ws, self.latest_task_id())["task"]["status"],
+            STATUS_BLOCKED,
+        )
+
+
 class GitStateForbiddenTest(DispatchBase):
     def _init_repo(self):
         subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True)

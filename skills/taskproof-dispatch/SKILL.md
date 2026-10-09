@@ -49,6 +49,8 @@ Semantics to remember:
 - `group` is a **serialisation key, not a label**. One task per group runs at a time; different groups run in parallel up to `[defaults] concurrency`. Omitting `group` lands you in `default`, so everything that omits it piles into one lane.
 - A missing `verify` is not "passed", it is **SKIPPED**.
 - `forbidden_paths` is checked after the run, and does not rest on `git status` alone — `.git/` and ignored build output count too; touching them fails the task.
+- The gate ignores Python byte-code (`__pycache__` segments, `.pyc` / `.pyo`) because it is a byproduct of running the tool, not authored work — but that is not a licence to litter. **When you run Python inside a card's worktree, use `python3 -B` (or `export PYTHONDONTWRITEBYTECODE=1`)**, or build data with the main-tree / pipx package instead of importing from the worktree. Belt and suspenders, not a replacement for the gate.
+- A type prefix is not an exception: `presence:` adds a *weaker* observation for its own rule and never cancels a `file` or directory rule that also covers the path. In particular `presence:t/__pycache__/` does **not** exempt byte-code from a `t/` rule.
 - One repository can be registered under several entries: e.g. `taskproof` pointing at the repository root and `taskproof-desktop` at the `desktop/` subdirectory, so cards in different directories can fire at the same time.
 
 ## 2. Write the card to a file

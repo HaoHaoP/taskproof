@@ -279,6 +279,28 @@ and documented: under `presence`, rewriting an existing file is **not** a
 violation. A repository that needs that case caught uses the default `file`
 rule for the path instead.
 
+**Python byte-code is never a boundary breach.** Whatever a rule covers, a path
+is skipped before the rule is applied when it is the interpreter's own output:
+a directory segment named `__pycache__`, or a final segment ending in `.pyc` /
+`.pyo`. Byte-code is a byproduct of *running* Python (an `import`), not authored
+intent, and it is regenerated on demand — so it is exactly the "world's noise"
+the gate promised not to blame the agent for. Counting it would make a rule that
+forbids a Python source directory (the desktop lane's "do not touch the Python"
+rule) fire the first time anyone imports the package from inside the guarded
+tree, which makes the rule unusable. The exemption is deliberately narrow and
+matches on the **path itself**, independent of the rule's `kind`, so `file`,
+`git` and `presence` all skip it alike — and it exempts *nothing else*: every
+other ignored path (`node_modules/`, `dist/`) is still watched, and a name that
+merely contains the substring, such as `a__pycache__b.py`, is still a breach.
+
+**`presence:` is not an exception.** A type prefix selects the probe for *its own*
+rule; it never weakens another rule that already covers the same path. In
+particular `presence:` is not an allow-list: adding `presence:t/__pycache__/`
+next to a `t/` rule does not carve the byte-code out of `t/` — the `t/` rule
+still fires on anything under `t/`, byte-code included, because the parent rule
+is evaluated on its own. To exempt a path you need a rule change the other way
+(e.g. narrow the parent), not an extra `presence:` observation on top.
+
 Untyped rules keep the historical meaning, so existing registries do not change
 behaviour: a bare path is a `file` rule, and the historical bare `.git/` rule
 keeps its git-state meaning. The type prefix is `file:` / `git:` / `presence:`.

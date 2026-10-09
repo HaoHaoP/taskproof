@@ -52,6 +52,55 @@ class ForbiddenPathTest(unittest.TestCase):
         )
 
 
+class PythonBytecodeExemptionTest(unittest.TestCase):
+    """Running Python drops byte-code; that must never trip the changed-path gate.
+
+    A worker that imports the package from inside a guarded tree writes
+    ``__pycache__/*.pyc`` as a byproduct of *running* the tool. Counting it as a
+    breach makes "forbid a Python source directory" unusable. The exemption is
+    narrow: only a ``__pycache__`` directory segment or a ``.pyc`` / ``.pyo``
+    ending, and a name that merely contains the substring is still a breach.
+    """
+
+    def test_pycache_directory_segment_is_exempt(self):
+        self.assertTrue(
+            verify.is_python_bytecode("t/__pycache__/mod.cpython-314.pyc")
+        )
+        self.assertTrue(verify.is_python_bytecode("__pycache__/mod.pyc"))
+
+    def test_pyc_and_pyo_suffixes_are_exempt(self):
+        self.assertTrue(verify.is_python_bytecode("t/mod.cpython-314.pyc"))
+        self.assertTrue(verify.is_python_bytecode("t/mod.pyo"))
+
+    def test_a_pycache_substring_is_not_exempt(self):
+        # "contains pycache" is not "is the __pycache__ directory segment".
+        self.assertFalse(verify.is_python_bytecode("a__pycache__b.py"))
+        self.assertFalse(verify.is_python_bytecode("t/a__pycache__b.py"))
+        self.assertFalse(verify.is_python_bytecode("t/mod.py"))
+
+    def test_check_forbidden_skips_bytecode_for_every_rule_kind(self):
+        # The path decides, not the rule: file / explicit file / presence alike.
+        for rule in ("t/", "file:t/", "presence:t/"):
+            self.assertEqual(
+                verify.check_forbidden(
+                    "/repo",
+                    [rule],
+                    ["t/__pycache__/mod.cpython-314.pyc", "t/mod.pyc"],
+                ),
+                [],
+            )
+
+    def test_check_forbidden_still_catches_human_edits(self):
+        self.assertEqual(
+            verify.check_forbidden(
+                "/repo",
+                ["t/"],
+                ["t/keep.py", "t/a__pycache__b.py"],
+            ),
+            ["t/keep.py", "t/a__pycache__b.py"],
+        )
+
+
 class ForbiddenRuleParseTest(unittest.TestCase):
     def test_untyped_rule_is_file(self):
         rule = verify.parse_forbidden_rule("dist/")

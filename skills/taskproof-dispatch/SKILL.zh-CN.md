@@ -49,6 +49,8 @@ taskproof --json register /absolute/path/to/repo --dry-run
 - `group` 是**串行 key，不是标签**。同 group 一次只跑一个；不同 group 可并行到 `[defaults] concurrency`。省略 `group` 会落到 `default`，于是所有省略者挤在同一条道。
 - 没有 `verify` 不是"通过"，是 **SKIPPED**。
 - `forbidden_paths` 在跑完后检查，且不只靠 `git status`——`.git/` 与被 ignore 的构建产物也算，改了就判失败。
+- 闸门忽略 Python 字节码（`__pycache__` 目录段、`.pyc` / `.pyo`），因为那是跑工具的副产品、不是人工改动——但这不是随便写文件的许可。**在道的 worktree 里跑 Python 时用 `python3 -B`（或 `export PYTHONDONTWRITEBYTECODE=1`）**，或者干脆用主树 / pipx 的包建数据，别从 worktree 里 import。双保险，不是闸门的替代。
+- 类型前缀不是例外：`presence:` 只为它自己那条规则加一路**更弱**的观察，绝不会取消另一条同样覆盖该路径的 `file` 或目录规则。特别地，`presence:t/__pycache__/` **不会**把字节码从 `t/` 规则里豁免出去。
 - 一个仓库可以注册多条：例如 `taskproof` 指向仓库根、`taskproof-desktop` 指向 `desktop/` 子目录，就是为了让不同目录的卡同时发车。
 
 ## 2. 把卡写进文件

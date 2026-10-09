@@ -16,6 +16,11 @@ Rules
    `.git` state (HEAD, refs, and stash) is compared instead of its bookkeeping
    files, so `git status` refreshing `.git/index` is not mistaken for a
    forbidden change.
+5. Python byte-code is never a breach, whatever the rule says: a directory
+   segment named `__pycache__`, or a path ending in `.pyc` / `.pyo`, is skipped
+   before any rule is applied. It is a byproduct of *running* the tool (an
+   `import`), not authored work, and is regenerated on demand — see
+   `is_python_bytecode`. The exemption is deliberately narrow and path-based.
 """
 
 import os
@@ -362,6 +367,38 @@ def git_state_snapshot(workdir: str) -> Dict[str, str]:
     return state
 
 
+#: The directory Python writes byte-code into, and the file suffixes it uses.
+_BYTECODE_DIR = "__pycache__"
+_BYTECODE_SUFFIXES = (".pyc", ".pyo")
+
+
+def is_python_bytecode(path: str) -> bool:
+    """Whether `path` is Python byte-code the interpreter wrote, not authored work.
+
+    Byte-code is a byproduct of *running* Python (an ``import``), carries no
+    human intent, and is regenerated on demand. A rule that forbids a Python
+    source directory would otherwise fire the first time anyone imports the
+    package from inside the guarded tree, which makes the rule unusable. A path
+    is exempt when either:
+
+      * any path segment is literally ``__pycache__``, or
+      * its final segment ends in ``.pyc`` or ``.pyo``.
+
+    The match is on the *path itself*, independent of the rule's ``kind``
+    (``file`` / ``git`` / ``presence``), so all three signals skip it alike. It
+    is deliberately narrow: only these two spellings are exempt. Every other
+    ignored path (``node_modules/``, ``dist/``) is still watched, and a name
+    that merely contains the substring — ``a__pycache__b.py`` — is not exempt.
+    """
+    text = str(path).replace("\\", "/")
+    segments = [seg for seg in text.split("/") if seg]
+    if not segments:
+        return False
+    if any(seg == _BYTECODE_DIR for seg in segments):
+        return True
+    return segments[-1].endswith(_BYTECODE_SUFFIXES)
+
+
 def check_forbidden(workdir: str, forbidden_paths: List[str],
                     changed_files: List[str]) -> List[str]:
     """Return the subset of `changed_files` that violates `forbidden_paths`.
@@ -386,6 +423,10 @@ def check_forbidden(workdir: str, forbidden_paths: List[str],
     violations: List[str] = []
     for original in changed_files or []:
         candidate = _normalise(workdir, original)
+        # Byte-code is the interpreter's byproduct, not authored work; it is a
+        # boundary breach for no rule kind (see `is_python_bytecode`).
+        if is_python_bytecode(candidate):
+            continue
         for rule_path, is_dir in rules:
             if is_dir:
                 if candidate == rule_path or candidate.startswith(rule_path + "/"):
