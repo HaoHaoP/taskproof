@@ -14,6 +14,8 @@ agent is ever invoked and nothing reaches the network:
   * `task_detail` / `summary_counts` shapes
 """
 
+import contextlib
+import io
 import os
 import subprocess
 import tempfile
@@ -24,8 +26,10 @@ from taskproof import concurrency, storage
 from taskproof.adapters import get
 from taskproof.dispatch import (
     _run_adapter,
+    _worktree_target_path,
     dispatch,
     prepare_workspace,
+    remove_task,
     summary_counts,
     task_detail,
 )
@@ -315,6 +319,13 @@ class RunAdapterTimeoutTest(unittest.TestCase):
 
 
 class WorktreeTest(DispatchBase):
+    """`--worktree` keeps a run's uncommitted work, and only that.
+
+    The card this pins: a worktree run with changes must NOT be discarded, so
+    the checkout is kept beside the repo and announced. A clean run still
+    removes it, exactly as before, and a plain run is untouched by any of it.
+    """
+
     def _git_repo(self):
         subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True)
         subprocess.run(["git", "config", "user.email", "t@t"], cwd=self.proj, check=True)
@@ -324,24 +335,127 @@ class WorktreeTest(DispatchBase):
         subprocess.run(["git", "add", "seed.txt"], cwd=self.proj, check=True)
         subprocess.run(["git", "commit", "-qm", "seed"], cwd=self.proj, check=True)
 
-    def test_worktree_runs_then_is_cleaned_up(self):
-        self._git_repo()
-        self.write_registry(verify="exit 0")
-        command = "custom:sh -c 'echo made > made.txt && echo ok'"
-        task_id = dispatch(self.ws, "proj", "x", worktree=True, adapter=command)
+    def _run(self, command, **kwargs):
+        """Dispatch a worktree run with stdout captured -> (task_id, stdout)."""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            task_id = dispatch(
+                self.ws, "proj", "x", worktree=True, adapter=command, **kwargs
+            )
+        return task_id, buf.getvalue()
 
-        self.assertEqual(task_detail(self.ws, task_id)["task"]["status"], STATUS_DONE)
-        # The scratch worktree is gone; only the main checkout remains.
-        listing = subprocess.run(
+    def _events(self, task_id):
+        return task_detail(self.ws, task_id)["events"]
+
+    def _worktree_listing(self):
+        return subprocess.run(
             ["git", "worktree", "list", "--porcelain"],
             cwd=self.proj,
             stdout=subprocess.PIPE,
             text=True,
             check=True,
         ).stdout
-        self.assertEqual(listing.count("worktree "), 1)
+
+    def test_worktree_with_changes_is_kept_and_printed(self):
+        self._git_repo()
+        self.write_registry(verify="exit 0")
+        task_id, out = self._run("custom:sh -c 'echo made > made.txt && echo ok'")
+
+        self.assertEqual(task_detail(self.ws, task_id)["task"]["status"], STATUS_DONE)
+        expected = os.path.join(self.tmp, f"project-wt-{task_id}")
+        # Kept, beside the repo, carrying the uncommitted change...
+        self.assertTrue(os.path.isdir(expected))
+        self.assertNotEqual(
+            subprocess.run(
+                ["git", "-C", expected, "status", "--porcelain"],
+                stdout=subprocess.PIPE,
+                text=True,
+                check=True,
+            ).stdout.strip(),
+            "",
+        )
+        # ...while the main checkout was never touched.
         self.assertFalse(os.path.exists(os.path.join(self.proj, "made.txt")))
+        # stdout names the path and the change count.
+        self.assertIn(f"worktree kept: {expected}", out)
+        self.assertIn("1 files changed", out)
+        # The `worktree` event records path + changed.
+        kept = [e for e in self._events(task_id) if e["event"] == "worktree"]
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0]["payload"]["path"], expected)
+        self.assertEqual(kept[0]["payload"]["changed"], 1)
         self.assertEqual(self.active_claims(), 0)
+
+    def test_worktree_without_changes_is_removed(self):
+        self._git_repo()
+        self.write_registry(verify="exit 0")
+        task_id, out = self._run("custom:sh -c 'echo ok'")
+
+        self.assertEqual(task_detail(self.ws, task_id)["task"]["status"], STATUS_DONE)
+        expected = os.path.join(self.tmp, f"project-wt-{task_id}")
+        self.assertFalse(os.path.exists(expected))
+        self.assertNotIn("worktree kept", out)
+        # Only the main checkout remains; nothing kept, nothing left behind.
+        self.assertEqual(self._worktree_listing().count("worktree "), 1)
+        names = [e["event"] for e in self._events(task_id)]
+        self.assertIn("worktree_removed", names)
+        self.assertNotIn("worktree", names)
+
+    def test_worktree_path_is_fresh_each_run(self):
+        self._git_repo()
+        self.write_registry(verify="exit 0")
+        first, _ = self._run("custom:sh -c 'echo a > a.txt && echo ok'")
+        second, _ = self._run("custom:sh -c 'echo b > b.txt && echo ok'")
+
+        self.assertNotEqual(first, second)
+        p1 = os.path.join(self.tmp, f"project-wt-{first}")
+        p2 = os.path.join(self.tmp, f"project-wt-{second}")
+        self.assertTrue(os.path.isdir(p1))
+        self.assertTrue(os.path.isdir(p2))
+        self.assertNotEqual(p1, p2)
+        # Two kept checkouts plus the main one.
+        self.assertEqual(self._worktree_listing().count("worktree "), 3)
+
+    def test_worktree_target_path_avoids_a_taken_name(self):
+        # Re-running into an already-taken name must not collide: the helper
+        # yields a fresh sibling rather than reusing the existing directory.
+        self._git_repo()
+        taken = os.path.join(self.tmp, "project-wt-20000101-001")
+        os.makedirs(taken)
+        fresh = _worktree_target_path(self.proj, "20000101-001")
+        self.assertNotEqual(fresh, taken)
+        self.assertTrue(fresh.startswith(taken + "-"))
+        self.assertFalse(os.path.exists(fresh))
+
+    def test_rm_deletes_a_kept_worktree(self):
+        self._git_repo()
+        self.write_registry(verify="exit 0")
+        task_id, _ = self._run("custom:sh -c 'echo made > made.txt && echo ok'")
+        kept = os.path.join(self.tmp, f"project-wt-{task_id}")
+        self.assertTrue(os.path.isdir(kept))
+
+        remove_task(self.ws, task_id)
+
+        self.assertFalse(os.path.exists(kept))
+        self.assertIsNone(task_detail(self.ws, task_id)["task"])
+        # Only the main checkout survives in git's registry too.
+        self.assertEqual(self._worktree_listing().count("worktree "), 1)
+
+    def test_without_worktree_keeps_todays_behaviour(self):
+        self._git_repo()
+        self.write_registry(verify="exit 0")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            task_id = dispatch(
+                self.ws, "proj", "x",
+                adapter="custom:sh -c 'echo made > made.txt && echo ok'",
+            )
+        # No worktree anywhere: no event, no stdout line, change in the repo.
+        names = [e["event"] for e in self._events(task_id)]
+        self.assertFalse(any(n.startswith("worktree") for n in names))
+        self.assertNotIn("worktree kept", buf.getvalue())
+        self.assertTrue(os.path.exists(os.path.join(self.proj, "made.txt")))
+        self.assertEqual(self._worktree_listing().count("worktree "), 1)
 
     def test_worktree_requires_git_repo(self):
         self.write_registry(verify="exit 0")  # self.proj is a plain directory

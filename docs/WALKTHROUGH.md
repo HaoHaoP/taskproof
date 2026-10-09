@@ -227,6 +227,16 @@ failure (70). Have the command say something.
 modified the working tree; the exit code tells you the outcome, not what is on
 disk now. That is what `forbidden_paths` and `--worktree` are for.
 
+**`--worktree` keeps a run's uncommitted work.** A `--worktree` run executes in
+a fresh checkout *beside* the repo, at `<repo parent>/<repo name>-wt-<task-id>`
+(never inside the repo, so it cannot pollute the project's own `git status`).
+When the run finishes, that checkout is **removed** — unless it still has
+changes, in which case it is **kept**: a `worktree kept: <path> (N files
+changed)` line is printed, a `worktree` event records the path, and the checkout
+stays for you to inspect or commit. A kept checkout is never reused; the next
+run opens a fresh one. `taskproof rm <task-id>` deletes the kept checkout along
+with the task's record and events.
+
 **`verify_kind = "none"` records SKIPPED, never "passed"** — see
 [`REGISTRY.md`](REGISTRY.md).
 

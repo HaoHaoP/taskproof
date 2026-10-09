@@ -182,12 +182,18 @@ taskproof show <task-id>                single task detail
 taskproof log <task-id>                 event stream
 taskproof verify <task-id>              re-run acceptance
 taskproof cancel <task-id>              stop a task (SIGTERM -> SIGKILL its own tree)
-taskproof rm <task-id>                  delete a terminal task's record and events
+taskproof rm <task-id>                  delete a terminal task's record, events and kept worktree
 taskproof board [--open | --serve PORT | --out FILE]
 taskproof api --port N [--allow-write]  local REST (consumed by the stage 2 frontend)
 taskproof doctor                        environment self-check
 taskproof gc                            archive and rotate
 ```
+
+`--worktree` runs the task in a fresh checkout *beside* the repo
+(`<repo parent>/<repo name>-wt-<task-id>`). It is removed when the run finishes
+clean; if it still has changes it is kept, printed as
+`worktree kept: ... (N files changed)`, recorded as a `worktree` event, and
+deleted later by `taskproof rm <task-id>`.
 
 Human-readable output follows the locale; `--json` for machines.
 

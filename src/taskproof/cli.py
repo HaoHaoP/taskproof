@@ -78,7 +78,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model")
     p.add_argument("--reasoning", choices=["none", "high"])
     p.add_argument("--read-only", action="store_true", help="read-only sandbox; acceptance is skipped")
-    p.add_argument("--worktree", action="store_true", help="run in a fresh git worktree")
+    p.add_argument(
+        "--worktree",
+        action="store_true",
+        help=(
+            "run in a fresh git worktree beside the repo; removed after the "
+            "run unless it has changes, in which case it is kept at "
+            "<repo>-wt-<task-id>, printed and recorded (rm <id> deletes it)"
+        ),
+    )
     p.add_argument("--no-verify", action="store_true", help="skip acceptance (recorded as SKIPPED, not passed)")
     p.add_argument("--timeout", type=int, help="override the registry timeout (seconds)")
 

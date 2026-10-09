@@ -172,12 +172,17 @@ taskproof show <task-id>                单任务详情
 taskproof log <task-id>                 事件流
 taskproof verify <task-id>              复跑验收
 taskproof cancel <task-id>              停任务（对自己那棵进程树 SIGTERM→SIGKILL）
-taskproof rm <task-id>                  删除终态任务的记录与事件
+taskproof rm <task-id>                  删除终态任务的记录、事件与保留的 worktree
 taskproof board [--open | --serve PORT | --out FILE]
 taskproof api --port N [--allow-write]  本地 REST（stage 2 前端消费）
 taskproof doctor                        环境自检
 taskproof gc                            归档与轮转
 ```
+
+`--worktree` 在仓库**同级**目录开一份全新检出
+（`<仓库父目录>/<仓库名>-wt-<任务id>`）。跑完干净就删除；若仍留有改动则保留，打印
+`worktree kept: ... (N files changed)`，追加一条 `worktree` 事件，之后由
+`taskproof rm <任务id>` 删除。
 
 人类可读输出跟随 locale；`--json` 给机器读。
 

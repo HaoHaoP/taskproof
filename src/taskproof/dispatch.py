@@ -25,7 +25,6 @@ import os
 import shutil
 import signal
 import subprocess
-import tempfile
 import threading
 import time
 from datetime import datetime
@@ -281,10 +280,10 @@ def _execute_claimed(
 
     Shared by `dispatch(start=True)` (row inserted running) and `run_queued`
     (row flipped from queued to running). Owns the whole worktree lifecycle
-    (create -> execute -> always remove) and raises whatever `_execute` raises;
-    it never touches the concurrency claim, which stays the caller's.
+    (create -> execute -> keep-if-changed / remove-if-clean) and raises whatever
+    `_execute` raises; it never touches the concurrency claim, which stays the
+    caller's.
     """
-    worktree_root = None
     worktree_path = None
     run_dir = project.path
     try:
@@ -295,7 +294,7 @@ def _execute_claimed(
                     "is not one",
                     hint="run without --worktree, or point the registry at a git checkout",
                 )
-            worktree_root, worktree_path = _create_worktree(project.path)
+            worktree_path = _create_worktree(project.path, task_id)
             run_dir = worktree_path
             storage.append_event(conn, task_id, "worktree_created", {"path": run_dir})
 
@@ -313,21 +312,43 @@ def _execute_claimed(
             timeout=timeout,
         )
     finally:
-        # The worktree must be cleaned up on every exit path; a cleanup failure
-        # is recorded rather than raised (it would mask the real outcome).
-        if worktree_root is not None:
-            error = _remove_worktree(project.path, worktree_root, worktree_path)
-            if error:
+        # Decide the worktree's fate on every exit path. A run that left changes
+        # behind KEEPS the checkout and announces it -- silently discarding
+        # uncommitted work was the whole bug this replaced. A clean run removes
+        # it as before; a cleanup failure is recorded rather than raised (it
+        # would mask the real outcome).
+        if worktree_path is not None:
+            changed = _worktree_change_count(worktree_path)
+            if changed:
+                print(
+                    f"worktree kept: {worktree_path} ({changed} files changed)",
+                    flush=True,
+                )
                 storage.append_event(
                     conn,
                     task_id,
-                    "worktree_cleanup_failed",
-                    {"path": worktree_path, "error": error},
+                    "worktree",
+                    {
+                        "path": worktree_path,
+                        "changed": changed,
+                        # The source repo, so `rm` can unregister the checkout
+                        # without a registry lookup.
+                        "repo": project.path,
+                    },
                 )
             else:
-                storage.append_event(
-                    conn, task_id, "worktree_removed", {"path": worktree_path}
-                )
+                error = _remove_worktree(project.path, worktree_path)
+                if error:
+                    storage.append_event(
+                        conn,
+                        task_id,
+                        "worktree_cleanup_failed",
+                        {"path": worktree_path, "error": error},
+                    )
+                else:
+                    storage.append_event(
+                        conn, task_id, "worktree_removed", {"path": worktree_path}
+                    )
 
 
 def _queued_options(conn, task_id: str) -> dict:
@@ -1061,14 +1082,35 @@ def _is_git_repo(path: str) -> bool:
     return proc.returncode == 0 and proc.stdout.strip() == "true"
 
 
-def _create_worktree(repo_path: str):
-    """`git worktree add` a fresh detached checkout; return (root, worktree).
+def _worktree_target_path(repo_path: str, task_id: str) -> str:
+    """The sibling directory a run's checkout lives in.
 
-    `root` is the temporary directory that owns the checkout, so cleanup can
-    remove the whole thing even if `git worktree remove` fails.
+    The convention is ``<repo parent>/<repo name>-wt-<task id>`` -- BESIDE the
+    repo, never inside it, so a kept checkout can never pollute the project's
+    own ``git status``. It is never reused: a task id is unique, and if the exact
+    name is somehow already taken (e.g. the same id run twice) a numeric suffix
+    keeps the two runs from colliding.
     """
-    root = tempfile.mkdtemp(prefix="taskproof-worktree-")
-    path = os.path.join(root, "wt")
+    repo_abs = os.path.abspath(repo_path)
+    base = os.path.join(
+        os.path.dirname(repo_abs), f"{os.path.basename(repo_abs)}-wt-{task_id}"
+    )
+    candidate = base
+    n = 2
+    while os.path.lexists(candidate):
+        candidate = f"{base}-{n}"
+        n += 1
+    return candidate
+
+
+def _create_worktree(repo_path: str, task_id: str) -> str:
+    """`git worktree add --detach` a fresh checkout; return its path.
+
+    The checkout is created directly at the finally-visible path
+    (:func:`_worktree_target_path`), so the ``worktree_created`` event, the kept
+    location and the printed line all name the same directory.
+    """
+    path = _worktree_target_path(repo_path, task_id)
     proc = subprocess.run(
         ["git", "worktree", "add", "--detach", path],
         cwd=repo_path,
@@ -1077,15 +1119,24 @@ def _create_worktree(repo_path: str):
         text=True,
     )
     if proc.returncode != 0:
-        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(path, ignore_errors=True)
         raise UsageError(
             "could not create a git worktree for this project",
             hint=(proc.stdout or "").strip() or "git worktree add failed",
         )
-    return root, path
+    return path
 
 
-def _remove_worktree(repo_path: str, root: str, path: str) -> Optional[str]:
+def _worktree_change_count(path: str) -> int:
+    """How many files ``git status --porcelain`` reports in a worktree.
+
+    Read-only, and reuses the very probe `verify` uses for a task's
+    ``files_changed`` field, so the count the message prints matches the audit.
+    """
+    return verify.detect_changes(path) or 0
+
+
+def _remove_worktree(repo_path: str, path: str) -> Optional[str]:
     """Best-effort `git worktree remove`; returns an error string on failure."""
     error = None
     try:
@@ -1103,8 +1154,8 @@ def _remove_worktree(repo_path: str, root: str, path: str) -> Optional[str]:
     except (OSError, subprocess.SubprocessError) as exc:
         error = str(exc)
 
-    # The checkout's owning temp dir always goes, even when git refused.
-    shutil.rmtree(root, ignore_errors=True)
+    # The checkout dir always goes, even when git refused to unregister it.
+    shutil.rmtree(path, ignore_errors=True)
     if error is not None:
         try:
             subprocess.run(
@@ -1245,8 +1296,48 @@ def cancel_task(workspace: str, task_id: str) -> dict:
         conn.close()
 
 
+def _kept_worktrees(conn, task_id: str):
+    """Every kept-worktree payload for a task, newest first.
+
+    A run that left changes behind appends one ``worktree`` event carrying its
+    ``path`` and ``changed`` count; `rm` reads those back (before deleting the
+    events) so it can clean up the directories too.
+    """
+    found = []
+    for row in conn.execute(
+        "SELECT payload FROM events WHERE task_id = ? AND event = 'worktree' "
+        "ORDER BY id DESC",
+        (task_id,),
+    ):
+        text = row[0]
+        try:
+            payload = json.loads(text) if text else {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            payload = {}
+        if isinstance(payload, dict) and payload.get("path"):
+            found.append(payload)
+    return found
+
+
+def _discard_kept_worktree(payload: dict) -> None:
+    """Delete a worktree a run kept, as `rm <id>` requires.
+
+    The tradeoff: `rm` owns the whole task, so the unrecoverable work it kept on
+    disk goes with it. Unregister via git when the source repo is known (best
+    effort), then remove the directory either way.
+    """
+    path = payload.get("path")
+    if not path:
+        return
+    repo = payload.get("repo")
+    if repo and os.path.isdir(repo):
+        _remove_worktree(repo, path)
+    else:
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def remove_task(workspace: str, task_id: str) -> str:
-    """Delete a terminal task's row and its `events` rows.
+    """Delete a terminal task's row, its `events` rows, and any kept worktree.
 
     Non-terminal tasks are refused with a hint to cancel first. The append-only
     JSONL audit stream is intentionally left in place (see `storage.delete_task`).
@@ -1263,7 +1354,12 @@ def remove_task(workspace: str, task_id: str) -> str:
                 f"task {task_id} is {row['status']}; cancel it before removing",
                 hint=f"taskproof cancel {task_id}",
             )
+        # A kept worktree is part of the task `rm` is discarding; snapshot the
+        # paths before `delete_task` wipes the events that name them.
+        kept_worktrees = _kept_worktrees(conn, task_id)
         storage.delete_task(conn, task_id)
+        for payload in kept_worktrees:
+            _discard_kept_worktree(payload)
         return task_id
     finally:
         conn.close()
