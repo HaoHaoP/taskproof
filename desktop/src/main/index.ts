@@ -237,9 +237,22 @@ function applyBadge(): void {
   diag(`badge ${n > 0 ? n : '(clear)'}`)
 }
 
-/** Align the login item with the switch. macOS is the platform this is for. */
+/**
+ * Align the login item with the switch. macOS is the platform this is for.
+ *
+ * Only a *packaged* build may touch the OS login items. In a dev run
+ * (`app.isPackaged === false`) the executable is `node_modules/electron`, so
+ * `setLoginItemSettings` would drop a stray login item literally named
+ * "Electron" pointing at the dev binary -- and leave it behind when the run
+ * ends. So a dev build never calls it; the switch only takes effect once the
+ * app is packaged. The diagnostic output says so, too.
+ */
 function syncAutostart(): void {
   if (process.platform !== 'darwin') return
+  if (!app.isPackaged) {
+    diag('autostart skipped: not packaged (takes effect only in a packaged build)')
+    return
+  }
   const openAtLogin = Boolean(settings.get().autostart)
   app.setLoginItemSettings({ openAtLogin })
   diag(`autostart ${openAtLogin}`)
@@ -307,11 +320,18 @@ async function pollDesktop(): Promise<void> {
           project: record.project ? String(record.project) : undefined
         })
       }
-      if (current.notifyFail) {
-        for (const task of notifier.claim(tasks, NOT_PASSING)) raiseNotification('验收未通过', task)
-      }
-      if (current.notifyDone) {
-        for (const task of notifier.claim(tasks, DONE)) raiseNotification('任务完成', task)
+      if (!notifier.isPrimed) {
+        // The first task list of this launch only *seeds*: every id that is
+        // already here (the entire backlog) is remembered, and nothing fires.
+        // Otherwise a fresh start would re-notify every historical card.
+        notifier.seed(tasks)
+      } else {
+        if (current.notifyFail) {
+          for (const task of notifier.claim(tasks, NOT_PASSING)) raiseNotification('验收未通过', task)
+        }
+        if (current.notifyDone) {
+          for (const task of notifier.claim(tasks, DONE)) raiseNotification('任务完成', task)
+        }
       }
     }
   } catch {

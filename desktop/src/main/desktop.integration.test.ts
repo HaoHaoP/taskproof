@@ -11,26 +11,33 @@
  *
  *   - `new Tray(...)` on the switch going on, `.destroy()` when it goes off;
  *   - `app.dock.setBadge('2')` for failed + blocked + timeout, ignoring cancelled;
- *   - one `new Notification(...)` per newly-failed id, none on the next poll;
+ *   - the first poll only seeds the backlog (no retrospective notice); a card
+ *     that appears afterwards raises one `new Notification(...)`, never more;
  *   - `close` is prevented and the window hidden only while `tray` is on;
- *   - `app.setLoginItemSettings({ openAtLogin })` aligns once at boot and on toggle.
+ *   - a dev build never calls `app.setLoginItemSettings`, while a packaged one
+ *     still aligns the login item with the switch on toggle.
  */
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 
 /** A stub API child: prints the port/token lines the real CLI prints, then serves
  *  the two read endpoints the poller consumes. Writes `<pid> <port>` when up. */
 const FAKE_API = `
 import { createServer } from 'node:http'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 const argv = process.argv.slice(2)
 const i = argv.indexOf('--port')
 const want = i >= 0 ? Number(argv[i + 1]) : 0
 const log = process.env.FAKE_API_LOG
+const tasksFile = process.env.FAKE_API_TASKS
 const srv = createServer((req, res) => {
   res.setHeader('content-type', 'application/json')
   if (req.url.startsWith('/api/summary')) return res.end(JSON.stringify({ summary: { failed: 2, cancelled: 1 } }))
-  if (req.url.startsWith('/api/tasks')) return res.end(JSON.stringify({ tasks: [{ id: 't-f1', status: 'failed', project: 'proj' }] }))
+  if (req.url.startsWith('/api/tasks')) {
+    let tasks = []
+    try { tasks = JSON.parse(readFileSync(tasksFile, 'utf8')) } catch {}
+    return res.end(JSON.stringify({ tasks }))
+  }
   res.statusCode = 404; res.end('{}')
 })
 srv.listen(want, '127.0.0.1', () => {
@@ -54,6 +61,9 @@ const H = vi.hoisted(() => {
     ipc: {} as Record<string, (...a: any[]) => unknown>,
     on: {} as Record<string, Array<(...a: any[]) => void>>,
     logFile: '',
+    tasksFile: '',
+    isPackaged: false,
+    diag: [] as string[],
     ready: false
   }
 })
@@ -73,6 +83,23 @@ vi.mock('electron', async () => {
   fs.mkdirSync(ws, { recursive: true })
   H.logFile = path.join(dir, 'api-port.txt')
   process.env.FAKE_API_LOG = H.logFile
+  // The stub serves its task list from a file the test can grow mid-run, so it
+  // can prove the seeding rule: a fresh launch opens onto a full backlog and
+  // must stay silent, and only a card that appears *after* that can notify.
+  H.tasksFile = path.join(dir, 'tasks.json')
+  process.env.FAKE_API_TASKS = H.tasksFile
+  fs.writeFileSync(
+    H.tasksFile,
+    JSON.stringify([
+      { id: 'h-f1', status: 'failed', project: 'proj' },
+      { id: 'h-f2', status: 'blocked', project: 'proj' },
+      { id: 'h-f3', status: 'timeout', project: 'proj' },
+      { id: 'h-f4', status: 'failed', project: 'proj' },
+      { id: 'h-d1', status: 'done', project: 'proj' },
+      { id: 'h-d2', status: 'done', project: 'proj' },
+      { id: 'h-d3', status: 'done', project: 'proj' }
+    ])
+  )
   // Off-by-default diagnostics are switched on here so the captured IPC surface
   // (tp:diag:*) is registered, exactly as the real-window harness would use it.
   process.env.TP_DESKTOP_DIAG = '1'
@@ -161,6 +188,9 @@ vi.mock('electron', async () => {
   return {
     app: {
       name: 'Taskproof',
+      get isPackaged() {
+        return H.isPackaged
+      },
       getPath: (name: string) => (name === 'appData' ? appData : name === 'home' ? dir : userData),
       setPath: () => {},
       getVersion: () => '0.1.0',
@@ -196,6 +226,19 @@ vi.mock('electron', async () => {
   }
 })
 
+// Capture the gated `[diag]` trace the main process writes to stdout, so the
+// test can assert on the notifications it *did not* raise (and on the autostart
+// note a dev build leaves instead of touching the login items). Non-diag writes
+// pass straight through to vitest's own reporter.
+const originalStdoutWrite = process.stdout.write.bind(process.stdout)
+process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+  const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8')
+  for (const line of text.split('\n')) {
+    if (line.startsWith('[diag]')) H.diag.push(line.trim())
+  }
+  return originalStdoutWrite(chunk as never, ...(rest as never[]))
+}) as typeof process.stdout.write
+
 // Import after the mock is registered; the top-level wiring runs and whenReady
 // resolves on the next microtask, so `api.start()` (auto) spawns the fake child.
 await import('./index')
@@ -221,6 +264,8 @@ async function childUp(): Promise<{ pid: number; port: number }> {
 const set = (patch: Record<string, unknown>): unknown => H.ipc['tp:settings:set']({}, patch)
 
 afterAll(async () => {
+  // Put stdout back so vitest's own reporting is untouched after this file.
+  process.stdout.write = originalStdoutWrite
   // Quiet the poller and stop the stub child so the worker can exit cleanly.
   set({ dockBadge: false, notifyFail: false })
   try {
@@ -250,16 +295,34 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
     expect(H.badge).not.toContain('3')
   })
 
-  it('notifies once for a newly-failed task and stays quiet on the next poll', async () => {
+  it('seeds the whole backlog on the first poll, then fires once for a new id', async () => {
     await childUp()
-    await vi.waitFor(() => expect(H.notifications.length).toBeGreaterThanOrEqual(1), { timeout: 8000 })
-    const first = H.notifications.filter((n) => n.body.includes('t-f1'))
-    expect(first).toHaveLength(1)
-    expect(first[0].title).toBe('验收未通过')
-    expect(first[0].body).toBe('proj · t-f1')
-    // Several more 2s polls: the id was claimed, so nothing else fires for it.
+    // One successful poll paints the badge; that same poll seeded the seven
+    // historical cards (four not-passing + three done) the stub starts with.
+    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 8000 })
+    // (1) A fresh launch onto a full backlog raises nothing, and the main-process
+    // trace carries no `notify` line at all.
+    expect(H.notifications).toEqual([])
+    expect(H.diag.some((line) => line.includes('notify'))).toBe(false)
+
+    // (2) A card that only shows up *after* the seed fires exactly one notice.
+    const history = JSON.parse(readFileSync(H.tasksFile, 'utf8')) as Array<Record<string, string>>
+    writeFileSync(
+      H.tasksFile,
+      JSON.stringify([...history, { id: 't-new', status: 'failed', project: 'proj' }])
+    )
+    await vi.waitFor(
+      () => expect(H.notifications.filter((n) => n.body.includes('t-new'))).toHaveLength(1),
+      { timeout: 8000 }
+    )
+    const fired = H.notifications.find((n) => n.body.includes('t-new'))
+    expect(fired?.title).toBe('验收未通过')
+    expect(fired?.body).toBe('proj · t-new')
+    expect(H.diag).toContain('[diag] notify 验收未通过 t-new')
+
+    // The same id on later polls stays quiet: one notification per id, ever.
     await new Promise((r) => setTimeout(r, 4500))
-    expect(H.notifications.filter((n) => n.body.includes('t-f1'))).toHaveLength(1)
+    expect(H.notifications.filter((n) => n.body.includes('t-new'))).toHaveLength(1)
   })
 
   it('close-to-tray: hides (not quits) while tray is on, tears down when off', async () => {
@@ -277,10 +340,30 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
     expect(prevented).toBe(false)
   })
 
-  it('aligns the login item at boot and on toggle', async () => {
-    await vi.waitFor(() => expect(H.loginItems.some((s) => s.openAtLogin)).toBe(true))
+  it('a dev build never writes a login item and says so', async () => {
+    await childUp()
+    // The stub is not packaged: boot and every toggle must leave the OS alone --
+    // no stray "Electron" login item.
+    expect(H.isPackaged).toBe(false)
     set({ autostart: false })
-    await vi.waitFor(() => expect(H.loginItems.some((s) => s.openAtLogin === false)).toBe(true))
+    set({ autostart: true })
+    await new Promise((r) => setTimeout(r, 300))
+    expect(H.loginItems).toEqual([])
+    expect(H.diag).toContain(
+      '[diag] autostart skipped: not packaged (takes effect only in a packaged build)'
+    )
+  })
+
+  it('a packaged build still aligns the login item with the switch', async () => {
+    H.isPackaged = true
+    try {
+      set({ autostart: false })
+      await vi.waitFor(() => expect(H.loginItems.some((s) => s.openAtLogin === false)).toBe(true))
+      set({ autostart: true })
+      await vi.waitFor(() => expect(H.loginItems.some((s) => s.openAtLogin === true)).toBe(true))
+    } finally {
+      H.isPackaged = false
+    }
   })
 
   it('reports tray + template + real badge over the diagnostic IPC', async () => {

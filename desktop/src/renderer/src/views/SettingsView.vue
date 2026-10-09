@@ -287,6 +287,7 @@ function openRegistry(): void {
             <div class="setrow">
               <div class="lab">
                 <div class="t">{{ t('settings.autostart') }}</div>
+                <div class="d">{{ t('settings.autostartDesc') }}</div>
               </div>
               <div class="ctl">
                 <el-switch

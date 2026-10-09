@@ -49,9 +49,35 @@ export interface NotifiableTask {
  * back on every pass. The tracker hands back only the rows in the watched
  * states that it has not reported yet, and remembers them so a later poll stays
  * quiet. Each id is claimed once, whichever watched state it first surfaced in.
+ *
+ * A fresh launch starts with the whole task list already done or failed: the
+ * very first poll must therefore *seed* rather than *claim*. `seed` records
+ * every id it is handed -- whatever its status -- and fires nothing, so an app
+ * that starts up surrounded by history does not greet the user with a wall of
+ * retrospective notices. From the second poll on, `claim` is the only path, and
+ * only ids that were not there at startup (or were unseen) can fire.
  */
 export class NotificationTracker {
   private readonly seen = new Set<string>()
+  private primed = false
+
+  /**
+   * The first-poll seed: remember every task id without returning any of them.
+   * All rows count, terminal or not -- a card that exists when the app opens is
+   * not a card the user just did, so nothing about it may fire a notification.
+   */
+  seed(tasks: readonly NotifiableTask[]): void {
+    for (const task of tasks) {
+      const id = String(task.id ?? '')
+      if (id !== '') this.seen.add(id)
+    }
+    this.primed = true
+  }
+
+  /** Whether the seeding first poll has happened; `claim` only runs after it. */
+  get isPrimed(): boolean {
+    return this.primed
+  }
 
   /** Newly-seen rows whose status is in `statuses`; they are marked as seen. */
   claim(tasks: readonly NotifiableTask[], statuses: readonly string[]): NotifiableTask[] {

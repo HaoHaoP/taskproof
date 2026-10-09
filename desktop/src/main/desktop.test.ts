@@ -74,6 +74,55 @@ describe('NotificationTracker', () => {
     const tracker = new NotificationTracker()
     expect(tracker.claim([{ id: '', status: 'failed' }], NOT_PASSING)).toEqual([])
   })
+
+  it('starts unprimed and reports the seed as the first poll', () => {
+    const tracker = new NotificationTracker()
+    expect(tracker.isPrimed).toBe(false)
+    tracker.seed([])
+    expect(tracker.isPrimed).toBe(true)
+  })
+
+  it('seeds the whole backlog on the first poll without firing a single notice', () => {
+    // The reviewer's real backlog: four not-passing cards and three done ones,
+    // all already terminal when the app opens. A fresh launch must not greet the
+    // user with seven retrospective notices.
+    const history = [
+      { id: 'f1', status: 'failed' },
+      { id: 'f2', status: 'blocked' },
+      { id: 'f3', status: 'timeout' },
+      { id: 'f4', status: 'failed' },
+      { id: 'd1', status: 'done' },
+      { id: 'd2', status: 'done' },
+      { id: 'd3', status: 'done' }
+    ]
+    const tracker = new NotificationTracker()
+    tracker.seed(history)
+    // Re-polling the same backlog, however it is watched, fires nothing.
+    expect(tracker.claim(history, NOT_PASSING)).toEqual([])
+    expect(tracker.claim(history, DONE)).toEqual([])
+    expect(tracker.claim(history, [...NOT_PASSING, ...DONE])).toEqual([])
+  })
+
+  it('fires once for a genuinely new id that shows up after the seed', () => {
+    const tracker = new NotificationTracker()
+    tracker.seed([{ id: 'old', status: 'done' }])
+    const fresh = [{ id: 'new', status: 'failed' }]
+    expect(tracker.claim(fresh, NOT_PASSING).map((t) => t.id)).toEqual(['new'])
+    // The same new id on the next poll stays quiet, exactly once.
+    expect(tracker.claim(fresh, NOT_PASSING)).toEqual([])
+  })
+
+  it('seeds every id it is handed, whatever the watched set', () => {
+    // A task that was cancelled at startup is still "already here": if it later
+    // surfaces in a watched state it must not look brand new.
+    const tracker = new NotificationTracker()
+    tracker.seed([
+      { id: 'run', status: 'running' },
+      { id: 'c1', status: 'cancelled' }
+    ])
+    expect(tracker.claim([{ id: 'run', status: 'failed' }], NOT_PASSING)).toEqual([])
+    expect(tracker.claim([{ id: 'c1', status: 'done' }], DONE)).toEqual([])
+  })
 })
 
 describe('notificationBody', () => {

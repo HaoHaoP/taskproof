@@ -225,6 +225,7 @@ export default {
     tray: '关窗到托盘',
     trayDesc: '关窗后服务与通知继续，点托盘图标唤回。',
     autostart: '开机自启',
+    autostartDesc: '仅打包后生效；开发态不会写入登录项。',
     adapters: '适配器状态',
     adaptersDesc: '来自 taskproof doctor，只读。',
     limits: '并发与超时',

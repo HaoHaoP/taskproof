@@ -233,6 +233,7 @@ export default {
     tray: 'Close window to tray',
     trayDesc: 'Service and notifications keep running; click the tray icon to bring the window back.',
     autostart: 'Launch at login',
+    autostartDesc: 'Only applies to the packaged app; a dev build never registers a login item.',
     adapters: 'Adapter status',
     adaptersDesc: 'From taskproof doctor. Read-only.',
     limits: 'Concurrency and timeout',
