@@ -4,7 +4,10 @@ import { COLUMNS, type Column } from './contract'
 import {
   DEFAULT_FILTER,
   DONE_WINDOW,
+  MAX_BUDGET,
+  MIN_BUDGET,
   boardQuery,
+  canGrowBudget,
   doneWindow,
   filterBoard,
   gridTracks,
@@ -212,6 +215,21 @@ describe('fetch budget coverage', () => {
 
   it('never asks to grow past the cap', () => {
     expect(needsMoreBudget('all', rows(2000, NOW, 1000), 2000, NOW)).toBe(false)
+  })
+})
+
+describe('canGrowBudget', () => {
+  it('says yes at the floor, no at the cap', () => {
+    expect(canGrowBudget(MIN_BUDGET)).toBe(true)
+    expect(canGrowBudget(MAX_BUDGET)).toBe(false)
+  })
+
+  it('flips exactly at the cap, one row either side', () => {
+    // The boundary is the whole point: one below the cap can still be raised,
+    // the cap itself cannot. This is the single comparison the warning block
+    // and the fetch both read.
+    expect(canGrowBudget(MAX_BUDGET - 1)).toBe(true)
+    expect(canGrowBudget(MAX_BUDGET + 1)).toBe(false)
   })
 })
 

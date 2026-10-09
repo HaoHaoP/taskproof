@@ -24,6 +24,7 @@ import {
   DONE_WINDOW,
   RANGES,
   boardQuery,
+  canGrowBudget,
   doneWindow,
   filterBoard,
   gridTracks,
@@ -93,6 +94,12 @@ const cancelled = computed(() => doneWindow(columns.value.cancelled ?? [], filte
  *  the number the board row's hint reports. Read from the fetched, filtered
  *  cards, never from a summary: we only ever claim what we actually hold. */
 const hidden = computed(() => hiddenTally(filter.value, columns.value))
+
+/** Whether the fetch budget still has room to grow. The capped warning asks
+ *  this -- not a second comparison of its own -- before it offers "继续取回":
+ *  at the cap `growBudget()` returns without touching the budget, so a button
+ *  there would be a promise the click cannot keep. */
+const canGrow = computed(() => canGrowBudget(store.fetchBudget))
 
 /** Header counts and cell contents, with the terminal columns already windowed. */
 const shown = computed<Record<string, Task[]>>(() => ({
@@ -251,9 +258,15 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
              all there is. -->
         <div v-if="store.capped" class="cap">
           <span>{{ t('board.capped', { n: store.tasks.length }) }}</span>
-          <button type="button" class="grow" @click="store.growBudget()">
+          <button
+            v-if="canGrow"
+            type="button"
+            class="grow"
+            @click="store.growBudget()"
+          >
             {{ t('board.continue') }}
           </button>
+          <span v-else class="cap-reached">{{ t('board.capReached') }}</span>
         </div>
       </div>
     </div>
@@ -413,8 +426,9 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   background: var(--raise);
 }
 /* The capped warning is a note, not an alarm: the amber of "incomplete", not
-   the red of "failed". It carries its own "继续取回" so the reader can pull the
-   older window rather than only being told it is missing. */
+   the red of "failed". While the budget can still rise it carries its own
+   "继续取回" so the reader can pull the older window; once the cap is reached
+   that button would be a dead click, so the note states the limit instead. */
 .boardbar .cap {
   display: inline-flex;
   align-items: center;

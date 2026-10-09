@@ -19,6 +19,7 @@ export default {
     ranges: { today: 'Today', '7d': 'Last 7 days', '30d': 'Last 30 days', all: 'All' },
     capped: 'only the most recent {n} — older rows are not fetched yet',
     continue: 'Fetch earlier',
+    capReached: 'fetch limit reached',
     expand: '{n} more · expand',
     collapse: 'collapse',
     taken: 'taken {n} of {m}',

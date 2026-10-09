@@ -393,6 +393,17 @@ export function gridTracks(visible: number): string {
 }
 
 /**
+ * Can this budget still be raised? One place, and one place only, compares a
+ * budget against `MAX_BUDGET`, so the button the UI offers and the growth the
+ * fetch performs can never disagree. Above (or at) the cap the budget is
+ * pinned: `growBudget()` would return without touching it, so a caller that
+ * still read "can grow" here would be offering a dead button.
+ */
+export function canGrowBudget(budget: number): boolean {
+  return budget < MAX_BUDGET
+}
+
+/**
  * Should the fetch budget grow before it can cover the range? The service
  * returns newest-created first, so the last row is the oldest one in hand:
  * when its `created_at` is still newer than the range boundary, older in-range
@@ -409,7 +420,7 @@ export function needsMoreBudget(
   budget: number,
   now: number
 ): boolean {
-  if (budget >= MAX_BUDGET) return false
+  if (!canGrowBudget(budget)) return false
   if (rows.length < budget) return false
   if (range === 'all') return true
   if (rows.length === 0) return false

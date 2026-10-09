@@ -57,3 +57,17 @@ describe('card 39 message keys', () => {
     expect(at(zhCN, 'drawer.claim')).toBe('worker 自述')
   })
 })
+
+describe('card 45 message keys (the cap-reached note)', () => {
+  it('adds the cap-reached note in both locales', () => {
+    expect(at(en, 'board.capReached')).toBe('fetch limit reached')
+    expect(at(zhCN, 'board.capReached')).toBe('已到取回上限')
+  })
+
+  it('leaves the existing capped warning and continue button wordings alone', () => {
+    expect(at(en, 'board.capped')).toBe('only the most recent {n} — older rows are not fetched yet')
+    expect(at(zhCN, 'board.capped')).toBe('仅取回最近 {n} 条 · 更早的还没取到')
+    expect(at(en, 'board.continue')).toBe('Fetch earlier')
+    expect(at(zhCN, 'board.continue')).toBe('继续取回')
+  })
+})

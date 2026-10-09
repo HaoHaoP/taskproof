@@ -228,3 +228,32 @@ describe('matrix grid columns', () => {
     expect(rule('.hd .rt .lane-hide')['pointer-events']).toBe('auto')
   })
 })
+
+describe('matrix capped warning branches (card 45)', () => {
+  // The capped warning renders while `store.capped` is true. Inside it the
+  // "继续取回" button is keyed off the pure `canGrowBudget` rule: at the cap the
+  // click would be a no-op, so the note states the limit and no button appears.
+
+  it('gates the grow button on the shared canGrowBudget rule, not a second cap check', () => {
+    expect(view).toMatch(
+      /const canGrow = computed\(\(\) => canGrowBudget\(store\.fetchBudget\)\)/
+    )
+    expect(view).toMatch(/<button\s+v-if="canGrow"\s+type="button"\s+class="grow"/)
+    expect(view).toMatch(/@click="store\.growBudget\(\)"/)
+    // The view reads the pure rule; it never re-derives the ceiling itself.
+    expect(view).not.toMatch(/MAX_BUDGET/)
+  })
+
+  it('keeps the reachable branch: the capped note and a live "继续取回"', () => {
+    expect(view).toMatch(/v-if="store\.capped" class="cap"/)
+    expect(view).toMatch(/t\('board\.capped', \{ n: store\.tasks\.length \}\)/)
+    expect(view).toMatch(/t\('board\.continue'\)/)
+  })
+
+  it('keeps the at-cap branch: the 已到取回上限 note with no button to click', () => {
+    expect(view).toMatch(/<span v-else class="cap-reached">\{\{ t\('board\.capReached'\) \}\}<\/span>/)
+    // The fallback is a plain sentence, not a disabled affordance: there is no
+    // `disabled` grow button the reader could mistake for a live one.
+    expect(view).not.toMatch(/class="grow"[\s\S]{0,40}disabled/)
+  })
+})

@@ -12,6 +12,7 @@ export default {
     ranges: { today: '今天', '7d': '最近 7 天', '30d': '最近 30 天', all: '全部' },
     capped: '仅取回最近 {n} 条 · 更早的还没取到',
     continue: '继续取回',
+    capReached: '已到取回上限',
     expand: '还有 {n} 张 · 展开',
     collapse: '收起',
     taken: '已取回 {n} / 共 {m}',
