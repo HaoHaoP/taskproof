@@ -3,3 +3,6 @@ out
 dist
 *.log
 .DS_Store
+
+# vitest's own cache directory
+.vitest
