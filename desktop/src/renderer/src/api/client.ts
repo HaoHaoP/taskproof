@@ -17,6 +17,9 @@ export interface Task {
   attempt: number | null
   group_name: string | null
   pid: number | null
+  pgid: number | null
+  /** The explicit queue order for a `queued` row; null when unset. */
+  queue_seq: number | null
   workdir: string | null
   reasoning: string | null
   result_path: string | null

@@ -38,6 +38,71 @@ export default {
 
   card: { attempt: '尝试', files: '文件' },
 
+  /* 控制台的四个动作 + 新增表单 + 排队列。统一放在 `task.*`（单数）下，
+     卡片菜单、失败文案与弹窗都读这一个命名空间；`tasks`（复数）是任务表页。 */
+  task: {
+    new: '新增任务',
+    menu: '操作',
+    advance: '立刻发车',
+    stop: '停止',
+    delete: '删除',
+    rerun: '再跑一次',
+    busy: '处理中…',
+    dismiss: '忽略',
+    compose: {
+      title: '新增任务',
+      rerun: '再跑一次',
+      project: '项目',
+      brief: '任务 brief',
+      briefPlaceholder: '要 agent 做什么？',
+      adapter: '适配器',
+      timeout: '超时',
+      seconds: '秒',
+      review: '查看后果摘要',
+      back: '返回',
+      noProjects: '还没有登记项目'
+    },
+    summary: {
+      title: '发车前确认',
+      project: '项目',
+      path: '真实路径',
+      adapter: '适配器',
+      timeout: '最长时长',
+      forbidden: '生效的保护路径',
+      none: '无',
+      seconds: '{n} 秒',
+      dispatch: '立刻发车',
+      queue: '存为待发车'
+    },
+    confirmStop: {
+      title: '停止这个任务？',
+      body: '工作区不会被动。任务会记为「已取消」。此操作不可撤销。',
+      confirm: '停止'
+    },
+    confirmDelete: {
+      title: '删除这个任务？',
+      body: '会删除任务记录与事件流。此操作不可撤销。',
+      confirm: '删除'
+    },
+    queue: {
+      order: '序号',
+      wave: '第 {n} 波',
+      waveHint: '序号相同 = 同一波'
+    },
+    error: {
+      concurrency: '暂时被拒：{detail}',
+      state: '当前状态不允许这个操作：{detail}',
+      invalid: '请求被拒绝：{detail}',
+      forbidden: '本地服务拒绝了写入（令牌不对）。',
+      notfound: '没有这个任务：{detail}',
+      network: '连不上本地服务：{detail}'
+    },
+    notice: {
+      group: '这个项目的道被占用了 —— 卡片仍在排队，稍后重试。',
+      cap: '全局并发已满 —— 卡片仍在排队，稍后重试。'
+    }
+  },
+
   tasks: {
     title: '全部任务',
     sub: '点任意一行看详情与判定。',

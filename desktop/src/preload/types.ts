@@ -160,6 +160,89 @@ export interface ProjectsApi {
   remove(id: string): Promise<RegistryResult<{ removed: string }>>
 }
 
+
+// -- tasks (the control surface) -------------------------------------------
+
+/**
+ * The task row as it crosses the IPC boundary.
+ *
+ * Deliberately a *slice*: the main process returns the server's row verbatim,
+ * but the renderer only ever reads identity + the two fields the console has to
+ * reason about. The full row for display still comes from the read-only
+ * `/api/tasks` client -- this is not a second definition of it.
+ */
+export interface TaskRow {
+  id: string
+  project: string
+  status: string
+  /** The explicit queue order; null when the server never assigned one. */
+  queue_seq: number | null
+  [field: string]: unknown
+}
+
+/**
+ * How a task write failed, mirroring the control-plane HTTP contract:
+ *  - `concurrency` 429 -- the spawn was refused (group busy, or the cap is
+ *    full). Nothing changed: a queued row stays queued, so the right move is
+ *    "retry later", not "failed". `reason` says which limit bit.
+ *  - `state`       409 -- the row is in the wrong state for the action
+ *    (cancel a terminal task, remove a live one, advance a non-queued one).
+ *  - `invalid`     400 -- a field was rejected
+ *  - `forbidden`   403 -- the token was missing or wrong
+ *  - `notfound`    404 -- no such task id
+ *  - `network`     the request never reached a response
+ */
+export type TaskErrorKind = 'concurrency' | 'state' | 'invalid' | 'forbidden' | 'notfound' | 'network'
+
+export interface TaskWriteError {
+  kind: TaskErrorKind
+  status: number
+  /** Human copy from the server, or the transport error. Never the token. */
+  message: string
+  /** Present only when `kind === 'concurrency'`: which limit refused the spawn. */
+  reason?: 'group' | 'cap'
+  /** The server's detail line for a refusal (e.g. `group 'app' is busy`). */
+  detail?: string
+  /** The server's retry hint, when it gave one. */
+  hint?: string
+}
+
+/** Every task call answers with this: a value, or a typed failure. */
+export type TaskResult<T> = { ok: true; value: T } | { ok: false; error: TaskWriteError }
+
+/**
+ * The body of `POST /api/tasks`. Four fields, matching the console's form:
+ * project / brief / adapter / timeout. `start` names the two exits -- true fires
+ * now, false parks the row as `queued`. Protection paths and worktree are
+ * registry concerns and are deliberately not here.
+ */
+export interface TaskCreatePayload {
+  project: string
+  brief: string
+  adapter: string
+  /** Hard cap for the run, in seconds. */
+  timeout: number
+  /** false parks the row as `queued` (the "save for later" exit). */
+  start: boolean
+}
+
+/**
+ * The task control surface. Like `ProjectsApi`, every method answers with a
+ * typed result rather than rejecting: the renderer needs to switch on *which*
+ * failure (retry-later vs conflict vs network), and a rejected promise would
+ * lose that shape. The token and the HTTP verbs live only in the main process.
+ */
+export interface TasksApi {
+  create(payload: TaskCreatePayload): Promise<TaskResult<{ task: TaskRow }>>
+  /** Fire ONE queued card now, out of its wave (`POST …/advance`). */
+  advance(id: string): Promise<TaskResult<{ task: TaskRow }>>
+  /** Stop a task (`POST …/cancel`); it lands in the cancelled column. */
+  cancel(id: string): Promise<TaskResult<{ task: TaskRow }>>
+  /** Delete a terminal task's row and events (`DELETE …`). */
+  remove(id: string): Promise<TaskResult<{ removed: string }>>
+  /** Edit a queued card's order (`PATCH …`); the only editable field. */
+  patchQueueSeq(id: string, queueSeq: number | null): Promise<TaskResult<{ task: TaskRow }>>
+}
 /** One adapter's verdict from `taskproof doctor`: installed, or why not. */
 export interface AdapterStatus {
   name: string
@@ -241,4 +324,9 @@ export interface TpApi {
    * the UI needs (which failure, and the conflict body).
    */
   projects: ProjectsApi
+  /**
+   * Task control. The console's four actions plus the queue-order edit. Same
+   * discipline as `projects`: named methods, typed results, no token, no verbs.
+   */
+  tasks: TasksApi
 }

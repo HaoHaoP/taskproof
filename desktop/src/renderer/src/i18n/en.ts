@@ -45,6 +45,72 @@ export default {
 
   card: { attempt: 'try', files: 'files' },
 
+  /* The console's four actions plus the dispatch form and the queue. They live
+     flat under `task.*` (singular) so the card menu, the store's failure copy
+     and the dialogs all read one namespace -- `tasks` (plural) is the table. */
+  task: {
+    new: 'New task',
+    menu: 'Actions',
+    advance: 'Dispatch now',
+    stop: 'Stop',
+    delete: 'Delete',
+    rerun: 'Run again',
+    busy: 'Working…',
+    dismiss: 'Dismiss',
+    compose: {
+      title: 'New task',
+      rerun: 'Run again',
+      project: 'Project',
+      brief: 'Brief',
+      briefPlaceholder: 'What should the agent do?',
+      adapter: 'Adapter',
+      timeout: 'Timeout',
+      seconds: 'seconds',
+      review: 'Review consequences',
+      back: 'Back',
+      noProjects: 'No projects registered yet'
+    },
+    summary: {
+      title: 'Before dispatch',
+      project: 'Project',
+      path: 'Real path',
+      adapter: 'Adapter',
+      timeout: 'Max duration',
+      forbidden: 'Protected paths',
+      none: 'none',
+      seconds: '{n} seconds',
+      dispatch: 'Dispatch now',
+      queue: 'Save for later'
+    },
+    confirmStop: {
+      title: 'Stop this task?',
+      body: 'The workspace will not be touched. The task is recorded as cancelled. This cannot be undone.',
+      confirm: 'Stop'
+    },
+    confirmDelete: {
+      title: 'Delete this task?',
+      body: 'Deletes the task record and its event stream. This cannot be undone.',
+      confirm: 'Delete'
+    },
+    queue: {
+      order: 'Order',
+      wave: 'wave {n}',
+      waveHint: 'Same order = same wave'
+    },
+    error: {
+      concurrency: 'Refused for now: {detail}',
+      state: "This does not apply to the task's current state: {detail}",
+      invalid: 'The request was rejected: {detail}',
+      forbidden: 'The local service refused the write (bad token).',
+      notfound: 'No such task: {detail}',
+      network: 'Cannot reach the local service: {detail}'
+    },
+    notice: {
+      group: "This project's lane is busy — the card stays queued. Retry later.",
+      cap: 'Global concurrency is full — the card stays queued. Retry later.'
+    }
+  },
+
   tasks: {
     title: 'All tasks',
     sub: 'Click any row for detail and the verdict.',

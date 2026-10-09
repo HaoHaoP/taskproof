@@ -1,20 +1,34 @@
 <script setup lang="ts">
 /**
- * A task card. Pure props in, one event out: no store, no fetching.
+ * A task card. Pure props in, events out: no store, no fetching.
  *
  * Ported from the prototype's `button.card`: a state lamp, the id, then the
  * verification stamp and the disclosure chevron on the right. The stamp is the
  * verification exit code and nothing else -- `✓ 0` or `✗ N` -- and a task that
  * was never verified gets no stamp at all, because there is no verdict to show.
+ *
+ * The console adds two affordances to the same card:
+ *  - an actions menu whose items follow the status (see `menuFor`), and
+ *  - for a queued card, its `queue_seq` as an editable number and a wave chip.
+ *    The chip's colour is keyed off the wave index, so two cards with the same
+ *    number visibly share a wave -- the meaning the order alone cannot carry.
+ *
+ * The card is a div with `role="button"` rather than a real <button>, because a
+ * menu and a number input cannot legally nest inside one.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import StatusMark from './StatusMark.vue'
 import type { Task } from '../api/client'
+import { menuFor, type TaskAction } from '../taskmenu'
 import { duration } from '../format'
 
-const props = defineProps<{ task: Task; expanded?: boolean }>()
-const emit = defineEmits<{ open: [id: string] }>()
+const props = defineProps<{ task: Task; expanded?: boolean; wave?: number }>()
+const emit = defineEmits<{
+  open: [id: string]
+  action: [action: TaskAction]
+  reorder: [seq: number]
+}>()
 
 const { t } = useI18n()
 
@@ -24,21 +38,55 @@ const stamp = computed(() => {
   if (exit == null) return null
   return { text: exit === 0 ? '✓ 0' : `✗ ${exit}`, cls: exit === 0 ? 'good' : 'bad' }
 })
+
+const menu = computed(() => menuFor(props.task.status))
+const queued = computed(() => props.task.status === 'queued')
+
+/** The wave's palette slot. The index -- not the raw number -- is what colours
+ *  the chip, so the palette is fixed however sparse the numbers get. */
+const waveClass = computed(() => `w${((props.wave ?? 0) % 6 + 6) % 6}`)
 </script>
 
 <template>
-  <button
-    type="button"
+  <div
     class="tp-card"
+    role="button"
+    tabindex="0"
     :data-status="task.status"
     :aria-expanded="expanded ? 'true' : 'false'"
     @click="emit('open', task.id)"
+    @keydown.enter.prevent="emit('open', task.id)"
+    @keydown.space.prevent="emit('open', task.id)"
   >
     <span class="line-1">
       <StatusMark :status="task.status" />
       <span class="cid">{{ task.id }}</span>
       <span class="tail">
         <span v-if="stamp" class="stamp" :class="stamp.cls">{{ stamp.text }}</span>
+        <el-dropdown trigger="click" placement="bottom-end" @command="(a: TaskAction) => emit('action', a)">
+          <button
+            class="menu-btn"
+            type="button"
+            :aria-label="t('task.menu')"
+            :title="t('task.menu')"
+            @click.stop
+          >
+            ⋯
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu class="tp-card-menu">
+              <el-dropdown-item
+                v-for="item in menu"
+                :key="item.action"
+                :command="item.action"
+                :disabled="item.disabled"
+                :class="{ danger: item.danger }"
+              >
+                {{ t(item.label) }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <span class="chev">▸</span>
       </span>
     </span>
@@ -51,7 +99,24 @@ const stamp = computed(() => {
       <span>{{ duration(task.started_at, task.finished_at) }}</span>
       <span>{{ t('card.files') }} {{ task.files_changed ?? 0 }}</span>
     </span>
-  </button>
+
+    <!-- The queue's order: a chip whose colour reads as the wave, and the
+         number itself, editable in place. Only a queued row has a place. -->
+    <span v-if="queued" class="qbar" @click.stop>
+      <span class="wave" :class="waveClass" :title="t('task.queue.waveHint')">
+        {{ t('task.queue.wave', { n: (wave ?? 0) + 1 }) }}
+      </span>
+      <span class="qlab">{{ t('task.queue.order') }}</span>
+      <el-input-number
+        class="qseq"
+        size="small"
+        controls-position="right"
+        :min="0"
+        :model-value="task.queue_seq ?? 0"
+        @change="(v: number | undefined) => v != null && emit('reorder', v)"
+      />
+    </span>
+  </div>
 </template>
 
 <style scoped>
@@ -80,6 +145,10 @@ const stamp = computed(() => {
 .tp-card[aria-expanded='true'] {
   box-shadow: 0 0 0 2px var(--accent);
 }
+.tp-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 .line-1 {
   display: flex;
   align-items: center;
@@ -96,7 +165,7 @@ const stamp = computed(() => {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
   flex: none;
 }
 .stamp {
@@ -115,6 +184,31 @@ const stamp = computed(() => {
   color: var(--c-failed);
   border-color: transparent;
   background: var(--w-failed);
+}
+/* The actions menu trigger: quiet until the card is hovered or the menu is
+   open, so it does not compete with the lamp and the id. */
+.menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-4);
+  font: 12px/1 var(--sans);
+  cursor: pointer;
+  opacity: 0;
+}
+.tp-card:hover .menu-btn,
+.menu-btn:focus-visible {
+  opacity: 1;
+}
+.menu-btn:hover {
+  background: var(--raise);
+  color: var(--ink);
 }
 /* The chevron is the disclosure affordance: it turns to point down while the
    drawer is open. */
@@ -149,9 +243,54 @@ const stamp = computed(() => {
   font: 9.5px/1 var(--mono);
   color: var(--ink-4);
 }
+/* The queue strip: wave chip, the label, and the editable number. */
+.qbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--rule);
+}
+.qbar .qlab {
+  font: 9.5px/1 var(--sans);
+  color: var(--ink-4);
+}
+.qbar .wave {
+  flex: none;
+  font: 600 9.5px/1 var(--sans);
+  padding: 3px 7px;
+  border-radius: var(--r-pill);
+  color: var(--wv-ink);
+  background: var(--wv-bg);
+}
+/* A fixed palette: same index, same colour -- the whole point of the chip.
+   Numbers stay legible on both themes (the ink is the darker system hue). */
+.wave.w0 { --wv-ink: #0a84ff; --wv-bg: rgba(10, 132, 255, 0.16); }
+.wave.w1 { --wv-ink: #30d158; --wv-bg: rgba(48, 209, 88, 0.16); }
+.wave.w2 { --wv-ink: #bf5af2; --wv-bg: rgba(191, 90, 242, 0.16); }
+.wave.w3 { --wv-ink: #ff9f0a; --wv-bg: rgba(255, 159, 10, 0.16); }
+.wave.w4 { --wv-ink: #ff375f; --wv-bg: rgba(255, 55, 95, 0.16); }
+.wave.w5 { --wv-ink: #5e5ce6; --wv-bg: rgba(94, 92, 230, 0.16); }
+.qseq {
+  width: 92px;
+  margin-left: auto;
+}
 @media (prefers-reduced-motion: reduce) {
   .chev {
     transition: none;
   }
+}
+</style>
+
+<!-- The dropdown is teleported out of this component, so scoped styles cannot
+     reach it. Keyed off the menu's own class, like FilterBar's, so it cannot
+     leak into any other Element Plus dropdown. -->
+<style>
+.tp-card-menu .el-dropdown-menu__item.danger {
+  color: var(--c-failed);
+}
+.tp-card-menu .el-dropdown-menu__item.danger.is-disabled {
+  color: var(--ink-4);
 }
 </style>

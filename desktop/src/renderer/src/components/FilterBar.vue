@@ -18,7 +18,11 @@ const props = defineProps<{
   polling: boolean
 }>()
 
-const emit = defineEmits<{ toggle: [id: string]; selectAll: [on: boolean] }>()
+const emit = defineEmits<{
+  toggle: [id: string]
+  selectAll: [on: boolean]
+  compose: []
+}>()
 
 const { t } = useI18n()
 
@@ -62,6 +66,10 @@ function isOn(id: string): boolean {
       </template>
     </el-dropdown>
 
+    <el-button class="newtask" type="primary" size="small" @click="emit('compose')">
+      {{ t('task.new') }}
+    </el-button>
+
     <div class="spacer" />
 
     <span class="live" :data-off="polling ? null : ''">
@@ -79,6 +87,10 @@ function isOn(id: string): boolean {
   height: var(--bar);
   padding: 0 16px;
   border-bottom: 1px solid var(--rule-2);
+}
+.newtask {
+  flex: none;
+  height: 28px;
 }
 .spacer {
   flex: 1;

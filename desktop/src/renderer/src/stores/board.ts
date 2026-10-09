@@ -8,7 +8,14 @@
  */
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { createClient, type BoardClient, type Project, type Summary, type Task } from '../api/client'
+import {
+  createClient,
+  type BoardClient,
+  type Project,
+  type Summary,
+  type Task,
+  type TaskEvent
+} from '../api/client'
 import { columnFor, unknownStatuses } from '../contract'
 import {
   DEFAULT_RANGE,
@@ -206,6 +213,29 @@ export const useBoardStore = defineStore('board', () => {
     detail.value = null
   }
 
+  /**
+   * Read one task + its event stream without opening the drawer.
+   *
+   * The console needs the events to seed a "run again" form (the timeout lives
+   * only in the queued event), and it must not navigate the reader to the
+   * drawer as a side effect. Returns null on any failure -- the caller shows a
+   * plain "could not read the original" rather than a half-filled form.
+   */
+  async function fetchDetail(id: string): Promise<{ task: Task; events: TaskEvent[] } | null> {
+    if (!client) {
+      try {
+        await connect()
+      } catch {
+        return null
+      }
+    }
+    try {
+      return await client!.task(id)
+    } catch {
+      return null
+    }
+  }
+
   function start(intervalMs = POLL_MS): void {
     stop()
     void refresh()
@@ -277,6 +307,7 @@ export const useBoardStore = defineStore('board', () => {
     connect,
     refresh,
     openTask,
+    fetchDetail,
     closeTask,
     start,
     stop,

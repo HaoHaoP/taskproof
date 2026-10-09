@@ -33,8 +33,11 @@ import {
   type RangeChoice
 } from '../matrix'
 import { useBoardStore } from '../stores/board'
+import { useTasksStore } from '../stores/tasks'
+import { queueWaves, type TaskAction } from '../taskmenu'
 
 const store = useBoardStore()
+const tasks = useTasksStore()
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
@@ -54,6 +57,9 @@ const projects = computed(() =>
 
 /** The narrowed board, grouped and ordered -- the source of every cell. */
 const columns = computed(() => groupColumns(filterBoard(store.tasks, filter.value, Date.now())))
+
+/** Wave index per queued card, so equal `queue_seq` reads as one colour. */
+const waves = computed(() => queueWaves(columns.value.queued ?? []))
 
 /** The finished column's window. The fold bar reads `hidden`; the cell reads
  *  `visible`. */
@@ -87,6 +93,24 @@ function isExpanded(id: string): boolean {
 
 function openTask(id: string): void {
   void router.push(`/matrix/${id}`)
+}
+
+/** The card menu's four actions. Advance / rerun go straight to the store;
+ *  stop and delete raise their confirmation sheets first. A write that landed
+ *  re-reads the board. */
+function onAction(task: Task, action: TaskAction): void {
+  if (action === 'advance') void advance(task)
+  else if (action === 'stop') tasks.openStop(task)
+  else if (action === 'delete') tasks.openDelete(task)
+  else if (action === 'rerun') void tasks.openRerun(task)
+}
+
+async function advance(task: Task): Promise<void> {
+  if (await tasks.advance(task)) await store.refresh()
+}
+
+async function reorder(task: Task, seq: number): Promise<void> {
+  if (await tasks.patchQueueSeq(task, seq)) await store.refresh()
 }
 
 /** Rewrite the board's query, dropping defaults so a default board is `/matrix`
@@ -145,6 +169,15 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
       <span v-if="store.capped" class="cap">{{ t('board.capped', { n: MAX_BUDGET }) }}</span>
     </div>
 
+    <!-- A refused spawn (429) changes nothing: the card stays queued at its
+         number. Say so, and let it be dismissed -- never show it as a failure. -->
+    <div v-if="tasks.notice" class="notice">
+      <span>{{ tasks.notice }}</span>
+      <button type="button" class="nx" @click="tasks.dismissNotice()">
+        {{ t('task.dismiss') }}
+      </button>
+    </div>
+
     <div class="matrix">
       <div class="grid">
         <div class="hd corner">{{ t('rail.title') }}</div>
@@ -183,7 +216,10 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
               :key="task.id"
               :task="task"
               :expanded="isExpanded(task.id)"
+              :wave="waves.get(task.id)"
               @open="openTask"
+              @action="(action: TaskAction) => onAction(task, action)"
+              @reorder="(seq: number) => reorder(task, seq)"
             />
             <div v-if="!tasksIn(project.id, column.key).length" class="dash">—</div>
           </div>
@@ -268,6 +304,34 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
 .boardbar .cap {
   font: 11.5px/1 var(--sans);
   color: var(--c-failed);
+}
+/* The "retry later" strip: a refused spawn is not a failure, so this reads as
+   a note, not an alarm -- the amber of "timed out", not the red of "failed". */
+.notice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 16px 0;
+  padding: 8px 12px;
+  border-radius: var(--r-ctl);
+  background: var(--w-timeout);
+  color: var(--c-timeout);
+  font: 12px/1.4 var(--sans);
+}
+.notice .nx {
+  margin-left: auto;
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: inherit;
+  font: 11.5px/1 var(--sans);
+  cursor: pointer;
+}
+.notice .nx:hover {
+  background: var(--raise);
 }
 .matrix {
   flex: 1;

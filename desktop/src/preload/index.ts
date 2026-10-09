@@ -13,6 +13,7 @@ import type {
   ProjectCreatePayload,
   ProjectPatch,
   ServiceStatus,
+  TaskCreatePayload,
   TpApi
 } from './types'
 
@@ -56,6 +57,14 @@ const api: TpApi = {
     create: (payload: ProjectCreatePayload) => ipcRenderer.invoke('tp:projects:create', payload),
     patch: (id: string, patch: ProjectPatch) => ipcRenderer.invoke('tp:projects:patch', id, patch),
     remove: (id: string) => ipcRenderer.invoke('tp:projects:remove', id)
+  },
+  tasks: {
+    create: (payload: TaskCreatePayload) => ipcRenderer.invoke('tp:tasks:create', payload),
+    advance: (id: string) => ipcRenderer.invoke('tp:tasks:advance', id),
+    cancel: (id: string) => ipcRenderer.invoke('tp:tasks:cancel', id),
+    remove: (id: string) => ipcRenderer.invoke('tp:tasks:remove', id),
+    patchQueueSeq: (id: string, queueSeq: number | null) =>
+      ipcRenderer.invoke('tp:tasks:patch-queue-seq', id, queueSeq)
   }
 }
 

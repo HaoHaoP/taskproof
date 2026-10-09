@@ -25,6 +25,8 @@ function task(id: string, fields: Partial<Task> = {}): Task {
     attempt: null,
     group_name: null,
     pid: null,
+    pgid: null,
+    queue_seq: null,
     workdir: null,
     reasoning: null,
     result_path: null,
@@ -106,6 +108,23 @@ describe('column ordering', () => {
       task('mid', { status: 'queued', created_at: '2026-10-08T10:00:00+08:00' })
     ]
     expect(sortColumn('queued', queued).map((t) => t.id)).toEqual(['early', 'mid', 'late'])
+  })
+
+  it('orders the queue by queue_seq, not creation, and sinks unnumbered rows', () => {
+    // Since card 22 the explicit seq is the order: an edited card moves, and
+    // equal seqs are one wave. Rows with no seq fall to the bottom.
+    const queued = [
+      task('first', { status: 'queued', queue_seq: 1, created_at: '2026-10-08T11:00:00+08:00' }),
+      task('third', { status: 'queued', queue_seq: 3, created_at: '2026-10-08T09:00:00+08:00' }),
+      task('second', { status: 'queued', queue_seq: 2, created_at: '2026-10-08T10:00:00+08:00' }),
+      task('nosie', { status: 'queued', queue_seq: null, created_at: '2026-10-08T08:00:00+08:00' })
+    ]
+    expect(sortColumn('queued', queued).map((t) => t.id)).toEqual([
+      'first',
+      'second',
+      'third',
+      'nosie'
+    ])
   })
 
   it('orders every other column newest-first by created_at', () => {

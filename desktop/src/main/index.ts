@@ -14,11 +14,13 @@ import * as settings from './settings'
 import { ApiService, type LaunchSpec } from './service'
 import { runDoctor } from './doctor'
 import { createProjectsClient, type ProjectsClient } from './projects'
+import { createTasksClient, type TasksClient } from './tasks'
 import type {
   AboutInfo,
   DesktopSettings,
   ProjectCreatePayload,
-  ProjectPatch
+  ProjectPatch,
+  TaskCreatePayload
 } from '../preload/types'
 
 // The app's display name is now "Taskproof", but Electron derives `userData`
@@ -57,21 +59,38 @@ const api = new ApiService(launchSpec)
  * new token. Everything that talks HTTP-with-a-token goes through here; the
  * renderer only ever sees the named IPC methods below.
  */
-let writeClient: ProjectsClient | null = null
-let writeKey = ''
+let projectsClient: ProjectsClient | null = null
+let tasksClient: TasksClient | null = null
+/** `${port}:${token}` at the moment both clients were minted. A service
+ *  restart changes both, so this is the single trigger that re-mints them. */
+let clientKey = ''
 
-function projects(): ProjectsClient {
+/**
+ * Both write clients are minted together, off the same port/token snapshot.
+ * Keeping them in one place means a restart swaps them atomically -- there is
+ * no window where the registry client has the new token and the task client
+ * still holds the old one.
+ */
+function ensureClients(): { projects: ProjectsClient; tasks: TasksClient } {
   const port = api.getStatus().port
   const token = api.getToken() ?? ''
   const key = `${port}:${token}`
-  if (!writeClient || writeKey !== key) {
-    writeClient = createProjectsClient({
-      baseUrl: port ? `http://127.0.0.1:${port}` : '',
-      token
-    })
-    writeKey = key
+  if (!projectsClient || !tasksClient || clientKey !== key) {
+    const baseUrl = port ? `http://127.0.0.1:${port}` : ''
+    projectsClient = createProjectsClient({ baseUrl, token })
+    tasksClient = createTasksClient({ baseUrl, token })
+    clientKey = key
   }
-  return writeClient
+  return { projects: projectsClient, tasks: tasksClient }
+}
+
+function projects(): ProjectsClient {
+  return ensureClients().projects
+}
+
+/** The task control client. Same token, same lifetime, different surface. */
+function tasks(): TasksClient {
+  return ensureClients().tasks
 }
 
 /**
@@ -291,6 +310,18 @@ function registerIpc(): void {
     projects().patch(String(id), patch)
   )
   ipcMain.handle('tp:projects:remove', (_event, id: string) => projects().remove(String(id)))
+
+  // Task control. Same narrow shape as the registry writes above: the token and
+  // the HTTP verb stay in this process, the renderer gets a typed result.
+  ipcMain.handle('tp:tasks:create', (_event, payload: TaskCreatePayload) =>
+    tasks().create(payload)
+  )
+  ipcMain.handle('tp:tasks:advance', (_event, id: string) => tasks().advance(String(id)))
+  ipcMain.handle('tp:tasks:cancel', (_event, id: string) => tasks().cancel(String(id)))
+  ipcMain.handle('tp:tasks:remove', (_event, id: string) => tasks().remove(String(id)))
+  ipcMain.handle('tp:tasks:patch-queue-seq', (_event, id: string, seq: number | null) =>
+    tasks().patchQueueSeq(String(id), seq)
+  )
 }
 
 api.onStatus((status) => {

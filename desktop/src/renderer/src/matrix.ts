@@ -129,16 +129,34 @@ export function finishedKey(task: Task): string | null {
 }
 
 /**
+ * Order the queue. Since card 22 the queue order is the explicit `queue_seq`,
+ * not creation time: the operator edits it, and equal numbers are one wave.
+ * Rows without a seq sink below the numbered ones, then tie on creation time so
+ * an untouched queue still reads oldest-first.
+ */
+function queueOrder(a: Task, b: Task): number {
+  const sa = a.queue_seq
+  const sb = b.queue_seq
+  if (sa === null || sa === undefined) {
+    if (sb === null || sb === undefined) return oldestFirst(stamp(a.created_at), stamp(b.created_at))
+    return 1
+  }
+  if (sb === null || sb === undefined) return -1
+  if (sa !== sb) return sa - sb
+  return oldestFirst(stamp(a.created_at), stamp(b.created_at))
+}
+
+/**
  * Order one column's tasks. Queued is the only column where order is meaning --
- * earliest first, so the head of the queue is the next task. Every other
- * column runs newest first; the two terminal columns (done and cancelled)
- * measure "newest" by their finish time, because that is the head their window
- * shows.
+ * the head of the queue is the next task, and the order is the editable
+ * `queue_seq`. Every other column runs newest first; the two terminal columns
+ * (done and cancelled) measure "newest" by their finish time, because that is
+ * the head their window shows.
  */
 export function sortColumn(key: string, tasks: Task[]): Task[] {
   const copy = [...tasks]
   if (key === 'queued') {
-    copy.sort((a, b) => oldestFirst(stamp(a.created_at), stamp(b.created_at)))
+    copy.sort(queueOrder)
   } else if (key === 'done' || key === 'cancelled') {
     copy.sort((a, b) => newestFirst(stamp(finishedKey(a)), stamp(finishedKey(b))))
   } else {

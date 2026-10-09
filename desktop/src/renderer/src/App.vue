@@ -4,14 +4,17 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import AboutDialog from './components/AboutDialog.vue'
 import FilterBar from './components/FilterBar.vue'
+import TaskConsole from './components/TaskConsole.vue'
 import { ICONS } from './icons'
 import { shellPlaceholder } from './shell'
 import { useElementLocale } from './i18n/element'
 import { useBoardStore } from './stores/board'
+import { useTasksStore } from './stores/tasks'
 import { useSettingsStore } from './stores/settings'
 
 const store = useBoardStore()
 const settings = useSettingsStore()
+const tasks = useTasksStore()
 const route = useRoute()
 const { t } = useI18n()
 
@@ -127,6 +130,7 @@ onBeforeUnmount(() => store.dispose())
             :polling="store.polling"
             @toggle="store.toggleProject"
             @select-all="store.selectAllProjects"
+            @compose="tasks.openCompose()"
           />
 
           <!-- The API reported a status word this build does not know. It is still
@@ -161,6 +165,9 @@ onBeforeUnmount(() => store.dispose())
       <!-- Mounted once at the shell so the macOS "About Taskproof" menu item can
            open it from any page; the settings row raises the same shared flag. -->
       <AboutDialog />
+      <!-- The console sheets (dispatch / stop / delete) are shell-level too: the
+           toolbar's "New task" button can raise them from any data view. -->
+      <TaskConsole />
     </div>
   </el-config-provider>
 </template>
