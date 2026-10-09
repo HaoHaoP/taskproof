@@ -7,7 +7,7 @@ agent is ever invoked and nothing reaches the network:
   * happy path -> done, verify_cmd/verify_exit written, started + done events
   * acceptance failure -> failed, and the slot is released
   * --no-verify / read-only -> SKIPPED, never "passed"
-  * a forbidden-path change fails the task even when the agent "succeeds"
+  * a forbidden-path change -> blocked (human review), acceptance still runs
   * an adapter failure raises AdapterError and still releases the slot
   * the concurrency gate refuses a second task in the same group
   * `_run_adapter` enforces its timeout and kills the process it started
@@ -25,8 +25,10 @@ import unittest
 from taskproof import concurrency, storage
 from taskproof.adapters import get
 from taskproof.dispatch import (
+    TaskStateError,
     _run_adapter,
     _worktree_target_path,
+    cancel_task,
     dispatch,
     prepare_workspace,
     remove_task,
@@ -34,7 +36,13 @@ from taskproof.dispatch import (
     task_detail,
 )
 from taskproof.errors import AdapterError, ConcurrencyError, UsageError, VerifyError
-from taskproof.models import STATUS_DONE, STATUS_FAILED, STATUS_TIMEOUT
+from taskproof.models import (
+    STATUS_BLOCKED,
+    STATUS_DONE,
+    STATUS_FAILED,
+    STATUS_TIMEOUT,
+    TERMINAL_STATUSES,
+)
 
 
 def _q(value) -> str:
@@ -216,7 +224,7 @@ class SkipVerifyTest(DispatchBase):
 
 
 class ForbiddenPathTest(DispatchBase):
-    def test_forbidden_change_fails_even_on_reported_success(self):
+    def test_forbidden_change_blocks_even_on_reported_success(self):
         subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True)
         self.write_registry(verify="exit 0", forbidden=["dist/"])
         command = "custom:sh -c 'mkdir -p dist && echo x > dist/out.txt && echo done'"
@@ -225,11 +233,122 @@ class ForbiddenPathTest(DispatchBase):
 
         task_id = self.latest_task_id()
         detail = task_detail(self.ws, task_id)
-        self.assertEqual(detail["task"]["status"], STATUS_FAILED)
+        self.assertEqual(detail["task"]["status"], STATUS_BLOCKED)
 
         blob = " ".join(json_event_text(e) for e in detail["events"])
         self.assertIn("dist", blob)
         self.assertEqual(self.active_claims(), 0)
+
+
+class ForbiddenTerminalSemanticsTest(DispatchBase):
+    """Card 34 layer 2 — a boundary breach is `blocked`, and acceptance runs.
+
+    The six true-process checks (real ``python -m taskproof`` invocations) are
+    reproduced in the delivery notes; here we pin the same facts end to end
+    through the pipeline the CLI drives, with a harmless ``custom:`` adapter.
+    """
+
+    def _violate(self, *, verify):
+        """Dispatch a run that touches ``protected/``; return the task id."""
+        self.write_registry(verify=verify, forbidden=["protected/"])
+        command = (
+            "custom:sh -c 'mkdir -p protected && echo x > protected/out.txt "
+            "&& echo ok'"
+        )
+        with self.assertRaises(VerifyError) as ctx:
+            dispatch(self.ws, "proj", "x", adapter=command)
+        # CLI exit code stays 71: the command's outcome is a verify error even
+        # though the task is recorded as `blocked`.
+        self.assertEqual(ctx.exception.exit_code, 71)
+        return self.latest_task_id()
+
+    def _event(self, task_id, name):
+        return next(
+            e for e in task_detail(self.ws, task_id)["events"] if e["event"] == name
+        )
+
+    # ① real breach + green acceptance -> blocked, acceptance actually ran
+    def test_violation_with_green_acceptance_is_blocked(self):
+        task_id = self._violate(verify="exit 0")
+        detail = task_detail(self.ws, task_id)
+        self.assertEqual(detail["task"]["status"], STATUS_BLOCKED)
+        self.assertEqual(detail["task"]["verify_cmd"], "exit 0")
+        self.assertEqual(detail["task"]["verify_exit"], 0)
+
+        names = [e["event"] for e in detail["events"]]
+        self.assertIn("forbidden", names)
+        self.assertIn("verify", names)
+        self.assertIn("blocked", names)
+        self.assertNotIn("failed", names)
+
+        verify = self._event(task_id, "verify")["payload"]
+        self.assertTrue(verify["ran"])
+        self.assertEqual(verify["status"], "PASSED")
+        self.assertEqual(verify["exit_code"], 0)
+        self.assertEqual(self.active_claims(), 0)
+
+    # ② real breach + red acceptance -> still blocked; both facts in the ledger
+    def test_violation_with_red_acceptance_is_still_blocked(self):
+        task_id = self._violate(verify="exit 1")
+        detail = task_detail(self.ws, task_id)
+        self.assertEqual(detail["task"]["status"], STATUS_BLOCKED)
+        self.assertEqual(detail["task"]["verify_exit"], 1)
+
+        names = [e["event"] for e in detail["events"]]
+        self.assertIn("forbidden", names)
+        self.assertIn("verify", names)
+        self.assertNotIn("failed", names)
+
+        verify = self._event(task_id, "verify")["payload"]
+        self.assertEqual(verify["status"], "FAILED")
+        self.assertEqual(verify["exit_code"], 1)
+        # The `blocked` event carries both the breach and the verify verdict.
+        blocked = self._event(task_id, "blocked")["payload"]
+        self.assertEqual(blocked["stage"], "forbidden")
+        self.assertEqual(blocked["verify"], "FAILED")
+        self.assertEqual(blocked["verify_exit"], 1)
+
+    # ③ regression: a clean run is still done
+    def test_clean_run_is_done(self):
+        self.write_registry(verify="exit 0", forbidden=["protected/"])
+        task_id = dispatch(self.ws, "proj", "x", adapter="custom:sh -c 'echo ok'")
+        detail = task_detail(self.ws, task_id)
+        self.assertEqual(detail["task"]["status"], STATUS_DONE)
+        self.assertNotIn("forbidden", [e["event"] for e in detail["events"]])
+
+    # ④ regression: a red acceptance with NO breach is still `failed`
+    def test_red_acceptance_without_violation_is_failed(self):
+        self.write_registry(verify="exit 1", forbidden=["protected/"])
+        with self.assertRaises(VerifyError):
+            dispatch(self.ws, "proj", "x", adapter="custom:sh -c 'echo ok'")
+        detail = task_detail(self.ws, self.latest_task_id())
+        self.assertEqual(detail["task"]["status"], STATUS_FAILED)
+        names = [e["event"] for e in detail["events"]]
+        self.assertIn("verify", names)
+        self.assertNotIn("forbidden", names)
+
+    # ⑤ summary counts the blocked card (and nothing as failed)
+    def test_summary_counts_blocked(self):
+        self._violate(verify="exit 0")
+        conn = self.open_conn()
+        try:
+            counts = summary_counts(self.ws, conn)
+        finally:
+            conn.close()
+        self.assertEqual(counts["blocked"], 1)
+        self.assertEqual(counts["failed"], 0)
+
+    # blocked is a true terminal: no process, cancel refuses, rm allows
+    def test_blocked_is_terminal_cancel_refuses_rm_allows(self):
+        task_id = self._violate(verify="exit 0")
+        self.assertIn(STATUS_BLOCKED, TERMINAL_STATUSES)
+        with self.assertRaises(TaskStateError):
+            cancel_task(self.ws, task_id)
+        # The refused cancel left the terminal state untouched.
+        self.assertEqual(
+            task_detail(self.ws, task_id)["task"]["status"], STATUS_BLOCKED
+        )
+        self.assertEqual(remove_task(self.ws, task_id), task_id)
 
 
 class ForbiddenSignalDiffTest(DispatchBase):

@@ -157,6 +157,36 @@ Over-limit behaviour exit immediately (no queueing); the caller decides when to 
 Process safety       only processes taskproof started are ever killed
 ```
 
+## Task statuses
+
+A task's `status` records what the run *is*; the terminal states say why it
+stopped.
+
+```
+queued                   parked, waiting for a worker
+running / verifying      the adapter is running, then acceptance is running
+done                     acceptance passed (or was recorded SKIPPED, never "passed")
+failed                   the adapter failed, or acceptance ran and went red
+blocked                  a protected path moved: a human must review the run
+timeout                  the adapter hit the hard timeout
+cancelled                a human stopped it
+```
+
+`blocked` is a true terminal state and means **"needs human review"**, not "the
+work is bad". A forbidden-path breach is recorded as `blocked`: the breach is a
+fact about the run, not a verdict on the work, so it stays separate from
+`failed` — whose only meaning is "acceptance did not pass" or "the adapter
+failed". A breach **never** short-circuits the pipeline: acceptance still runs,
+and both facts land in the ledger, the `forbidden` event with the offending
+paths and the `verify` event with the real result. A breach outranks a red
+acceptance: the card is `blocked` either way, and `verify_exit` tells the human
+whether the work itself was sound.
+
+Because `blocked` is terminal, the queue never advances it, `cancel` refuses it
+(there is no process to kill), and `rm` deletes it like any other terminal row.
+Clearing a `blocked` card is a human decision made in layer 3 via `accept <id>`;
+the dispatch pipeline never auto-promotes it to `done`.
+
 ## Exit codes
 
 ```
@@ -167,6 +197,14 @@ Process safety       only processes taskproof started are ever killed
 71   verification or artifact self-check failure
 75   concurrency limit reached
 ```
+
+An exit code says **how the command ended**, not what the task was recorded as,
+and the two are deliberately decoupled. A forbidden-path breach is stored as
+`blocked`, yet the `run` command still exits `71` — the same `VerifyError`
+mapping as any verification failure. Callers that care whether the work is
+acceptable read the task status; callers that only need the command's outcome
+read the exit code.
+
 
 ## The forbidden-path gate
 

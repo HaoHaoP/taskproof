@@ -728,17 +728,11 @@ def _execute(
         }
     )
     if violations:
-        # A protected path was touched: fail outright, even though the adapter
-        # reported success. The offending paths go into the audit stream.
-        _finish_task(
-            conn,
-            task_id,
-            status=STATUS_FAILED,
-            exit_code=exit_code,
-            files_changed=files_changed,
-            workdir=run_dir,
-            result_path=result_path,
-        )
+        # A protected path was touched. This is a fact about the run, not a
+        # verdict that the work is bad — so record it and DO NOT short-circuit.
+        # Acceptance still runs below (⑦) and a human decides in layer 3
+        # (`accept`), not this pipeline. The offending paths go into the audit
+        # stream here, untouched, exactly as before.
         storage.append_event(
             conn,
             task_id,
@@ -752,16 +746,6 @@ def _execute(
                 # guarantee for that rule was partial.
                 "snapshot_truncated": forbidden_truncated,
             },
-        )
-        storage.append_event(
-            conn,
-            task_id,
-            "failed",
-            {"stage": "forbidden", "violations": violations, "paths": violation_paths},
-        )
-        raise VerifyError(
-            f"forbidden path(s) changed: {', '.join(violation_paths)}",
-            hint="the task touched a path the registry protects",
         )
 
     # ⑦ acceptance, run in the PROJECT workdir — never the workspace. A run that
@@ -803,19 +787,49 @@ def _execute(
         },
     )
 
-    # ⑧ terminal row + event.
-    if verify_status == "FAILED":
-        _finish_task(
+    # ⑧ terminal row + event. Two *facts* may be in play — a protected path
+    # moved, and/or acceptance failed — and the ledger must carry both, so the
+    # rule is: a violation outranks a red acceptance (a human reviews the
+    # boundary breach), a red acceptance is a plain `failed`, and a clean green
+    # run is `done`. Every branch has already written the `verify` event above,
+    # so whichever terminal we pick here, the acceptance result is not lost.
+    common = dict(
+        exit_code=exit_code,
+        verify_cmd=verify_cmd_field,
+        verify_exit=verify_exit_field,
+        files_changed=files_changed,
+        workdir=run_dir,
+        result_path=result_path,
+    )
+
+    if violations:
+        # A protected path was touched: `blocked` (= human review), NOT a
+        # failure of the work. The exit code stays 71 (VerifyError, below) even
+        # though the terminal state is blocked — "what the task is recorded as"
+        # and "how this command ended" are deliberately different values.
+        # Layer 3's `accept <id>` is what clears a blocked card; this pipeline
+        # never auto-promotes it to `done`, even when acceptance passed.
+        _finish_task(conn, task_id, status=STATUS_BLOCKED, **common)
+        storage.append_event(
             conn,
             task_id,
-            status=STATUS_FAILED,
-            exit_code=exit_code,
-            verify_cmd=verify_cmd_field,
-            verify_exit=verify_exit_field,
-            files_changed=files_changed,
-            workdir=run_dir,
-            result_path=result_path,
+            "blocked",
+            {
+                "stage": "forbidden",
+                "violations": violations,
+                "paths": violation_paths,
+                # Both facts survive in the ledger: the breach and the verdict.
+                "verify": verify_status,
+                "verify_exit": verify_exit_field,
+            },
         )
+        raise VerifyError(
+            f"forbidden path(s) changed: {', '.join(violation_paths)}",
+            hint="the task touched a path the registry protects",
+        )
+
+    if verify_status == "FAILED":
+        _finish_task(conn, task_id, status=STATUS_FAILED, **common)
         storage.append_event(
             conn,
             task_id,
@@ -831,17 +845,7 @@ def _execute(
             hint=f"output: {outcome.output_tail}" if outcome and outcome.output_tail else None,
         )
 
-    _finish_task(
-        conn,
-        task_id,
-        status=STATUS_DONE,
-        exit_code=exit_code,
-        verify_cmd=verify_cmd_field,
-        verify_exit=verify_exit_field,
-        files_changed=files_changed,
-        workdir=run_dir,
-        result_path=result_path,
-    )
+    _finish_task(conn, task_id, status=STATUS_DONE, **common)
     storage.append_event(
         conn,
         task_id,

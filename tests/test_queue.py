@@ -10,6 +10,7 @@ Covered:
   * same wave + same group  -> one runs, the other stays queued and is retried
   * global cap full         -> refused card stays queued (role still there)
   * a parked row is advanced by id: the SAME row runs, no new id
+  * a `blocked` (boundary breach) card is terminal: the queue never advances it
   * the queue daemon stops cleanly on SIGTERM and leaves no concurrency claim
   * a stopped queue's leftover queued rows are resumed by a restart
 """
@@ -23,8 +24,9 @@ import time
 import unittest
 
 from taskproof import concurrency, dispatch, queue, storage
-from taskproof.errors import ConcurrencyError
+from taskproof.errors import ConcurrencyError, VerifyError
 from taskproof.models import (
+    STATUS_BLOCKED,
     STATUS_DONE,
     STATUS_FAILED,
     STATUS_QUEUED,
@@ -248,6 +250,54 @@ class RunQueuedTest(_WorkspaceCase):
         row = self.row(task_id)
         self.assertEqual(row["status"], STATUS_DONE)
         self.assertEqual(row["verify_cmd"], "SKIPPED")  # not "passed"
+
+
+class BlockedNotAdvancedTest(_WorkspaceCase):
+    """⑥ Card 34: `blocked` is a true terminal, so the queue skips it."""
+
+    def _make_blocked(self):
+        # A project that protects `protected/`, run by an adapter that writes to
+        # it: the breach is recorded `blocked` (green acceptance still runs).
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write(
+                "[defaults]\nconcurrency = 3\ntimeout = 120\n\n"
+                "[[project]]\n"
+                'id = "p"\n'
+                f"path = {_q(self.proj)}\n"
+                'group = "g"\n'
+                'verify = "exit 0"\n'
+                'verify_kind = "check"\n'
+                'forbidden_paths = ["protected/"]\n'
+            )
+        with self.assertRaises(VerifyError):
+            dispatch.dispatch(
+                self.ws, "p", "breach",
+                adapter=("custom:sh -c 'mkdir -p protected && "
+                         "echo x > protected/out.txt && echo ok'"),
+            )
+        conn = self.open_conn()
+        try:
+            return storage.list_tasks(conn, limit=1)[0]["id"]
+        finally:
+            conn.close()
+
+    def test_blocked_card_is_not_advanced(self):
+        task_id = self._make_blocked()
+        self.assertEqual(self.status(task_id), STATUS_BLOCKED)
+
+        # The wave selector only sees live rows, so a terminal card is invisible.
+        conn = self.open_conn()
+        try:
+            self.assertEqual(queue.select_wave(conn), [])
+        finally:
+            conn.close()
+
+        # A real daemon tick launches nothing and leaves the terminal row alone.
+        daemon = queue.QueueDaemon(self.ws, tick_seconds=0.01)
+        self.assertEqual(daemon.tick(), 0)
+        row = self.row(task_id)
+        self.assertEqual(row["status"], STATUS_BLOCKED)
+        self.assertEqual(self.count_tasks(), 1)
 
 
 class SameWaveSameGroupTest(_WorkspaceCase):

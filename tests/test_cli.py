@@ -20,7 +20,7 @@ def _q(value) -> str:
 
 
 def registry_toml(path, *, pid="proj", group="proj", verify="exit 0",
-                  verify_kind="check") -> str:
+                  verify_kind="check", forbidden=()) -> str:
     lines = [
         "[defaults]",
         "concurrency = 3",
@@ -34,6 +34,9 @@ def registry_toml(path, *, pid="proj", group="proj", verify="exit 0",
     if verify is not None:
         lines.append(f"verify = {_q(verify)}")
         lines.append(f"verify_kind = {_q(verify_kind)}")
+    if forbidden:
+        joined = ", ".join(_q(f) for f in forbidden)
+        lines.append(f"forbidden_paths = [{joined}]")
     return "\n".join(lines) + "\n"
 
 
@@ -180,6 +183,40 @@ class ExitCodeTest(CliBase):
             "--workspace", self.ws, "register", os.path.join(self.tmp, "missing")
         )
         self.assertEqual(code, 64)
+
+
+class BlockedStatusTest(CliBase):
+    """Card 34: a boundary breach is recorded as `blocked`, still exit 71, and
+    shows up under `tasks --status blocked`."""
+
+    def _breach(self):
+        self.run_cli("--workspace", self.ws, "init")
+        self.write_registry(forbidden=["protected/"])
+        return self.run_cli(
+            "--workspace", self.ws, "run", "proj", "breach",
+            "--adapter",
+            "custom:sh -c 'mkdir -p protected && echo x > protected/out.txt "
+            "&& echo ok'",
+        )
+
+    def test_forbidden_run_exits_71_but_is_blocked(self):
+        code, _ = self._breach()
+        self.assertEqual(code, 71)  # the command's outcome, not the task state
+
+        code, out = self.run_cli(
+            "--workspace", self.ws, "--json", "tasks", "--status", "blocked"
+        )
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["tasks"][0]["status"], "blocked")
+
+        # A `failed` filter must NOT see it: the ledger did not mix the two.
+        code, out = self.run_cli(
+            "--workspace", self.ws, "--json", "tasks", "--status", "failed"
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["count"], 0)
 
 
 class RegisterTest(CliBase):
