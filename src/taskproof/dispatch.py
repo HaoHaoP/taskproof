@@ -1579,65 +1579,124 @@ def _violation_summary(conn, task_id: str) -> dict:
     return summary
 
 
-def accept_task(workspace: str, task_id: str, *, by: str = "cli") -> dict:
-    """Clear a `blocked` card — the human disposition of one boundary breach.
+#: How much of the agent's own last summary the `accepted` event carries. The
+#: summary is context for a human sign-off, never a verdict — a tail is enough.
+_SUMMARY_TAIL_CHARS = 500
 
-    Only `blocked` is accepted; every other status (queued / running /
-    verifying / done / failed / timeout / cancelled) is refused with a readable
-    `TaskStateError`, so `accept` can never silently re-close a card.
 
-    `accept` is a verdict on the *breach*, not a pass on the work, so the new
-    terminal state follows the acceptance result already on the card:
+def _last_summary(conn, task_id: str) -> Optional[str]:
+    """The agent's own last summary, newest first, or None when there is none.
 
-      * ``verify_exit == 0``            -> `done`   ("the work is sound; I
-        accept this crossing")
-      * anything else (red or skipped)  -> `failed` ("I accept the crossing,
-        but the work itself did not pass")
-
-    One `accepted` event records the actor (``by``), the verify verdict and
-    exit, the breach summary this acceptance confirms, and ``from`` / ``to``.
-    The card's `verify_*` columns and `finished_at` are left untouched — the
-    run's own facts do not change because a human later signed off. Returns the
-    updated task row.
+    `adapter` carries the agent's claim right after it exits; a clean `done`
+    carries it again. A failed *acceptance* records no summary (only the
+    verdict), so this is best-effort context, not a required field.
     """
+    for name in ("adapter", "done"):
+        row = conn.execute(
+            "SELECT payload FROM events WHERE task_id = ? AND event = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (task_id, name),
+        ).fetchone()
+        if row is None or row[0] is None:
+            continue
+        try:
+            payload = json.loads(row[0])
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if isinstance(payload, dict):
+            text = payload.get("summary")
+            if isinstance(text, str) and text.strip():
+                return text
+    return None
+
+
+def accept_task(
+    workspace: str, task_id: str, *, by: str = "cli", note: Optional[str] = None
+) -> dict:
+    """Clear a `blocked` or `failed` card — the human disposition of one run.
+
+    `blocked` (a boundary breach) is accepted with or without a note, exactly as
+    it always has been: a green acceptance earns `done`, a red or skipped one
+    earns `failed`. `failed` (the adapter failed, or acceptance ran and went red)
+    may also be accepted, but ONLY with a non-empty ``note``: closing a failed
+    card is a human sign-off, and the reason must survive in the ledger.
+
+    `accept` is a human **registration**, not a verdict: it never re-runs
+    acceptance and never rewrites `verify_*`. Whatever the run recorded when it
+    stopped stays authoritative; a failed card is promoted to `done` only because
+    a human judged the recorded failure a false red, and that judgement is kept
+    in the `accepted` event alongside the evidence the human saw.
+
+    Every other status (queued / running / verifying / done / timeout /
+    cancelled) is refused with a readable `TaskStateError`, so `accept` can never
+    silently re-close a card. The card's `verify_*` columns and `finished_at` are
+    left untouched — the run's own facts do not change because a human later
+    signed off. Returns the updated task row.
+    """
+    note_text = note if isinstance(note, str) else None
+    note_present = bool(note_text and note_text.strip())
     conn = storage.connect(storage.db_path(workspace))
     try:
         storage.migrate(conn)
         row = storage.get_task(conn, task_id)
         if row is None:
             raise TaskNotFoundError(f"no such task: {task_id}")
-        if row["status"] != STATUS_BLOCKED:
+        status = row["status"]
+        if status not in (STATUS_BLOCKED, STATUS_FAILED):
             raise TaskStateError(
-                f"task {task_id} is {row['status']}; "
-                "only a blocked task can be accepted"
+                f"task {task_id} is {status}; "
+                "only a blocked or failed task can be accepted"
+            )
+        if status == STATUS_FAILED and not note_present:
+            # A failed card is closed by human judgement, not by a fresh verdict,
+            # so the reason MUST be on the record. Refuse before touching the row.
+            raise UsageError(
+                "accepting a failed task requires a note: "
+                "人工收尾必须留说明",
+                hint=(
+                    "accept is a human registration, not a verdict; pass "
+                    '--note "why this failure is being cleared"'
+                ),
             )
 
         verify_exit = row["verify_exit"]
         if verify_exit == 0:
-            verify_label, new_status = _VERIFY_PASSED, STATUS_DONE
+            verify_label = _VERIFY_PASSED
         elif verify_exit is None:
-            verify_label, new_status = _VERIFY_SKIPPED, STATUS_FAILED
+            verify_label = _VERIFY_SKIPPED
         else:
-            verify_label, new_status = _VERIFY_FAILED, STATUS_FAILED
+            verify_label = _VERIFY_FAILED
+        if status == STATUS_FAILED:
+            # A human signed the red off as a false negative: the recorded facts
+            # stay, the terminal state becomes `done`.
+            new_status = STATUS_DONE
+        else:
+            # `blocked` keeps following its acceptance result, exactly as before.
+            new_status = STATUS_DONE if verify_exit == 0 else STATUS_FAILED
 
-        summary = _violation_summary(conn, task_id)
+        payload = {
+            "by": by,
+            "verify": verify_label,
+            "verify_exit": verify_exit,
+            "from": status,
+            "to": new_status,
+            # The evidence the human actually saw when signing off.
+            "files_changed": row["files_changed"],
+            # The note is stored verbatim (None for a blocked card with no note).
+            "note": note_text,
+        }
+        if status == STATUS_BLOCKED:
+            summary = _violation_summary(conn, task_id)
+            payload["rules"] = summary["rules"]
+            payload["paths"] = summary["paths"]
+            payload["violations"] = summary["violations"]
+        else:
+            agent_summary = _last_summary(conn, task_id)
+            if agent_summary:
+                payload["summary"] = agent_summary[:_SUMMARY_TAIL_CHARS]
+
         storage.update_task(conn, task_id, status=new_status)
-        storage.append_event(
-            conn,
-            task_id,
-            "accepted",
-            {
-                "by": by,
-                "verify": verify_label,
-                "verify_exit": verify_exit,
-                "from": STATUS_BLOCKED,
-                "to": new_status,
-                # The breach this acceptance confirms, verbatim from the ledger.
-                "rules": summary["rules"],
-                "paths": summary["paths"],
-                "violations": summary["violations"],
-            },
-        )
+        storage.append_event(conn, task_id, "accepted", payload)
         return dict(storage.get_task(conn, task_id))
     finally:
         conn.close()

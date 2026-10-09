@@ -19,8 +19,9 @@ Security choices (deliberate, and the whole reason this module exists):
   ``POST /api/tasks`` (dispatch, or ``start=false`` to park a queued row),
   ``POST /api/tasks/<id>/advance`` (fire ONE queued card now, out of its wave,
   via ``dispatch.run_queued``), ``POST /api/tasks/<id>/accept`` (clear a
-  ``blocked`` card: ``done`` when its acceptance passed, else ``failed``,
-  recorded as an ``accepted`` event), ``POST /api/tasks/<id>/cancel`` (SIGTERM
+  ``blocked`` card: ``done`` when its acceptance passed, else ``failed``; also
+  clear a ``failed`` card to ``done`` with a required ``{"note": "…"}`` body,
+  each recorded as one ``accepted`` event), ``POST /api/tasks/<id>/cancel`` (SIGTERM
   -> SIGKILL the task's own process group, or drop a queued card), and
   ``DELETE /api/tasks/<id>`` (terminal only). Reordering a queued card is field
   maintenance, not a sixth action: ``PATCH /api/tasks/<id>`` accepts only
@@ -328,7 +329,7 @@ class _Handler(BaseHTTPRequestHandler):
                 )
                 if not task_id or "/" in task_id:
                     return 404, {"error": "not found", "path": parsed.path}
-                return self._accept_task(task_id)
+                return self._accept_task(task_id, self._body())
             return 404, {"error": "not found", "path": parsed.path}
 
         if path.startswith("/api/projects/"):
@@ -519,10 +520,24 @@ class _Handler(BaseHTTPRequestHandler):
         dispatch.run_queued(self.workspace, task_id)
         return 200, {"task": self._task_record(task_id)}
 
-    def _accept_task(self, task_id):
+    def _accept_task(self, task_id, body=None):
         # The same human disposition as `taskproof accept <id>`; the audit event
         # records that it came from the API surface (`by="api"`), not the CLI.
-        return 200, {"task": dispatch.accept_task(self.workspace, task_id, by="api")}
+        # Body may carry ``{"note": "..."}`` — required to clear a `failed` card.
+        body = body or {}
+        unknown = set(body) - {"note"}
+        if unknown:
+            raise RegistryError(
+                f"unsupported field(s): {', '.join(sorted(unknown))}"
+            )
+        note = body.get("note")
+        if note is not None and not isinstance(note, str):
+            raise RegistryError("note must be a string")
+        return 200, {
+            "task": dispatch.accept_task(
+                self.workspace, task_id, by="api", note=note
+            )
+        }
 
     def _cancel_task(self, task_id):
         return 200, {"task": dispatch.cancel_task(self.workspace, task_id)}

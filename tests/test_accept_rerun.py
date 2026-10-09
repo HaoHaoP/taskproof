@@ -24,9 +24,11 @@ from taskproof.api import server
 from taskproof.errors import VerifyError
 from taskproof.models import (
     STATUS_BLOCKED,
+    STATUS_CANCELLED,
     STATUS_DONE,
     STATUS_FAILED,
     STATUS_QUEUED,
+    STATUS_TIMEOUT,
 )
 
 _SENTINEL = object()
@@ -143,6 +145,27 @@ class _Base(unittest.TestCase):
             self.ws, "proj", brief, adapter=_CLEAN, start=False
         )
 
+    def red(self, *, verify="exit 1"):
+        """Dispatch a clean run whose acceptance goes red; return the failed id."""
+        self.write_registry(verify=verify)
+        with self.assertRaises(VerifyError):
+            dispatch.dispatch(self.ws, "proj", "red", adapter=_CLEAN)
+        return self.latest_id()
+
+    def timed_out(self):
+        """Dispatch an adapter that outlives its own timeout; return a timeout id."""
+        with self.assertRaises(VerifyError):
+            dispatch.dispatch(
+                self.ws, "proj", "slow", adapter="custom:sleep 5", timeout=1
+            )
+        return self.latest_id()
+
+    def cancelled(self):
+        """Park a card and cancel it while still queued; return a cancelled id."""
+        queued = self.park("drop me")
+        dispatch.cancel_task(self.ws, queued)
+        return queued
+
 
 # ---------------------------------------------------------------------------
 # ①②③ accept
@@ -210,28 +233,104 @@ class AcceptTest(_Base):
         self.assertEqual(self.row(task_id)["status"], STATUS_FAILED)
         self.assertEqual(self.latest_event(task_id, "accepted")["payload"]["verify"], "skipped")
 
-    # ③ accept only works on blocked; every other state is refused, unchanged
-    def test_accept_refuses_non_blocked_and_keeps_the_status(self):
+    # ③ accept works on blocked (note optional) and failed (note required);
+    # every other state is refused, unchanged.
+    def test_accept_refuses_done_timeout_cancelled_and_queued(self):
         done = dispatch.dispatch(self.ws, "proj", "clean", adapter=_CLEAN)
-        self.write_registry(verify="exit 1")
-        with self.assertRaises(VerifyError):
-            dispatch.dispatch(self.ws, "proj", "red", adapter=_CLEAN)
-        failed = self.latest_id()
-        self.write_registry(verify="exit 0")
+        timeout = self.timed_out()
+        cancelled = self.cancelled()
         queued = self.park("parked")
 
         for task_id, before in (
             (done, STATUS_DONE),
-            (failed, STATUS_FAILED),
+            (timeout, STATUS_TIMEOUT),
+            (cancelled, STATUS_CANCELLED),
             (queued, STATUS_QUEUED),
         ):
             self.assertEqual(self.row(task_id)["status"], before)
             code, _out, err = self.run_cli("accept", task_id)
             self.assertNotEqual(code, 0, task_id)
-            self.assertIn("only a blocked task", err)
+            self.assertIn("only a blocked or failed task", err)
             # The terminal state was not silently rewritten.
             self.assertEqual(self.row(task_id)["status"], before)
             self.assertIsNone(self.latest_event(task_id, "accepted"))
+
+
+# ---------------------------------------------------------------------------
+# failed -> done: a human sign-off that must leave a note
+# ---------------------------------------------------------------------------
+
+
+class AcceptFailedTest(_Base):
+    NOTE = "假红：机器繁忙导致 8s 等待超时；成果已复核并合并"
+
+    # A failed card is refused without a note; the row and ledger are untouched.
+    def test_failed_without_note_is_refused_before_anything_changes(self):
+        task_id = self.red(verify="exit 1")
+        before = self.row(task_id)
+        events_before = self.events(task_id)
+        self.assertEqual(before["status"], STATUS_FAILED)
+
+        for argv in (
+            ("accept", task_id),
+            ("accept", task_id, "--note", ""),
+            ("accept", task_id, "--note", "   "),
+        ):
+            code, _out, err = self.run_cli(*argv)
+            self.assertNotEqual(code, 0, argv)
+            self.assertIn("人工收尾必须留说明", err)
+
+        self.assertEqual(self.row(task_id)["status"], STATUS_FAILED)
+        # One event, one status: nothing changed at all.
+        self.assertEqual(len(self.events(task_id)), len(events_before))
+        self.assertIsNone(self.latest_event(task_id, "accepted"))
+
+    # A failed card with a note is closed as done, keeping the run's own facts.
+    def test_failed_with_note_goes_done_and_preserves_verify_facts(self):
+        task_id = self.red(verify="exit 1")
+        before = self.row(task_id)
+        self.assertEqual(before["status"], STATUS_FAILED)
+        self.assertEqual(before["verify_exit"], 1)
+        accepted_before = len(
+            [e for e in self.events(task_id) if e["event"] == "accepted"]
+        )
+
+        code, out, err = self.run_cli("accept", task_id, "--note", self.NOTE)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["status"], STATUS_DONE)
+
+        after = self.row(task_id)
+        self.assertEqual(after["status"], STATUS_DONE)
+        # `accept` only moves `status`; the run's own facts are frozen.
+        for column in (
+            "verify_exit",
+            "verify_cmd",
+            "files_changed",
+            "finished_at",
+            "exit_code",
+        ):
+            self.assertEqual(after[column], before[column], column)
+
+        events = self.events(task_id)
+        accepted = [e for e in events if e["event"] == "accepted"]
+        # Exactly one new `accepted` event; nothing else was appended.
+        self.assertEqual(len(accepted), accepted_before + 1)
+        p = accepted[-1]["payload"]
+        self.assertEqual(p["by"], "cli")
+        self.assertEqual(p["from"], "failed")
+        self.assertEqual(p["to"], "done")
+        self.assertEqual(p["note"], self.NOTE)  # verbatim, not trimmed
+        self.assertEqual(p["verify_exit"], before["verify_exit"])
+        self.assertEqual(p["files_changed"], before["files_changed"])
+
+    # The note is preserved exactly even when surrounded by whitespace.
+    def test_note_is_recorded_verbatim(self):
+        task_id = self.red(verify="exit 1")
+        code, _out, err = self.run_cli("accept", task_id, "--note", " keep me ")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            self.latest_event(task_id, "accepted")["payload"]["note"], " keep me "
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +518,46 @@ class HttpAcceptTest(_Base):
         )
         status, payload = self._request(f"/api/tasks/{task_id}/accept", method="POST")
         self.assertEqual(status, 409, payload)
-        self.assertIn("only a blocked task", payload["error"])
+        self.assertIn("only a blocked or failed task", payload["error"])
+
+    def test_failed_without_note_is_400(self):
+        task_id = self.red(verify="exit 1")
+        status, payload = self._request(
+            f"/api/tasks/{task_id}/accept", method="POST"
+        )
+        self.assertEqual(status, 400, payload)
+        self.assertIn("人工收尾必须留说明", payload["error"])
+        # Nothing moved.
+        self.assertEqual(self.row(task_id)["status"], STATUS_FAILED)
+        self.assertIsNone(self.latest_event(task_id, "accepted"))
+
+    def test_failed_with_note_flips_the_card_like_the_cli(self):
+        task_id = self.red(verify="exit 1")
+        before = self.row(task_id)
+        status, payload = self._request(
+            f"/api/tasks/{task_id}/accept",
+            method="POST",
+            body={"note": "假红：机器繁忙导致超时；成果已复核"},
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["task"]["status"], STATUS_DONE)
+        after = self.row(task_id)
+        self.assertEqual(after["status"], STATUS_DONE)
+        self.assertEqual(after["verify_exit"], before["verify_exit"])
+        self.assertEqual(after["finished_at"], before["finished_at"])
+        event = self.latest_event(task_id, "accepted")["payload"]
+        self.assertEqual(event["by"], "api")
+        self.assertEqual(event["from"], "failed")
+        self.assertEqual(event["to"], "done")
+        self.assertEqual(event["note"], "假红：机器繁忙导致超时；成果已复核")
+
+    def test_unsupported_body_field_is_400(self):
+        task_id = self.red(verify="exit 1")
+        status, payload = self._request(
+            f"/api/tasks/{task_id}/accept", method="POST", body={"why": "x"}
+        )
+        self.assertEqual(status, 400, payload)
+        self.assertEqual(self.row(task_id)["status"], STATUS_FAILED)
 
     def test_missing_token_is_403(self):
         task_id = self.breach(verify="exit 0")
@@ -520,7 +658,7 @@ class RealProcessTest(_Base):
         done = dispatch.dispatch(self.ws, "proj", "clean", adapter=_CLEAN)
         proc = self._run_cli("accept", done)
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("only a blocked task", proc.stderr)
+        self.assertIn("only a blocked or failed task", proc.stderr)
 
 
 if __name__ == "__main__":

@@ -110,6 +110,15 @@ taskproof log <task-id> --follow
 
 `log` prints the task's full event stream; `--follow` follows it all the way to the terminal state.
 
+## 5.1 Human sign-off: `accept`
+
+`accept <id>` is how a human closes a card the pipeline stopped on its own. It is a **registration, not a verdict**.
+
+- It never re-runs acceptance and never rewrites `verify_*`: the acceptance result stays authoritative and the registration rides alongside it.
+- `blocked` (a forbidden-path breach): `accept <id>` clears it, note optional — green acceptance -> `done`, red or skipped -> `failed`.
+- `failed` (acceptance went red, or the adapter failed): `accept <id> --note "…"` clears it to `done`, but the note is **required** — an empty or missing note is refused (CLI `rc != 0`, HTTP `400`). The note records *why* the failure was judged a false red; it is not a substitute for the run's own `verify_*`.
+- `done` / `timeout` / `cancelled` and every non-terminal state are refused.
+
 ## 6. Parallel scheduling: parallel by default
 
 **Parallel is the default — do not serialise out of habit.** Before firing:

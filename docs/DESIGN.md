@@ -202,14 +202,29 @@ whether the work itself was sound.
 Because `blocked` is terminal, the queue never advances it, `cancel` refuses it
 (there is no process to kill), and `rm` deletes it like any other terminal row.
 Clearing a `blocked` card is a human decision made in layer 3 via `accept <id>`;
-the dispatch pipeline never auto-promotes it to `done`. `accept` only touches a
-`blocked` row, and it is a verdict on the *breach* rather than the work: a green
-acceptance earns `done`, a red or skipped one earns `failed`, and either way one
-`accepted` event records who cleared it, the verify verdict and exit, and the
-breach summary that was confirmed. Re-running the work is a separate act: `rerun
-<id>` starts a fresh card from a terminal one, reusing its brief and run flags,
-and links the two in the ledger (`rerun_of` on the new card, `rerun_as` on the
-old) so `log <id> --json` shows the pair.
+the dispatch pipeline never auto-promotes it to `done`. `accept` is a human
+**registration**, not a verdict: it never re-runs acceptance and never rewrites
+`verify_*`. On a `blocked` row it is a verdict on the *breach* rather than the
+work — a green acceptance earns `done`, a red or skipped one earns `failed` — and
+it needs no note (card 36's behaviour, unchanged).
+
+A `failed` card (the adapter failed, or acceptance ran and went red) also gets an
+exit, but only through the same `accept <id>` and **only with `--note "…"`**:
+closing a failed card is a human sign-off that the recorded failure was a false
+red, so the reason must survive in the ledger. An empty or missing note is
+refused before anything changes (CLI `rc != 0`, HTTP `400`). Accepting a `failed`
+card promotes it to `done` while leaving `verify_*` and `finished_at` exactly as
+the run recorded them — the acceptance result stays authoritative and the human
+registration rides alongside it. Either path writes one `accepted` event naming
+who cleared it (`by`), the verdict and exit (`verify` / `verify_exit`), the
+evidence the human saw (`files_changed`, plus the confirmed breach summary for a
+`blocked` card), the `from` / `to` statuses, and the note. `done` / `timeout` /
+`cancelled` and every non-terminal state are still refused.
+
+Re-running the work is a separate act: `rerun <id>` starts a fresh card from a
+terminal one, reusing its brief and run flags, and links the two in the ledger
+(`rerun_of` on the new card, `rerun_as` on the old) so `log <id> --json` shows
+the pair.
 
 ## Exit codes
 
@@ -282,7 +297,7 @@ taskproof tasks [--status S] [--project P] [--limit N]
 taskproof show <task-id>                single task detail
 taskproof log <task-id>                 event stream
 taskproof verify <task-id>              re-run acceptance (facts only; never moves the status)
-taskproof accept <task-id>              clear a blocked card: done if acceptance passed, else failed
+taskproof accept <task-id> [--note T]   clear a blocked or failed card (failed needs --note)
 taskproof rerun <task-id>               start a fresh, ledger-linked copy of a terminal task
 taskproof advance <task-id>             fire one queued task now, out of its wave
 taskproof queue                          resident daemon: push waves unattended (blocks)
@@ -348,10 +363,11 @@ is not developed further. Stage 2 builds a separate Electron application in
 default; only an explicit `--allow-write` opens a session-token-gated write
 surface (project create / edit / delete, plus task control: dispatch / advance /
 accept / cancel / remove / queue-seq edit) on top of it. `accept` is written
-both ways — `POST /api/tasks/<id>/accept` and `taskproof accept <id>`; `rerun`
-is CLI-only on purpose (the v1 "run it again" affordance is a prefilled form,
-not a write the board needs to own). The Python package gains
-only the small changes described below; everything else is additive.
+both ways — `POST /api/tasks/<id>/accept` (optional body `{"note": "…"}`, required
+to clear a `failed` card) and `taskproof accept <id> [--note "…"]`; `rerun` is
+CLI-only on purpose (the v1 "run it again" affordance is a prefilled form, not a
+write the board needs to own). The Python package gains only the small changes
+described below; everything else is additive.
 
 **Stack.** TypeScript, Vue 3 (`<script setup>`), electron-vite
 (main / preload / renderer), Pinia, vue-router (hash mode — production loads

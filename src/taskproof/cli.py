@@ -137,9 +137,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "accept",
-        help="clear a blocked task: done if acceptance passed, else failed",
+        help=(
+            "clear a blocked or failed task: done if acceptance passed (a failed "
+            "card needs --note), else failed"
+        ),
     )
     p.add_argument("task_id")
+    p.add_argument(
+        "--note",
+        help=(
+            "why a failed card is being cleared; required for failed "
+            "(人工收尾必须留说明)"
+        ),
+    )
 
     p = sub.add_parser(
         "rerun",
@@ -708,7 +718,9 @@ def cmd_advance(args):
 
 
 def cmd_accept(args):
-    task = dispatch.accept_task(args.workspace, args.task_id)
+    task = dispatch.accept_task(
+        args.workspace, args.task_id, note=getattr(args, "note", None)
+    )
     payload = {"task_id": args.task_id, "status": task.get("status"), "task": task}
     emit(args, payload, f"{args.task_id}  {task.get('status', '')}  accepted")
     return 0

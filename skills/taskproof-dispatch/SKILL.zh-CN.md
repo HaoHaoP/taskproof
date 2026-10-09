@@ -110,6 +110,15 @@ taskproof log <task-id> --follow
 
 `log` 打印该任务的完整事件流；`--follow` 会一直跟到终态。
 
+## 5.1 人工收尾：`accept`
+
+`accept <id>` 是人收掉一张管线自己停下的卡的方式。它是**登记、不是判据**。
+
+- 它绝不重跑验收，也绝不改写 `verify_*`：验收结果永远权威，人工登记只是与它并列。
+- `blocked`（越界）：`accept <id>` 放行，note 可选——验收绿→`done`，验收红或被跳过→`failed`。
+- `failed`（验收红，或适配器失败）：`accept <id> --note "…"` 收成 `done`，但 note **必填**——空或缺一律拒绝（CLI `rc != 0`、HTTP `400`）。note 记的是"这次为什么判为假红"，它不是运行自身 `verify_*` 的替代。
+- `done` / `timeout` / `cancelled` 与所有非终态一律拒绝。
+
 ## 6. 并行调度：默认并行
 
 **默认就该并行，不要习惯性串行。** 发车前：
