@@ -255,7 +255,7 @@ async function childUp(): Promise<{ pid: number; port: number }> {
         throw new Error('child not up yet')
       }
     },
-    { timeout: 8000, interval: 100 }
+    { timeout: 15_000, interval: 100 }
   )
   const [pid, port] = readFileSync(H.logFile, 'utf8').trim().split(' ').map(Number)
   return { pid, port }
@@ -276,7 +276,12 @@ afterAll(async () => {
   }
 })
 
-describe('desktop integration (stubbed electron + stubbed API child)', { timeout: 20_000 }, () => {
+// NOTE: the waits below are deliberately generous. This suite runs the real poll
+// loop against a stub child, and the machine it runs on is routinely busy with
+// several task lanes at once -- an 8s budget for "the next poll lands" was flaky
+// (it failed once under load and passed on every calm re-run, which is a corrupt
+// signal for a lane's acceptance). Budgets are per-wait, not per-suite.
+describe('desktop integration (stubbed electron + stubbed API child)', { timeout: 40_000 }, () => {
   it('creates the tray on boot and destroys/re-creates it as the switch flips', async () => {
     await childUp()
     await vi.waitFor(() => expect(H.trayCtor).toBeGreaterThanOrEqual(1))
@@ -291,7 +296,7 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
   it('paints the Dock badge from failed + blocked + timeout, never cancelled', async () => {
     await childUp()
     // summary { failed: 2, cancelled: 1 } -> the badge must read "2", not "3".
-    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 8000 })
+    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 15_000 })
     expect(H.badge).not.toContain('3')
   })
 
@@ -299,7 +304,7 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
     await childUp()
     // One successful poll paints the badge; that same poll seeded the seven
     // historical cards (four not-passing + three done) the stub starts with.
-    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 8000 })
+    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 15_000 })
     // (1) A fresh launch onto a full backlog raises nothing, and the main-process
     // trace carries no `notify` line at all.
     expect(H.notifications).toEqual([])
@@ -313,7 +318,7 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
     )
     await vi.waitFor(
       () => expect(H.notifications.filter((n) => n.body.includes('t-new'))).toHaveLength(1),
-      { timeout: 8000 }
+      { timeout: 15_000 }
     )
     const fired = H.notifications.find((n) => n.body.includes('t-new'))
     expect(fired?.title).toBe('验收未通过')
@@ -369,7 +374,7 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
   it('reports tray + template + real badge over the diagnostic IPC', async () => {
     await childUp()
     set({ tray: true })
-    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 8000 })
+    await vi.waitFor(() => expect(H.badge).toContain('2'), { timeout: 15_000 })
     const state = (await H.ipc['tp:diag:state']()) as { tray: boolean; trayTemplate: boolean; badge: string }
     expect(state.tray).toBe(true)
     expect(state.trayTemplate).toBe(true)
