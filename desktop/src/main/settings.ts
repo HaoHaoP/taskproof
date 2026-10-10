@@ -9,6 +9,7 @@ import { app } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import type { DesktopSettings } from '../preload/types'
+import { DEFAULT_COLUMN_CAPS, normalizeColumnCaps } from '../preload/types'
 
 let cached: DesktopSettings | null = null
 
@@ -31,7 +32,10 @@ function defaults(): DesktopSettings {
     notifyDone: false,
     dockBadge: false,
     tray: false,
-    autostart: false
+    autostart: false,
+    // A fresh board matches today's: done / cancelled window at ten, the four
+    // live columns unfolded. The user's own table rides in settings.json.
+    columnCaps: { ...DEFAULT_COLUMN_CAPS }
   }
 }
 
@@ -51,7 +55,11 @@ export function get(): DesktopSettings {
       raw !== null && typeof raw === 'object' && !Array.isArray(raw)
         ? (raw as Partial<DesktopSettings>)
         : {}
-    cached = { ...defaults(), ...stored }
+    // `columnCaps` is a nested object, so a shallow spread cannot backfill it:
+    // an older file that predates the field (or names only some columns) would
+    // replace the whole default table with its own partial one. Merge it key by
+    // key instead, dropping unknown keys and converging the values.
+    cached = { ...defaults(), ...stored, columnCaps: normalizeColumnCaps(stored.columnCaps) }
   } catch {
     // Missing or unreadable: fall back to defaults rather than failing to boot.
     cached = defaults()
@@ -60,7 +68,14 @@ export function get(): DesktopSettings {
 }
 
 export function set(patch: Partial<DesktopSettings>): DesktopSettings {
-  const next = { ...get(), ...patch }
+  const current = get()
+  // Merge a caps patch over the *current* table before normalising, so a
+  // one-column write (the header control's `+` / `-`) keeps the other five
+  // caps rather than resetting them to their defaults.
+  const columnCaps = patch.columnCaps
+    ? normalizeColumnCaps({ ...current.columnCaps, ...patch.columnCaps })
+    : current.columnCaps
+  const next = { ...current, ...patch, columnCaps }
   cached = next
   try {
     const file = settingsFile()

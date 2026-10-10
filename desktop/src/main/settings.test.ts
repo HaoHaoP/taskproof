@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { DEFAULT_COLUMN_CAPS, normalizeColumnCaps } from '../preload/types'
 
 // `vi.mock` is hoisted above the imports, so the mutable path has to be too.
 const h = vi.hoisted(() => ({ userData: '' }))
@@ -72,6 +73,9 @@ describe('settings.json migration', () => {
     expect(loaded.dockBadge).toBe(false)
     expect(loaded.tray).toBe(false)
     expect(loaded.autostart).toBe(false)
+    // The nested cap table is backfilled whole, not left undefined by the
+    // shallow spread.
+    expect(loaded.columnCaps).toEqual(DEFAULT_COLUMN_CAPS)
   })
 
   it('falls back to defaults when the file is missing', async () => {
@@ -84,6 +88,24 @@ describe('settings.json migration', () => {
     // then PATH, then python3); a fresh install must not be pinned to a bare
     // `taskproof` that only a login shell could find.
     expect(loaded.taskproofPath).toBe('')
+  })
+
+  it('backfills a partial columnCaps table key by key', async () => {
+    // A file from the release that first added the field names one column only.
+    writeFileSync(
+      join(h.userData, 'settings.json'),
+      JSON.stringify({ columnCaps: { done: 3 } })
+    )
+    const loaded = (await load()).get()
+    // The named column wins; every missing column keeps its code default.
+    expect(loaded.columnCaps).toEqual({
+      running: 0,
+      verifying: 0,
+      done: 3,
+      cancelled: 10,
+      blocked: 0,
+      abnormal: 0
+    })
   })
 
   it('persists a desktop-integration switch to disk for the next read', async () => {
@@ -101,5 +123,58 @@ describe('settings.json migration', () => {
     const reread = (await load()).get()
     expect(reread.tray).toBe(true)
     expect(reread.autostart).toBe(true)
+  })
+})
+
+describe('normalizeColumnCaps', () => {
+  it('fills an absent table with the code defaults', () => {
+    expect(normalizeColumnCaps(undefined)).toEqual(DEFAULT_COLUMN_CAPS)
+    expect(normalizeColumnCaps(null)).toEqual(DEFAULT_COLUMN_CAPS)
+    expect(normalizeColumnCaps({})).toEqual(DEFAULT_COLUMN_CAPS)
+    expect(normalizeColumnCaps('nope')).toEqual(DEFAULT_COLUMN_CAPS)
+  })
+
+  it('keeps the given columns and backfills the missing ones', () => {
+    expect(normalizeColumnCaps({ done: 3 })).toEqual({
+      running: 0,
+      verifying: 0,
+      done: 3,
+      cancelled: 10,
+      blocked: 0,
+      abnormal: 0
+    })
+    expect(normalizeColumnCaps({ done: 0, verifying: 200 })).toEqual({
+      running: 0,
+      verifying: 200,
+      done: 0,
+      cancelled: 10,
+      blocked: 0,
+      abnormal: 0
+    })
+  })
+
+  it('drops unknown column keys (they never reach the effective table)', () => {
+    expect(normalizeColumnCaps({ nope: 5, done: 2 })).toEqual({
+      running: 0,
+      verifying: 0,
+      done: 2,
+      cancelled: 10,
+      blocked: 0,
+      abnormal: 0
+    })
+  })
+
+  it('falls an out-of-range integer back to the code default', () => {
+    expect(normalizeColumnCaps({ done: 500, cancelled: -1 })).toEqual(DEFAULT_COLUMN_CAPS)
+    // 201 is one past the ceiling, so it is rejected rather than snapped.
+    expect(normalizeColumnCaps({ done: 201 }).done).toBe(10)
+    expect(normalizeColumnCaps({ blocked: 200 }).blocked).toBe(200)
+    expect(normalizeColumnCaps({ blocked: 0 }).blocked).toBe(0)
+  })
+
+  it('falls a non-integer / non-number value back to the code default', () => {
+    expect(normalizeColumnCaps({ done: 2.5, cancelled: '3' })).toEqual(DEFAULT_COLUMN_CAPS)
+    expect(normalizeColumnCaps({ abnormal: Number.NaN }).abnormal).toBe(0)
+    expect(normalizeColumnCaps({ running: {} }).running).toBe(0)
   })
 })

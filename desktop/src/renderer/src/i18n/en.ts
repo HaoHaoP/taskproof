@@ -26,7 +26,14 @@ export default {
     takeMore: 'Take more',
     hideLane: 'Hide the “{name}” column',
     hiddenLanes: '{n} column(s) hidden · {m} card(s) · show all',
-    showAllLanes: 'Show all columns'
+    showAllLanes: 'Show all columns',
+    capLabel: 'Cap',
+    capAll: 'All',
+    capTitle: 'Max cards shown in this column (All = no fold)',
+    capDown: 'Decrease this column’s display cap',
+    capUp: 'Increase this column’s display cap',
+    expandColumn: 'Expand the “{name}” column',
+    collapseColumn: 'Collapse the “{name}” column'
   },
 
   live: { on: 'live', off: 'polling paused' },

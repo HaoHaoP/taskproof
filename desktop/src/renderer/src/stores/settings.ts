@@ -16,6 +16,7 @@ import type {
   ThemeChoice
 } from '../../../preload/types'
 import { setLocale } from '../i18n'
+import { DEFAULT_COLUMN_CAPS } from '../../../preload/types'
 
 /** The booleans that back the desktop-integration switches. */
 type FlagKey = 'notifyFail' | 'notifyDone' | 'dockBadge' | 'tray' | 'autostart'
@@ -33,7 +34,8 @@ const FALLBACK: DesktopSettings = {
   notifyDone: false,
   dockBadge: false,
   tray: false,
-  autostart: false
+  autostart: false,
+  columnCaps: { ...DEFAULT_COLUMN_CAPS }
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -112,6 +114,14 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
+   * Write one column's display cap. The whole table goes over the wire so the
+   * main process's merge keeps the other five values; `0` is "no fold".
+   */
+  function setColumnCap(key: string, cap: number): void {
+    void persist({ columnCaps: { ...settings.value.columnCaps, [key]: cap } })
+  }
+
+  /**
    * The desktop-integration switches. They persist now; the tray, Dock badge,
    * notifications and login item that read them are a later card -- but a
    * switch that only lived in memory would be decoration.
@@ -134,6 +144,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setPort,
     setLaunch,
     setTaskproofPath,
+    setColumnCap,
     setFlag,
     applyTheme
   }

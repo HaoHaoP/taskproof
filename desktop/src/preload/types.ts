@@ -49,6 +49,70 @@ export interface DesktopSettings {
   dockBadge: boolean
   tray: boolean
   autostart: boolean
+  /**
+   * Per-column display caps for the matrix (column key -> cap). `0` means
+   * "no fold -- show the whole column"; a positive cap windows the column to
+   * that many cards. A missing key is the code default for that column, so an
+   * old settings.json that predates this field still opens on today's board.
+   */
+  columnCaps: Record<string, number>
+}
+
+/**
+ * The matrix's column-window caps, shared because BOTH processes must agree on
+ * them: the renderer draws the header control from `DEFAULT_COLUMN_CAPS`, and
+ * the main process validates the stored table against `COLUMN_CAP_KEYS` and the
+ * `CAP_MIN..CAP_MAX` range. This is the one runtime value the boundary module
+ * carries, and it is deliberately dependency-free so the main bundle never
+ * reaches into the renderer's `contract`.
+ *
+ * `COLUMN_CAP_KEYS` is the contract's `COLUMNS` order (the renderer asserts the
+ * two agree). Keep `done` / `cancelled` at ten: that is today's `DONE_WINDOW`.
+ */
+export const COLUMN_CAP_KEYS = [
+  'running',
+  'verifying',
+  'done',
+  'cancelled',
+  'blocked',
+  'abnormal'
+] as const
+
+export const CAP_MIN = 0
+export const CAP_MAX = 200
+
+export const DEFAULT_COLUMN_CAPS: Record<string, number> = {
+  running: 0,
+  verifying: 0,
+  done: 10,
+  cancelled: 10,
+  blocked: 0,
+  abnormal: 0
+}
+
+/**
+ * Normalise a stored `columnCaps` table: keep only the declared column keys and
+ * only in-range integers (`0..200`). Everything else -- an unknown key, a
+ * string, a float, `null`, a nested object, or an integer outside the range --
+ * is dropped and falls back to that column's code default, so a hand-edited
+ * settings.json can never leave the board in a state the header control cannot
+ * express. The result is a *full* six-key table: every declared column is
+ * present, so a partial (older) file is backfilled key by key rather than
+ * whole-object-spread away.
+ */
+export function normalizeColumnCaps(input: unknown): Record<string, number> {
+  const raw =
+    input !== null && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {}
+  const out: Record<string, number> = { ...DEFAULT_COLUMN_CAPS }
+  for (const key of COLUMN_CAP_KEYS) {
+    const value = raw[key]
+    if (typeof value === 'number' && Number.isInteger(value) && value >= CAP_MIN && value <= CAP_MAX) {
+      out[key] = value
+    }
+  }
+  return out
 }
 
 /** One adapter's verdict from `taskproof doctor`: installed, or why not. */
