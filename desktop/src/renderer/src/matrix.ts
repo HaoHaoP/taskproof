@@ -316,25 +316,77 @@ export function columnWindow(cards: Task[], expanded: boolean, cap: number): Col
   return { visible, hidden: cards.length - visible.length, total: cards.length }
 }
 
-/** The fold-bar state for one column: which control (and count) its header
- *  draws, or `null` for "no bar". Pure, so the SFC only maps it to markup. */
-export interface FoldControl {
-  mode: 'expand' | 'collapse'
-  /** The hidden-card count for `expand`; always 0 for `collapse`. */
-  n: number
+/** A translated label decision: the i18n leaf key and its interpolation data. */
+export interface MatrixLabel {
+  key: string
+  params: Record<string, number>
 }
 
 /**
- * The fold bar a windowed column draws. A column that is hiding cards offers
- * "还有 N 张 · 展开"; one that is fully unfolded and can be folded again
- * (`total > cap > 0`) offers "收起". A `cap === 0` column never folds, so it
- * never draws a bar -- that is the whole reason "no fold" is its own value
- * rather than a very large number.
+ * The chip's one-line summary of the current column window. The five branches
+ * are deliberately ordered: an empty column never claims a count; `cap === 0`
+ * and a cap that is not exceeded both mean every card is already visible; an
+ * unfolded cap keeps the limit in the sentence so "show all" cannot be mistaken
+ * for having removed that limit.
  */
-export function foldControlFor(window: ColumnWindow, cap: number): FoldControl | null {
-  if (window.hidden > 0) return { mode: 'expand', n: window.hidden }
-  if (cap > 0 && window.total > cap) return { mode: 'collapse', n: 0 }
-  return null
+export function capChipLabel(window: ColumnWindow, cap: number, expanded: boolean): MatrixLabel {
+  if (window.total === 0) return { key: 'board.capChip.empty', params: {} }
+  if (cap === 0 || window.total <= cap) {
+    return { key: 'board.capChip.all', params: { total: window.total } }
+  }
+  if (expanded) {
+    return { key: 'board.capChip.expanded', params: { total: window.total, cap } }
+  }
+  return { key: 'board.capChip.capped', params: { cap, total: window.total } }
+}
+
+/** The fixed display-cap choices, in menu order. `0` is the "all" choice. */
+export const CAP_CHOICES = [5, 10, 20, 50, 0] as const
+
+export interface CapMenuOption {
+  value: number
+  label: MatrixLabel
+  checked: boolean
+}
+
+export interface CapMenuAction {
+  kind: 'expand' | 'collapse'
+  label: MatrixLabel
+}
+
+export interface CapMenu {
+  options: CapMenuOption[]
+  /** Zero or one state-dependent fold / unfold action. */
+  actions: CapMenuAction[]
+}
+
+/**
+ * The fixed cap choices plus the one state-dependent action the chip's dropdown
+ * may offer. This is pure so the menu cannot invent a collapse action for a
+ * column already at its cap, or an expand action when nothing is hidden.
+ */
+export function capMenuFor(window: ColumnWindow, cap: number, expanded: boolean): CapMenu {
+  const options = CAP_CHOICES.map((value): CapMenuOption => {
+    const label: MatrixLabel = value === 0
+      ? { key: 'board.capMenu.all', params: {} }
+      : { key: 'board.capMenu.option', params: { n: value } }
+    return { value, label, checked: value === cap }
+  })
+
+  const actions: CapMenuAction[] = []
+  if (window.hidden > 0) {
+    actions.push({
+      kind: 'expand',
+      label: { key: 'board.capMenu.expand', params: { hidden: window.hidden } }
+    })
+  } else if (expanded && cap > 0 && window.total > cap) {
+    actions.push({
+      kind: 'collapse',
+      label: { key: 'board.capMenu.collapse', params: { cap } }
+    })
+  }
+
+  return { options, actions }
 }
 
 /** Converge a user-entered cap into the control's domain: a whole number in

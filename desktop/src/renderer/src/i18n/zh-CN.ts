@@ -13,20 +13,24 @@ export default {
     capped: '仅取回最近 {n} 条 · 更早的还没取到',
     continue: '继续取回',
     capReached: '已到取回上限',
-    expand: '还有 {n} 张 · 展开',
-    collapse: '收起',
     taken: '已取回 {n} / 共 {m}',
     takeMore: '取更多',
     hideLane: '隐藏「{name}」列',
     hiddenLanes: '已隐藏 {n} 列（其中 {m} 张卡）',
     showAllLanes: '全部显示',
-    capLabel: '上限',
-    capAll: '全',
-    capTitle: '这一列最多显示几张卡（全 = 不折）',
-    capDown: '降低这一列的上限',
-    capUp: '提高这一列的上限',
-    expandColumn: '展开「{name}」列',
-    collapseColumn: '收起「{name}」列'
+    capChip: {
+      empty: '显示全部',
+      all: '显示全部 {total}',
+      expanded: '显示全部 {total}（上限 {cap}）',
+      capped: '显示 {cap} / 共 {total}'
+    },
+    capMenu: {
+      title: '显示上限',
+      option: '{n} 张',
+      all: '全部',
+      expand: '展开其余 {hidden} 张',
+      collapse: '收起（回到 {cap} 张）'
+    }
   },
 
   live: { on: '实时', off: '已暂停轮询' },

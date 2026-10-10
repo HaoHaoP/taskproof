@@ -180,37 +180,39 @@ describe('matrix grid columns', () => {
     expect(view).toMatch(/@click="hideLane\(column\.key\)"/)
   })
 
-  it('rides each fold bar inside its own column header, per column', () => {
-    // The bar used to be a trailing grid row with a hand-written `grid-column`.
-    // It now lives in the header it belongs to, so the sticky band carries it
-    // and no `grid-column` arithmetic is needed. Each column keeps its OWN
-    // unfolded state now, so the click names the column it belongs to.
+  it('puts one cap chip and dropdown in every column header, including empty columns', () => {
+    // The header loop is the same `lanes` loop as the cells; the chip and its
+    // pure decisions are inside it with no `v-if`, so an empty column still
+    // gets the same control. COLUMNS is six, so that is all six by default.
+    expect(COLUMNS).toHaveLength(6)
     expect(view).not.toMatch(/laneColumn/)
     expect(view).not.toMatch(/gridColumn:/)
-    expect(view).toMatch(/v-if="folds\[column\.key\]\?\.mode === 'expand'"/)
-    expect(view).toMatch(/v-else-if="folds\[column\.key\]\?\.mode === 'collapse'"/)
-    expect(view).toMatch(/@click\.stop="openColumn\(column\.key\)"/)
-    expect(view).toMatch(/@click\.stop="closeColumn\(column\.key\)"/)
+    const headerStart = view.indexOf('v-for="(column, index) in lanes"')
+    const headerEnd = view.indexOf('<template v-for="group in projects"', headerStart)
+    const headerMarkup = view.slice(headerStart, headerEnd)
+    expect(headerMarkup).toContain('class="cap-chip"')
+    expect(headerMarkup).toContain('capChips[column.key]')
+    expect(headerMarkup).toContain('capMenus[column.key]')
+    expect(headerMarkup).toContain('@command="capCommand(column.key)"')
     expect(view).toMatch(/:data-col="column\.key"/)
-    expect(rule('.fold')['grid-column']).toBeUndefined()
+    expect(view).toMatch(/settings\.setColumnCap\(key, command\)/)
   })
 
-  it('puts a per-column cap control in every header', () => {
-    // The control is `−  N  ＋`; the number opens an inline editor. It lives
-    // inside the header it caps, and its own handlers stop so a click can never
-    // reach the hide switch or the board's filter.
-    expect(view).toMatch(/class="cap-ctl"/)
-    expect(view).toMatch(/@click\.stop="stepCap\(column\.key, -1\)"/)
-    expect(view).toMatch(/@click\.stop="stepCap\(column\.key, 1\)"/)
-    expect(view).toMatch(/@click\.stop="beginCap\(column\.key\)"/)
-    expect(view).toMatch(/v-if="editingCap === column\.key"/)
-    expect(view).toMatch(/@keydown\.enter\.stop\.prevent="commitCap\(column\.key\)"/)
-    expect(view).toMatch(/@blur="commitCap\(column\.key\)"/)
-    expect(view).toMatch(/t\('board\.capTitle'\)/)
-    // The control keeps pointer events (it is real), unlike the decorative
-    // label / tally -- otherwise a click would fall through to the header.
+  it('removes the old fold bar, stepper/editor and first-row count', () => {
+    // The chip replaces all three old UI shapes. The first row keeps only the
+    // hide switch; no orphan count may compete with the chip's one number.
+    expect(view).not.toMatch(/class="cap-step"/)
+    expect(view).not.toMatch(/class="cap-val"/)
+    expect(view).not.toMatch(/class="cap-input"/)
+    expect(view).not.toMatch(/class="fold/)
+    expect(view).not.toMatch(/class="n"/)
+    expect(styleRules.some((entry) => entry.selector === '.hd .n')).toBe(false)
+    expect(styleRules.some((entry) => entry.selector.startsWith('.fold'))).toBe(false)
+
+    // The chip keeps pointer events (it is real), unlike the decorative label /
+    // tally -- otherwise a click would fall through to the header.
     expect(rule('.hd .lb, .hd .rt')['pointer-events']).toBe('none')
-    expect(rule('.cap-ctl')['pointer-events']).toBeUndefined()
+    expect(rule('.cap-chip')['pointer-events']).toBeUndefined()
   })
 
   it('covers the seam under each header so nothing scrolls through it', () => {
@@ -237,8 +239,8 @@ describe('matrix grid columns', () => {
     expect(seam['background']).toBe('inherit')
 
     // The label/tally decoration must not intercept a hit, so a probe of the
-    // band lands on `.hd` (or `.fold`), never the elements painting the seam.
-    // The one control up here stays clickable.
+    // band lands on `.hd` (or the chip), never the elements painting the seam.
+    // The controls up here stay clickable.
     expect(rule('.hd .lb, .hd .rt')['pointer-events']).toBe('none')
     expect(rule('.hd .rt .lane-hide')['pointer-events']).toBe('auto')
   })

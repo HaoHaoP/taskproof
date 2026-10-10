@@ -280,3 +280,46 @@ describe('card 65 message keys (projects = a row per project)', () => {
     expect(at(zhCN, 'projects.col.group')).toBe('并发组')
   })
 })
+
+describe('card 70 message keys (cap chip + menu)', () => {
+  it('pins the chip states and menu wording in both locales', () => {
+    expect(at(en, 'board.capChip.empty')).toBe('Show all')
+    expect(at(zhCN, 'board.capChip.empty')).toBe('显示全部')
+    expect(at(en, 'board.capChip.all')).toBe('Show all {total}')
+    expect(at(zhCN, 'board.capChip.all')).toBe('显示全部 {total}')
+    expect(at(en, 'board.capChip.expanded')).toBe('Show all {total} (cap {cap})')
+    expect(at(zhCN, 'board.capChip.expanded')).toBe('显示全部 {total}（上限 {cap}）')
+    expect(at(en, 'board.capChip.capped')).toBe('Show {cap} / {total}')
+    expect(at(zhCN, 'board.capChip.capped')).toBe('显示 {cap} / 共 {total}')
+
+    expect(at(en, 'board.capMenu.title')).toBe('Display cap')
+    expect(at(zhCN, 'board.capMenu.title')).toBe('显示上限')
+    expect(at(en, 'board.capMenu.option')).toBe('{n} cards')
+    expect(at(zhCN, 'board.capMenu.option')).toBe('{n} 张')
+    expect(at(en, 'board.capMenu.all')).toBe('All')
+    expect(at(zhCN, 'board.capMenu.all')).toBe('全部')
+    expect(at(en, 'board.capMenu.expand')).toBe('Show the remaining {hidden}')
+    expect(at(zhCN, 'board.capMenu.expand')).toBe('展开其余 {hidden} 张')
+    expect(at(en, 'board.capMenu.collapse')).toBe('Collapse to {cap} cards')
+    expect(at(zhCN, 'board.capMenu.collapse')).toBe('收起（回到 {cap} 张）')
+  })
+
+  it('drops the old fold-bar and stepper keys from both locales', () => {
+    const removedCapKeys = [
+      'board.expand',
+      'board.collapse',
+      'board.capLabel',
+      'board.capAll',
+      'board.capTitle',
+      'board.capDown',
+      'board.capUp',
+      'board.expandColumn',
+      'board.collapseColumn'
+    ]
+    for (const [name, messages] of Object.entries(locales)) {
+      for (const key of removedCapKeys) {
+        expect(at(messages as Record<string, unknown>, key), `${name}:${key}`).toBeUndefined()
+      }
+    }
+  })
+})

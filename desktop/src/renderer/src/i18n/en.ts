@@ -20,20 +20,24 @@ export default {
     capped: 'only the most recent {n} — older rows are not fetched yet',
     continue: 'Fetch earlier',
     capReached: 'fetch limit reached',
-    expand: '{n} more · expand',
-    collapse: 'collapse',
     taken: 'taken {n} of {m}',
     takeMore: 'Take more',
     hideLane: 'Hide the “{name}” column',
     hiddenLanes: '{n} column(s) hidden · {m} card(s) · show all',
     showAllLanes: 'Show all columns',
-    capLabel: 'Cap',
-    capAll: 'All',
-    capTitle: 'Max cards shown in this column (All = no fold)',
-    capDown: 'Decrease this column’s display cap',
-    capUp: 'Increase this column’s display cap',
-    expandColumn: 'Expand the “{name}” column',
-    collapseColumn: 'Collapse the “{name}” column'
+    capChip: {
+      empty: 'Show all',
+      all: 'Show all {total}',
+      expanded: 'Show all {total} (cap {cap})',
+      capped: 'Show {cap} / {total}'
+    },
+    capMenu: {
+      title: 'Display cap',
+      option: '{n} cards',
+      all: 'All',
+      expand: 'Show the remaining {hidden}',
+      collapse: 'Collapse to {cap} cards'
+    }
   },
 
   live: { on: 'live', off: 'polling paused' },
