@@ -122,7 +122,8 @@ claims                          -- 并发守卫，带过期回收
 **注册表模型：项目与任务组。** 注册表有两种块。`[[project]]` 是仓 / 筛选单位
 （`id` + `path` + `aliases`），本身不可派活；`[[taskgroup]]`（一条道）才是
 可派活的单位：`id`、归属 `project`、`path`（缺省继承项目）、验收命令与结果
-契约。锁名是 `taskgroup.group`，缺省等于任务组 id；两条道可以写同一个值来
+契约；它还可以声明自己的**长驻工作区**（`workspace` / `link`，字段与默认值见
+`docs/REGISTRY.zh-CN.md`）。锁名是 `taskgroup.group`，缺省等于任务组 id；两条道可以写同一个值来
 互相串行。
 
 `tasks` 表不变：`project` 存本次运行瞄准的**任务组 id**，`group` 存锁名
@@ -296,6 +297,8 @@ taskproof accept <task-id> [--note T]   放行 blocked 或 failed 卡（failed �
 taskproof rerun <task-id>               从终态卡起一张新卡，并在账本里双向关联
 taskproof cancel <task-id>              停任务（对自己那棵进程树 SIGTERM→SIGKILL）
 taskproof rm <task-id>                  删除终态任务的记录、事件与保留的 worktree
+taskproof workspaces                    列出拥有长驻工作区的道
+taskproof workspace-rm <taskgroup>      删除其中一个（先打印证据；不干净就拒绝）
 taskproof board [--open | --serve PORT | --out FILE]
 taskproof api --port N                  本地只读 REST（stage 2 前端消费）
 taskproof doctor                        环境自检
@@ -306,6 +309,18 @@ taskproof gc                            归档与轮转
 （`<仓库父目录>/<仓库名>-wt-<任务id>`）。跑完干净就删除；若仍留有改动则保留，打印
 `worktree kept: ... (N files changed)`，追加一条 `worktree` 事件，之后由
 `taskproof rm <任务id>` 删除。
+
+一条道也可以改为声明**长驻工作区**：`workspace = "worktree"` 让这条道在仓旁
+只有一棵 git worktree（`<仓库父目录>/<仓库名>-ws-<道 id>`）—— 这条道第一次真
+发车时惰性创建，之后每张卡都复用它，**跑完绝不删**。运行目录是这条道在它里面
+的位置：指向子目录的道，就跑在那个子目录里。`link = [...]` 把依赖从主树软链
+进来，道因此不用重装操作者已有的东西；不写就按构建文件探测（`package.json`
+→ `node_modules`、`Cargo.toml` → `target`），而 **Python 的 venv 刻意不探测**
+—— 它的配置与控制台脚本写死绝对路径。默认是 `none`，而且是刻意如此：含主树
+绝对路径的 verify 命令一旦跑进工作区，会静默地验收**主树**。
+`taskproof workspaces` 列出这些工作区；`taskproof workspace-rm <道>` 先打印证据
+（未提交改动、未合并提交、以及会解除 worktree 注册），只删没有留下成果的
+工作区 —— `--force` 才覆盖。
 
 人类可读输出跟随 locale；`--json` 给机器读。
 

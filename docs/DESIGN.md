@@ -132,7 +132,9 @@ claims                          -- concurrency guard, with expiry-based reclamat
 `[[project]]` is a repository / filter unit (`id` + `path` + `aliases`) and is
 not dispatchable on its own. A `[[taskgroup]]` (a lane, "道") is one
 dispatchable unit: an `id`, an owning `project`, a `path` (defaulting to the
-project's), plus the acceptance command and the result contract. The lock name
+project's), plus the acceptance command and the result contract. It may also
+declare a **long-lived workspace** of its own (`workspace` / `link`; the fields
+and their defaults are in `docs/REGISTRY.md`). The lock name
 is `taskgroup.group`; it defaults to the taskgroup id, and two lanes may set the
 same value to serialize with each other.
 
@@ -348,6 +350,8 @@ taskproof accept <task-id> [--note T]   clear a blocked or failed card (failed n
 taskproof rerun <task-id>               start a fresh, ledger-linked copy of a terminal task
 taskproof cancel <task-id>              stop a task (SIGTERM -> SIGKILL its own tree)
 taskproof rm <task-id>                  delete a terminal task's record, events and kept worktree
+taskproof workspaces                    list lanes that own a long-lived workspace
+taskproof workspace-rm <taskgroup>      delete one (prints the evidence; refuses unless clean)
 taskproof board [--open | --serve PORT | --out FILE]
 taskproof api --port N                  local read-only REST (consumed by the stage 2 frontend)
 taskproof doctor                        environment self-check
@@ -359,6 +363,22 @@ taskproof gc                            archive and rotate
 clean; if it still has changes it is kept, printed as
 `worktree kept: ... (N files changed)`, recorded as a `worktree` event, and
 deleted later by `taskproof rm <task-id>`.
+
+A taskgroup may declare a **long-lived workspace** instead: `workspace =
+"worktree"` gives that lane exactly one git worktree beside the repo
+(`<repo parent>/<repo name>-ws-<lane id>`), created lazily the first time a card
+actually fires into it and reused by every card after — a run never removes it.
+The run directory is the lane's own place inside it, so a lane pointing at a
+subdirectory runs in that subdirectory. `link = [...]` symlinks dependencies from
+the main checkout into it, so a lane never reinstalls what the operator already
+has; without it the usual markers are probed (`package.json` -> `node_modules`,
+`Cargo.toml` -> `target`) and a Python venv is deliberately never inferred — its
+config and console scripts hard-code absolute paths. The default is `none`, and
+deliberately so: a verify command that `cd`s to an absolute main-tree path would
+silently accept the *main tree* from inside a workspace. `taskproof workspaces`
+lists them; `taskproof workspace-rm <lane>` prints the evidence (uncommitted
+changes, unmerged commits, the worktree unregistration) and refuses to delete a
+workspace that still holds work unless `--force`.
 
 Human-readable output follows the locale; `--json` for machines.
 
