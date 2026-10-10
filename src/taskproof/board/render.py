@@ -25,7 +25,7 @@ _STATUS_ORDER = tuple(status for status, _, _ in _STATUSES)
 _BAD = ("failed", "timeout")
 _LIVE = ("running", "verifying")
 
-_STYLE = '\n:root{\n  --paper:#f4f6f8; --panel:#fff; --sunken:#f0f2f5;\n  --ink:#0f1114; --ink-2:#474e57; --ink-3:#828a94; --ink-4:#a8afb8;\n  --rule:#d9dde3; --rule-2:#e7eaee;\n  --signal:#b8341d; --signal-wash:#fbeee9; --signal-rule:#e2ab9e;\n  --lane:176px; --col:296px; --rail:214px;\n  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;\n  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;\n  --pin:0 6px 10px -6px rgba(15,17,20,.10);\n}\n*{box-sizing:border-box}\nhtml,body{margin:0;height:100%}\nbody{background:var(--paper);color:var(--ink);font:13px/1.5 var(--sans);\n     -webkit-font-smoothing:antialiased;overflow:hidden}\n:focus-visible{outline:2px solid var(--ink);outline-offset:2px}\nbutton{font:inherit;color:inherit;background:none;border:0;padding:0;text-align:left}\n\n/* ── 报头 ── */\n.mast{display:flex;align-items:baseline;gap:13px;padding:14px 20px 12px;background:var(--panel);\n      border-bottom:1px solid var(--rule)}\n.mast h1{margin:0;font:600 14px/1 var(--mono);letter-spacing:-.02em}\n.mast h1 span{color:var(--ink-3);font-weight:400}\n.tally{margin-left:auto;display:flex;gap:16px;font:11.5px/1 var(--mono);color:var(--ink-3);white-space:nowrap}\n.tally b{color:var(--ink);font-weight:600;margin-left:4px}\n.tally .alarm b{color:var(--signal)}\n.tally .gen{color:var(--ink-4);border-left:1px solid var(--rule);padding-left:16px}\n\n.shell{display:flex;height:calc(100vh - 47px)}\n\n/* ── 左栏：项目多选 ── */\n.rail{width:var(--rail);flex:none;background:var(--panel);border-right:1px solid var(--rule);\n      display:flex;flex-direction:column}\n.rh{display:flex;justify-content:space-between;align-items:baseline;padding:13px 16px 9px;\n    font:600 10.5px/1 var(--sans);letter-spacing:.06em;color:var(--ink-2)}\n.rh .rn{font:10px/1 var(--mono);color:var(--ink-4);letter-spacing:0}\n.rquick{display:flex;gap:12px;padding:0 16px 10px}\n.rquick button{font:10.5px/1 var(--sans);color:var(--ink-3);cursor:pointer;\n               border-bottom:1px solid var(--rule)}\n.rquick button:hover{color:var(--ink)}\n.plist{list-style:none;margin:0;padding:0 8px;overflow:auto;flex:1}\n.prow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:3px;cursor:pointer}\n.prow:hover{background:var(--sunken)}\n.prow input{position:absolute;opacity:0;width:0;height:0}\n.box{width:13px;height:13px;flex:none;border:1px solid #b9bfc7;border-radius:2px;\n     background:var(--panel);position:relative}\n.prow input:checked+.box{background:var(--ink);border-color:var(--ink)}\n.prow input:checked+.box::after{content:"";position:absolute;left:3.5px;top:.5px;width:4px;height:8px;\n     border:solid #fff;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}\n.prow input:focus-visible+.box{outline:2px solid var(--ink);outline-offset:1px}\n.pname{font:11.5px/1.2 var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.pn{margin-left:auto;font:10px/1 var(--mono);color:var(--ink-4);display:flex;gap:7px;flex:none}\n.pn em{color:var(--signal);font-style:normal;font-weight:600}\n.rfoot{padding:10px 16px;border-top:1px solid var(--rule-2);\n       font:10px/1 var(--mono);color:var(--ink-4)}\n\n/* ── 矩阵 ── */\n.matrix{flex:1;overflow:auto}\n/* 不要加 min-width:max-content —— 它与 minmax(296px,1fr) 组合会让 1fr 轨道按\n   "内容最大宽度"求解，而卡片是 width:100%，在不定宽轨道里百分比无法解析，\n   Chrome 会把列算炸（实测 6374px/列，网格宽 38420px）。\n   minmax 本身已保证最小列宽，容器窄时轨道溢出即触发横向滚动。 */\n.grid{display:grid;grid-template-columns:var(--lane) repeat(5,minmax(var(--col),1fr));\n      align-content:start}\n.hd{position:sticky;top:0;z-index:3;background:var(--paper);border-bottom:1px solid var(--rule);\n    box-shadow:var(--pin);padding:10px 12px 9px;font:600 10.5px/1 var(--sans);\n    letter-spacing:.06em;color:var(--ink-2);display:flex;justify-content:space-between;\n    align-items:baseline;gap:8px}\n.hd .n{font:600 10.5px/1 var(--mono);letter-spacing:0;color:var(--ink-3)}\n.hd.st-h-failed,.hd.st-h-timeout{color:var(--signal)}\n.hd.st-h-failed .n,.hd.st-h-timeout .n{color:var(--signal)}\n.hd.corner{position:sticky;left:0;z-index:5;justify-content:flex-start;padding-left:20px;\n           color:var(--ink-3)}\n.lane{position:sticky;left:0;z-index:2;background:var(--paper);border-right:1px solid var(--rule);\n      border-bottom:1px solid var(--rule-2);box-shadow:var(--pin);padding:12px 13px 12px 20px}\n.lane .name{font:600 12.5px/1.25 var(--sans);letter-spacing:-.01em}\n.lane .pth{font:10px/1.4 var(--mono);color:var(--ink-4);margin-top:3px;\n           display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.lane .tally2{font:10px/1 var(--mono);color:var(--ink-3);margin-top:8px;display:flex;\n              gap:10px;flex-wrap:wrap}\n.lane .tally2 .bad{color:var(--signal);font-weight:600}\n.cell{padding:8px 10px 9px;border-bottom:1px solid var(--rule-2);background:var(--sunken)}\n.cell+.cell{border-left:1px solid var(--rule-2)}\n\n/* ── 卡片（整张是可点的 button）── */\nbutton.card{display:block;width:100%;background:var(--panel);border:1px solid var(--rule);\n            border-radius:3px;box-shadow:0 1px 1px rgba(15,17,20,.03);position:relative;\n            overflow:hidden;cursor:pointer;padding:8px 10px 8px 12px}\nbutton.card+button.card{margin-top:6px}\nbutton.card:hover{background:#fcfcfd;border-color:#c8cdd4}\nbutton.card[aria-expanded="true"]{border-color:#b6bcc5;background:#fcfcfd}\n.l1{display:flex;align-items:center;gap:7px}\n.mark{font:600 11px/1 var(--mono);color:var(--ink-4);flex:none}\n.cid{font:10px/1 var(--mono);color:var(--ink-4);overflow:hidden;text-overflow:ellipsis;\n     white-space:nowrap}\n.tail{margin-left:auto;display:flex;align-items:center;gap:7px;flex:none}\n.stamp{font:600 9.5px/1 var(--mono);color:var(--ink-3);border:1px solid var(--rule);\n       border-radius:2px;padding:2px 4px}\n.chev{font:9px/1 var(--mono);color:var(--ink-4);transition:transform .15s}\nbutton.card[aria-expanded="true"] .chev{transform:rotate(90deg);color:var(--ink-2)}\n.l2{margin-top:5px;font-size:12.5px;line-height:1.45;color:var(--ink);\n    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.gist{margin-top:6px;font:9.5px/1 var(--mono);color:var(--ink-4);display:flex;gap:12px;flex-wrap:wrap}\n.st-running{border-color:#c3c9d1}\n.st-running .mark{color:var(--ink)}\n.st-verifying .mark{color:var(--ink-2)}\n.st-failed,.st-timeout{border-color:var(--signal-rule);background:var(--signal-wash);\n                       border-left:3px solid var(--signal)}\n.st-failed .stamp,.st-timeout .stamp{color:var(--signal);border-color:var(--signal-rule);font-weight:600}\n.st-failed .mark,.st-timeout .mark{color:var(--signal)}\n.st-failed .cid,.st-timeout .cid{color:#a2766c}\n.st-running::before,.st-verifying::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;\n  background:linear-gradient(180deg,transparent,var(--ink) 45%,transparent);background-size:100% 220%;\n  animation:flow 1.9s linear infinite}\n.st-verifying::before{background:linear-gradient(180deg,transparent,var(--ink-3) 45%,transparent);\n  background-size:100% 220%;animation-duration:1.1s}\n@keyframes flow{from{background-position:0 -110%}to{background-position:0 110%}}\n@media (prefers-reduced-motion:reduce){\n  .st-running::before,.st-verifying::before{animation:none;background:var(--ink-3)}\n  .chev{transition:none}}\n.empty{color:var(--ink-4);font:10.5px/1 var(--mono);padding:4px 0 0;opacity:.7}\n\n/* ── 右侧抽屉 ── */\n.scrim{position:fixed;inset:0;background:rgba(15,17,20,.16);opacity:0;pointer-events:none;\n       transition:opacity .2s;z-index:40}\nbody.drawer-open .scrim{opacity:1;pointer-events:auto}\n.drawer{position:fixed;top:0;right:0;bottom:0;width:min(492px,94vw);background:var(--panel);\n        border-left:1px solid var(--rule);box-shadow:-18px 0 40px -24px rgba(15,17,20,.45);\n        transform:translateX(101%);transition:transform .22s cubic-bezier(.4,0,.2,1);\n        z-index:50;display:flex;flex-direction:column}\n.drawer.open{transform:none}\n@media (prefers-reduced-motion:reduce){.drawer{transition:none}.scrim{transition:none}}\n.dh{display:flex;align-items:center;gap:9px;padding:14px 16px 12px;border-bottom:1px solid var(--rule);\n    background:var(--paper)}\n.dh .cid{font:600 12px/1 var(--mono);color:var(--ink);overflow:visible}\n.dh .dur{font:10px/1 var(--mono);color:var(--ink-4);margin-left:auto;text-align:right}\n.sc{font:600 10px/1 var(--sans);letter-spacing:.05em;padding:3px 7px;border-radius:2px;\n    background:var(--sunken);color:var(--ink-2);flex:none}\n.sc-running,.sc-verifying{background:#e8ebef;color:var(--ink)}\n.sc-done{background:#e6ebef;color:var(--ink-2)}\n.sc-failed,.sc-timeout{background:var(--signal-wash);color:var(--signal);\n                       box-shadow:inset 0 0 0 1px var(--signal-rule)}\n.dh .x{font:13px/1 var(--mono);color:var(--ink-4);cursor:pointer;padding:2px 4px;margin-left:10px}\n.dh .x:hover{color:var(--ink)}\n.dbody{overflow:auto;padding:0 0 26px}\n.sec{padding:14px 16px;border-bottom:1px solid var(--rule-2)}\n.sec h4{margin:0 0 9px;font:600 9.5px/1 var(--sans);letter-spacing:.06em;color:var(--ink-4);\n        display:flex;align-items:center;gap:9px}\n.live{display:inline-flex;align-items:center;gap:5px;font:9.5px/1 var(--mono);\n      color:var(--ink-2);letter-spacing:0}\n.live i{width:5px;height:5px;border-radius:50%;background:var(--ink);\n        animation:pulse 1.6s ease-in-out infinite}\n@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}\n@media (prefers-reduced-motion:reduce){.live i{animation:none}}\n.live[data-off] i{background:var(--ink-4);animation:none}\n.full{margin:0;font:10.5px/1.6 var(--mono);color:var(--ink-2);white-space:pre-wrap;\n      word-break:break-word;background:var(--sunken);border:1px solid var(--rule-2);\n      border-radius:3px;padding:10px 11px}\n\n.tl{list-style:none;margin:0;padding:0 0 0 4px}\n.tl .ev{position:relative;display:grid;grid-template-columns:52px 1fr auto;gap:0 11px;\n        padding:0 0 13px 16px;border-left:1px solid var(--rule)}\n.tl .ev:last-child{border-left-color:transparent;padding-bottom:0}\n.tl .dot{position:absolute;left:-4.5px;top:3px;width:8px;height:8px;border-radius:50%;\n         background:var(--panel);border:1.5px solid var(--ink-4)}\n.tl .ev.now .dot{border-color:var(--ink);background:var(--ink);animation:pulse 1.6s ease-in-out infinite}\n.tl .ev.end .dot{border-color:var(--ink-2)}\n.tl .ev.isbad .dot{border-color:var(--signal);background:var(--signal)}\n.tl .t{font:10px/1.5 var(--mono);color:var(--ink-4)}\n.tl .k{font:600 11.5px/1.5 var(--sans);color:var(--ink);grid-column:2}\n.tl .g{font:10px/1.5 var(--mono);color:var(--ink-4);text-align:right}\n.tl .d{grid-column:2/4;font:10px/1.55 var(--mono);color:var(--ink-3);word-break:break-word}\n\n.claim{margin:0;font-size:11.5px;line-height:1.6;color:var(--ink-2)}\ndl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:3px 12px}\ndt{font:10px/1.5 var(--sans);color:var(--ink-4);white-space:nowrap}\ndd{margin:0;font:10.5px/1.5 var(--mono);color:var(--ink);word-break:break-word}\n.verdict{padding:13px 16px;display:flex;flex-direction:column;gap:7px}\n.vmark{align-self:flex-start;font:600 9.5px/1 var(--mono);letter-spacing:.1em;padding:4px 7px;\n       border:1px solid var(--ink);border-radius:2px;color:var(--ink)}\n.verdict.bad .vmark{border-color:var(--signal);color:var(--signal);background:var(--signal-wash)}\n.vcmd{font:9.5px/1.45 var(--mono);color:var(--ink-3);overflow-wrap:break-word;word-break:normal;\n      display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}\n'
+_STYLE = '\n:root{\n  --paper:#f4f6f8; --panel:#fff; --sunken:#f0f2f5;\n  --ink:#0f1114; --ink-2:#474e57; --ink-3:#828a94; --ink-4:#a8afb8;\n  --rule:#d9dde3; --rule-2:#e7eaee;\n  --signal:#b8341d; --signal-wash:#fbeee9; --signal-rule:#e2ab9e;\n  --lane:176px; --col:296px; --rail:214px;\n  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;\n  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;\n  --pin:0 6px 10px -6px rgba(15,17,20,.10);\n}\n*{box-sizing:border-box}\nhtml,body{margin:0;height:100%}\nbody{background:var(--paper);color:var(--ink);font:13px/1.5 var(--sans);\n     -webkit-font-smoothing:antialiased;overflow:hidden}\n:focus-visible{outline:2px solid var(--ink);outline-offset:2px}\nbutton{font:inherit;color:inherit;background:none;border:0;padding:0;text-align:left}\n\n/* ── 报头 ── */\n.mast{display:flex;align-items:baseline;gap:13px;padding:14px 20px 12px;background:var(--panel);\n      border-bottom:1px solid var(--rule)}\n.mast h1{margin:0;font:600 14px/1 var(--mono);letter-spacing:-.02em}\n.mast h1 span{color:var(--ink-3);font-weight:400}\n.tally{margin-left:auto;display:flex;gap:16px;font:11.5px/1 var(--mono);color:var(--ink-3);white-space:nowrap}\n.tally b{color:var(--ink);font-weight:600;margin-left:4px}\n.tally .alarm b{color:var(--signal)}\n.tally .gen{color:var(--ink-4);border-left:1px solid var(--rule);padding-left:16px}\n\n.shell{display:flex;height:calc(100vh - 47px)}\n\n/* ── 左栏：项目多选 ── */\n.rail{width:var(--rail);flex:none;background:var(--panel);border-right:1px solid var(--rule);\n      display:flex;flex-direction:column}\n.rh{display:flex;justify-content:space-between;align-items:baseline;padding:13px 16px 9px;\n    font:600 10.5px/1 var(--sans);letter-spacing:.06em;color:var(--ink-2)}\n.rh .rn{font:10px/1 var(--mono);color:var(--ink-4);letter-spacing:0}\n.rquick{display:flex;gap:12px;padding:0 16px 10px}\n.rquick button{font:10.5px/1 var(--sans);color:var(--ink-3);cursor:pointer;\n               border-bottom:1px solid var(--rule)}\n.rquick button:hover{color:var(--ink)}\n.plist{list-style:none;margin:0;padding:0 8px;overflow:auto;flex:1}\n.prow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:3px;cursor:pointer}\n.prow:hover{background:var(--sunken)}\n.prow input{position:absolute;opacity:0;width:0;height:0}\n.box{width:13px;height:13px;flex:none;border:1px solid #b9bfc7;border-radius:2px;\n     background:var(--panel);position:relative}\n.prow input:checked+.box{background:var(--ink);border-color:var(--ink)}\n.prow input:checked+.box::after{content:"";position:absolute;left:3.5px;top:.5px;width:4px;height:8px;\n     border:solid #fff;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}\n.prow input:focus-visible+.box{outline:2px solid var(--ink);outline-offset:1px}\n.pname{font:11.5px/1.2 var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.pn{margin-left:auto;font:10px/1 var(--mono);color:var(--ink-4);display:flex;gap:7px;flex:none}\n.pn em{color:var(--signal);font-style:normal;font-weight:600}\n.pn .lc{color:var(--ink-4)}\n.rfoot{padding:10px 16px;border-top:1px solid var(--rule-2);\n       font:10px/1 var(--mono);color:var(--ink-4)}\n\n/* ── 矩阵 ── */\n.matrix{flex:1;overflow:auto}\n/* 不要加 min-width:max-content —— 它与 minmax(296px,1fr) 组合会让 1fr 轨道按\n   "内容最大宽度"求解，而卡片是 width:100%，在不定宽轨道里百分比无法解析，\n   Chrome 会把列算炸（实测 6374px/列，网格宽 38420px）。\n   minmax 本身已保证最小列宽，容器窄时轨道溢出即触发横向滚动。 */\n.grid{display:grid;grid-template-columns:var(--lane) repeat(5,minmax(var(--col),1fr));\n      align-content:start}\n.hd{position:sticky;top:0;z-index:3;background:var(--paper);border-bottom:1px solid var(--rule);\n    box-shadow:var(--pin);padding:10px 12px 9px;font:600 10.5px/1 var(--sans);\n    letter-spacing:.06em;color:var(--ink-2);display:flex;justify-content:space-between;\n    align-items:baseline;gap:8px}\n.hd .n{font:600 10.5px/1 var(--mono);letter-spacing:0;color:var(--ink-3)}\n.hd.st-h-failed,.hd.st-h-timeout{color:var(--signal)}\n.hd.st-h-failed .n,.hd.st-h-timeout .n{color:var(--signal)}\n.hd.corner{position:sticky;left:0;z-index:5;justify-content:flex-start;padding-left:20px;\n           color:var(--ink-3)}\n.lane{position:sticky;left:0;z-index:2;background:var(--paper);border-right:1px solid var(--rule);\n      border-bottom:1px solid var(--rule-2);box-shadow:var(--pin);padding:12px 13px 12px 20px}\n.lane .name{font:600 12.5px/1.25 var(--sans);letter-spacing:-.01em}\n.lane .pth{font:10px/1.4 var(--mono);color:var(--ink-4);margin-top:3px;\n           display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.lane .tally2{font:10px/1 var(--mono);color:var(--ink-3);margin-top:8px;display:flex;\n              gap:10px;flex-wrap:wrap}\n.lane .tally2 .bad{color:var(--signal);font-weight:600}\n.cell{padding:8px 10px 9px;border-bottom:1px solid var(--rule-2);background:var(--sunken)}\n.cell+.cell{border-left:1px solid var(--rule-2)}\n\n/* ── 卡片（整张是可点的 button）── */\nbutton.card{display:block;width:100%;background:var(--panel);border:1px solid var(--rule);\n            border-radius:3px;box-shadow:0 1px 1px rgba(15,17,20,.03);position:relative;\n            overflow:hidden;cursor:pointer;padding:8px 10px 8px 12px}\nbutton.card+button.card{margin-top:6px}\nbutton.card:hover{background:#fcfcfd;border-color:#c8cdd4}\nbutton.card[aria-expanded="true"]{border-color:#b6bcc5;background:#fcfcfd}\n.l1{display:flex;align-items:center;gap:7px}\n.mark{font:600 11px/1 var(--mono);color:var(--ink-4);flex:none}\n.cid{font:10px/1 var(--mono);color:var(--ink-4);overflow:hidden;text-overflow:ellipsis;\n     white-space:nowrap}\n.tail{margin-left:auto;display:flex;align-items:center;gap:7px;flex:none}\n.stamp{font:600 9.5px/1 var(--mono);color:var(--ink-3);border:1px solid var(--rule);\n       border-radius:2px;padding:2px 4px}\n.chev{font:9px/1 var(--mono);color:var(--ink-4);transition:transform .15s}\nbutton.card[aria-expanded="true"] .chev{transform:rotate(90deg);color:var(--ink-2)}\n.l2{margin-top:5px;font-size:12.5px;line-height:1.45;color:var(--ink);\n    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.gist{margin-top:6px;font:9.5px/1 var(--mono);color:var(--ink-4);display:flex;gap:12px;flex-wrap:wrap}\n.st-running{border-color:#c3c9d1}\n.st-running .mark{color:var(--ink)}\n.st-verifying .mark{color:var(--ink-2)}\n.st-failed,.st-timeout{border-color:var(--signal-rule);background:var(--signal-wash);\n                       border-left:3px solid var(--signal)}\n.st-failed .stamp,.st-timeout .stamp{color:var(--signal);border-color:var(--signal-rule);font-weight:600}\n.st-failed .mark,.st-timeout .mark{color:var(--signal)}\n.st-failed .cid,.st-timeout .cid{color:#a2766c}\n.st-running::before,.st-verifying::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;\n  background:linear-gradient(180deg,transparent,var(--ink) 45%,transparent);background-size:100% 220%;\n  animation:flow 1.9s linear infinite}\n.st-verifying::before{background:linear-gradient(180deg,transparent,var(--ink-3) 45%,transparent);\n  background-size:100% 220%;animation-duration:1.1s}\n@keyframes flow{from{background-position:0 -110%}to{background-position:0 110%}}\n@media (prefers-reduced-motion:reduce){\n  .st-running::before,.st-verifying::before{animation:none;background:var(--ink-3)}\n  .chev{transition:none}}\n.empty{color:var(--ink-4);font:10.5px/1 var(--mono);padding:4px 0 0;opacity:.7}\n\n/* ── 右侧抽屉 ── */\n.scrim{position:fixed;inset:0;background:rgba(15,17,20,.16);opacity:0;pointer-events:none;\n       transition:opacity .2s;z-index:40}\nbody.drawer-open .scrim{opacity:1;pointer-events:auto}\n.drawer{position:fixed;top:0;right:0;bottom:0;width:min(492px,94vw);background:var(--panel);\n        border-left:1px solid var(--rule);box-shadow:-18px 0 40px -24px rgba(15,17,20,.45);\n        transform:translateX(101%);transition:transform .22s cubic-bezier(.4,0,.2,1);\n        z-index:50;display:flex;flex-direction:column}\n.drawer.open{transform:none}\n@media (prefers-reduced-motion:reduce){.drawer{transition:none}.scrim{transition:none}}\n.dh{display:flex;align-items:center;gap:9px;padding:14px 16px 12px;border-bottom:1px solid var(--rule);\n    background:var(--paper)}\n.dh .cid{font:600 12px/1 var(--mono);color:var(--ink);overflow:visible}\n.dh .dur{font:10px/1 var(--mono);color:var(--ink-4);margin-left:auto;text-align:right}\n.sc{font:600 10px/1 var(--sans);letter-spacing:.05em;padding:3px 7px;border-radius:2px;\n    background:var(--sunken);color:var(--ink-2);flex:none}\n.sc-running,.sc-verifying{background:#e8ebef;color:var(--ink)}\n.sc-done{background:#e6ebef;color:var(--ink-2)}\n.sc-failed,.sc-timeout{background:var(--signal-wash);color:var(--signal);\n                       box-shadow:inset 0 0 0 1px var(--signal-rule)}\n.dh .x{font:13px/1 var(--mono);color:var(--ink-4);cursor:pointer;padding:2px 4px;margin-left:10px}\n.dh .x:hover{color:var(--ink)}\n.dbody{overflow:auto;padding:0 0 26px}\n.sec{padding:14px 16px;border-bottom:1px solid var(--rule-2)}\n.sec h4{margin:0 0 9px;font:600 9.5px/1 var(--sans);letter-spacing:.06em;color:var(--ink-4);\n        display:flex;align-items:center;gap:9px}\n.live{display:inline-flex;align-items:center;gap:5px;font:9.5px/1 var(--mono);\n      color:var(--ink-2);letter-spacing:0}\n.live i{width:5px;height:5px;border-radius:50%;background:var(--ink);\n        animation:pulse 1.6s ease-in-out infinite}\n@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}\n@media (prefers-reduced-motion:reduce){.live i{animation:none}}\n.live[data-off] i{background:var(--ink-4);animation:none}\n.full{margin:0;font:10.5px/1.6 var(--mono);color:var(--ink-2);white-space:pre-wrap;\n      word-break:break-word;background:var(--sunken);border:1px solid var(--rule-2);\n      border-radius:3px;padding:10px 11px}\n\n.tl{list-style:none;margin:0;padding:0 0 0 4px}\n.tl .ev{position:relative;display:grid;grid-template-columns:52px 1fr auto;gap:0 11px;\n        padding:0 0 13px 16px;border-left:1px solid var(--rule)}\n.tl .ev:last-child{border-left-color:transparent;padding-bottom:0}\n.tl .dot{position:absolute;left:-4.5px;top:3px;width:8px;height:8px;border-radius:50%;\n         background:var(--panel);border:1.5px solid var(--ink-4)}\n.tl .ev.now .dot{border-color:var(--ink);background:var(--ink);animation:pulse 1.6s ease-in-out infinite}\n.tl .ev.end .dot{border-color:var(--ink-2)}\n.tl .ev.isbad .dot{border-color:var(--signal);background:var(--signal)}\n.tl .t{font:10px/1.5 var(--mono);color:var(--ink-4)}\n.tl .k{font:600 11.5px/1.5 var(--sans);color:var(--ink);grid-column:2}\n.tl .g{font:10px/1.5 var(--mono);color:var(--ink-4);text-align:right}\n.tl .d{grid-column:2/4;font:10px/1.55 var(--mono);color:var(--ink-3);word-break:break-word}\n\n.claim{margin:0;font-size:11.5px;line-height:1.6;color:var(--ink-2)}\ndl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:3px 12px}\ndt{font:10px/1.5 var(--sans);color:var(--ink-4);white-space:nowrap}\ndd{margin:0;font:10.5px/1.5 var(--mono);color:var(--ink);word-break:break-word}\n.verdict{padding:13px 16px;display:flex;flex-direction:column;gap:7px}\n.vmark{align-self:flex-start;font:600 9.5px/1 var(--mono);letter-spacing:.1em;padding:4px 7px;\n       border:1px solid var(--ink);border-radius:2px;color:var(--ink)}\n.verdict.bad .vmark{border-color:var(--signal);color:var(--signal);background:var(--signal-wash)}\n.vcmd{font:9.5px/1.45 var(--mono);color:var(--ink-3);overflow-wrap:break-word;word-break:normal;\n      display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}\n'
 _SCRIPT = '<script>\n(function () {\n  var POLL_MS = 2000, timers = {}, current = null;\n\n  function rows() { return document.querySelectorAll(\'.rowrow[data-project]\'); }\n  function boxes() { return document.querySelectorAll(\'.plist input[type=checkbox]\'); }\n\n  function applyFilter() {\n    var on = {}, n = 0;\n    boxes().forEach(function (b) { on[b.value] = b.checked; if (b.checked) n++; });\n    rows().forEach(function (r) {\n      r.style.display = on[r.dataset.project] ? \'contents\' : \'none\';\n    });\n    document.getElementById(\'rail-count\').textContent = n + \' / \' + boxes().length + \' 显示\';\n  }\n  boxes().forEach(function (b) { b.addEventListener(\'change\', applyFilter); });\n  document.querySelector(\'[data-all]\').addEventListener(\'click\', function () {\n    boxes().forEach(function (b) { b.checked = true; }); applyFilter();\n  });\n  document.querySelector(\'[data-none]\').addEventListener(\'click\', function () {\n    boxes().forEach(function (b) { b.checked = false; }); applyFilter();\n  });\n  applyFilter();\n\n  function close() {\n    if (current) {\n      current.classList.remove(\'open\');\n      var card = document.querySelector(\'[data-task="\' + current.id + \'"]\');\n      if (card) card.setAttribute(\'aria-expanded\', \'false\');\n      if (timers[current.id]) { clearInterval(timers[current.id]); delete timers[current.id]; }\n    }\n    current = null;\n    document.body.classList.remove(\'drawer-open\');\n    if (location.hash) history.replaceState(null, \'\', location.pathname + location.search);\n  }\n\n  function poll(d) {\n    var el = d.querySelector(\'[data-live]\');\n    if (!el) return;\n    // 正式实现：服务端提供 /api/tasks/<id>/events，返回该任务的增量事件\n    fetch(\'/api/tasks/\' + d.id.replace(/^task-/, \'\') + \'/events\', {cache: \'no-store\'})\n      .then(function (r) { if (!r.ok) throw 0; return r.json(); })\n      .then(function () { el.innerHTML = \'<i></i>实时 · 每 2 秒\'; })\n      .catch(function () {\n        // 静态快照 / 无该接口 → 明确标注降级，不假装还在实时\n        el.setAttribute(\'data-off\', \'\');\n        el.innerHTML = \'<i></i>静态快照 · 无法实时更新\';\n        if (timers[d.id]) { clearInterval(timers[d.id]); delete timers[d.id]; }\n      });\n  }\n\n  function open(id) {\n    var d = document.getElementById(id);\n    if (!d) return;\n    if (current && current !== d) close();\n    d.classList.add(\'open\');\n    document.body.classList.add(\'drawer-open\');\n    current = d;\n    var card = document.querySelector(\'[data-task="\' + id + \'"]\');\n    if (card) card.setAttribute(\'aria-expanded\', \'true\');\n    if (history.replaceState) history.replaceState(null, \'\', \'#\' + id);\n    var t = d.querySelector(\'[data-live]\');\n    if (t) { t.removeAttribute(\'data-off\'); t.innerHTML = \'<i></i>实时 · 每 2 秒\'; poll(d);\n             timers[id] = setInterval(function () { poll(d); }, POLL_MS); }\n  }\n\n  document.querySelectorAll(\'button.card\').forEach(function (c) {\n    c.addEventListener(\'click\', function () { open(c.dataset.task); });\n  });\n  document.querySelectorAll(\'[data-close]\').forEach(function (el) {\n    el.addEventListener(\'click\', close);\n  });\n  document.addEventListener(\'keydown\', function (e) { if (e.key === \'Escape\') close(); });\n  if (location.hash) {\n    var d = document.getElementById(location.hash.slice(1));\n    if (d) open(location.hash.slice(1));\n  }\n})();\n</script>'
 
 
@@ -134,21 +134,118 @@ def _meta_parts(task, reference):
 
 
 def _load_registered_projects(workspace):
-    """Best-effort registry read: ``[{id, path, group}]`` in file order."""
+    """Best-effort registry read: projects with their lanes, in file order."""
     try:
         reg = registry.load(registry.workspace_registry_path(workspace))
     except Exception:
         return []
-    # One swimlane per lane (taskgroup), same shape as before: the board shows
-    # a line per dispatchable unit, ordered as it always has been.
     return [
-        {"id": tg.id, "path": tg.path, "group": tg.group}
-        for tg in reg.taskgroups
+        {
+            "id": project.id,
+            "path": project.path,
+            "aliases": list(project.aliases),
+            "taskgroups": [
+                {"id": tg.id, "path": tg.path, "group": tg.group}
+                for tg in reg.lanes_for(project.id)
+            ],
+        }
+        for project in reg.projects
     ]
 
 
+def _lane_owners(projects):
+    """Map every taskgroup id to its owning project id."""
+    owners = {}
+    for project in projects:
+        for taskgroup in project.get("taskgroups", []):
+            owners[taskgroup["id"]] = project["id"]
+    return owners
+
+
+def _group_rows_by_project(rows, owners):
+    """Group task rows by owning project, newest-active project first."""
+    groups = {}
+    for row in rows:
+        lane_id = str(row.get("project") or "")
+        project_id = owners.get(lane_id, lane_id)
+        groups.setdefault(project_id, []).append(row)
+    ordered = sorted(
+        groups.items(),
+        key=lambda item: max((t.get("created_at") or "") for t in item[1]),
+        reverse=True,
+    )
+    return [
+        (pid, sorted(items, key=lambda t: t.get("created_at") or "", reverse=True))
+        for pid, items in ordered
+    ]
+
+
+def _expand_selection(selected, owners, registered):
+    """Resolve selected keys (project or lane ids) to row + lane id lists.
+
+    A project id selects that project's whole row (every lane it owns). A lane
+    id selects the project that owns it. An id the registry never heard of is
+    kept as its own row, so a board built without a registry still behaves the
+    way it always did (the lane id doubles as the project id).
+    """
+    rows, lanes = [], []
+    seen_rows, seen_lanes = set(), set()
+    for key in selected:
+        if key in registered:
+            row = key
+        elif key in owners:
+            row = owners[key]
+        else:
+            # An id the registry never heard of is its own row (a registry-less
+            # board, or an old link).
+            row = key
+        project = registered.get(row) or {}
+        owned = [lane["id"] for lane in project.get("taskgroups", [])] or [key]
+        if row not in seen_rows:
+            seen_rows.add(row)
+            rows.append(row)
+        for lane in owned:
+            if lane not in seen_lanes:
+                seen_lanes.add(lane)
+                lanes.append(lane)
+    return rows, lanes
+
+
+def _project_meta(groups, registered):
+    """Project-level path/alias/lane metadata for rail and lane rendering."""
+    meta = {}
+    for project_id, tasks in groups:
+        base = registered.get(project_id) or {}
+        lanes = [dict(lane) for lane in base.get("taskgroups", [])]
+        seen = {lane["id"] for lane in lanes}
+        for task in tasks:
+            lane_id = str(task.get("project") or "")
+            if not lane_id or lane_id in seen:
+                continue
+            # Historical rows can name a lane that was later removed from the
+            # registry. Keep it visible rather than hiding the task.
+            lanes.append(
+                {
+                    "id": lane_id,
+                    "path": task.get("workdir") or "",
+                    "group": lane_id,
+                }
+            )
+            seen.add(lane_id)
+        path = base.get("path")
+        if not path:
+            path = next((task.get("workdir") for task in tasks if task.get("workdir")), None)
+        meta[project_id] = {
+            "id": project_id,
+            "path": path or "—",
+            "aliases": list(base.get("aliases") or []),
+            "taskgroups": lanes,
+        }
+    return meta
+
+
 def _known_project_ids(workspace):
-    """Every project id the board knows about, in navigation order."""
+    """Every project id the board accepts, with lane ids kept for old links."""
     ids = []
     seen = set()
     conn = storage.connect(storage.db_path(workspace))
@@ -165,6 +262,10 @@ def _known_project_ids(workspace):
         if proj["id"] not in seen:
             seen.add(proj["id"])
             ids.append(proj["id"])
+        for taskgroup in proj.get("taskgroups", []):
+            if taskgroup["id"] not in seen:
+                seen.add(taskgroup["id"])
+                ids.append(taskgroup["id"])
     return ids
 
 
@@ -359,7 +460,9 @@ def _card(task, selected_task_id, reference) -> str:
         stamp = task.get("verify_exit")
         if stamp is None:
             stamp = "0" if raw_status == "done" else "1"
-    meta = "".join(f"<span>{_escape(part)}</span>" for part in _meta_parts(task, reference))
+    lane = str(task.get("project") or "")
+    meta_parts = ([f"道 {lane}"] if lane else []) + _meta_parts(task, reference)
+    meta = "".join(f"<span>{_escape(part)}</span>" for part in meta_parts)
     expanded = "true" if selected_task_id == task_id else "false"
     stamp_html = f'<span class="stamp">{_escape(stamp)}</span>' if stamp is not None else ""
     return "\n".join([
@@ -428,6 +531,7 @@ def _evidence_html(task, events, reference) -> str:
     window_start = _time_label(task.get("started_at") or task.get("created_at"))
     window_end = _time_label(task.get("finished_at") or reference)
     rows = (
+        ("taskgroup", str(task.get("project") or "—")),
         ("exit", "—" if task.get("exit_code") is None else task.get("exit_code")),
         ("verify", verify_text),
         ("files", files_text),
@@ -483,7 +587,7 @@ def _drawer(task, events, selected_task_id, reference) -> str:
     return "\n".join(parts)
 
 
-def _rail_html(lanes, total) -> str:
+def _rail_html(lanes, total, meta) -> str:
     parts = [
         '<aside class="rail">',
         '<div class="rh"><span>项目</span><span class="rn" id="rail-count"></span></div>',
@@ -492,14 +596,24 @@ def _rail_html(lanes, total) -> str:
         '<ul class="plist">',
     ]
     for pid, tasks in lanes:
+        info = meta.get(pid) or {}
+        lane_ids = [str(lane.get("id")) for lane in info.get("taskgroups", [])]
+        # One row per project: the lanes it owns live in the hover title, and a
+        # multi-lane project gets a small "N道" tag. A single-lane project adds
+        # no tag, so an un-migrated registry looks exactly as it did before.
+        label = " · ".join(lane_ids) if lane_ids else pid
+        lane_tag = (
+            f'<span class="lc">{_escape(len(lane_ids))}道</span>'
+            if len(lane_ids) > 1 else ""
+        )
         bad = sum(1 for task in tasks if _status_bucket(task.get("status")) in _BAD)
         bad_html = f"<em>{_escape(bad)}</em>" if bad else ""
         parts.append(
-            '<li><label class="prow">'
+            f'<li><label class="prow" title="{_escape(label)}">'
             f'<input type="checkbox" value="{_escape(pid)}" checked>'
             '<span class="box" aria-hidden="true"></span>'
             f'<span class="pname">{_escape(pid)}</span>'
-            f'<span class="pn">{_escape(len(tasks))}{bad_html}</span>'
+            f'<span class="pn">{lane_tag}{_escape(len(tasks))}{bad_html}</span>'
             "</label></li>"
         )
     parts.append("</ul>")
@@ -570,6 +684,20 @@ def render_board(workspace: str, *, limit: int = 200,
         selected = deduped
     selected_task_id = None if task is None else str(task)
 
+    # The board groups tasks by their *owning project*, not their lane: the
+    # left rail is one row per project while the registry still keeps project
+    # and lane separate. `selected` may name either layer (old links use lane
+    # ids), so resolve it to project rows first, then to the lanes to read.
+    registered_list = _load_registered_projects(workspace)
+    registered = {proj["id"]: proj for proj in registered_list}
+    owners = _lane_owners(registered_list)
+    if selected is None:
+        selection_rows = selection_lanes = None
+    else:
+        selection_rows, selection_lanes = _expand_selection(
+            selected, owners, registered
+        )
+
     conn = storage.connect(storage.db_path(workspace))
     try:
         storage.migrate(conn)
@@ -578,8 +706,8 @@ def render_board(workspace: str, *, limit: int = 200,
             rows = [dict(row) for row in storage.list_tasks(conn, limit=limit)]
         else:
             seen = set()
-            for pid in selected:
-                for row in storage.list_tasks(conn, project=pid, limit=limit):
+            for lane in selection_lanes:
+                for row in storage.list_tasks(conn, project=lane, limit=limit):
                     item = dict(row)
                     if item.get("id") in seen:
                         continue
@@ -591,22 +719,15 @@ def render_board(workspace: str, *, limit: int = 200,
     finally:
         conn.close()
 
-    grouped = dict(storage.group_tasks_by_project(rows))
+    groups = _group_rows_by_project(rows, owners)
     if selected is None:
-        lanes = storage.group_tasks_by_project(rows)
+        lanes = groups
     else:
-        lanes = [(pid, grouped[pid]) for pid in selected if pid in grouped]
+        by_project = dict(groups)
+        lanes = [(pid, by_project[pid]) for pid in selection_rows if pid in by_project]
 
-    registered = {proj["id"]: proj for proj in _load_registered_projects(workspace)}
-    paths = {}
-    for pid, tasks in lanes:
-        path = (registered.get(pid) or {}).get("path")
-        if not path:
-            for item in tasks:
-                if item.get("workdir"):
-                    path = item.get("workdir")
-                    break
-        paths[pid] = path or "—"
+    meta = _project_meta(lanes, registered)
+    paths = {pid: meta[pid]["path"] for pid, _ in lanes}
     if selected_task_id is not None and selected_task_id not in events_by_task:
         selected_task_id = None
 
@@ -639,7 +760,7 @@ def render_board(workspace: str, *, limit: int = 200,
         f'<span class="gen">生成于 {_escape(generated_text)}</span>',
         "</div></div>",
         '<div class="shell">',
-        _rail_html(lanes, total),
+        _rail_html(lanes, total, meta),
         _grid_html(lanes, status_counts, events_by_task, selected_task_id, reference, paths),
         "</div>",
         '<div class="scrim" data-close></div>',

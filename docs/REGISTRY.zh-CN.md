@@ -231,7 +231,8 @@ result_schema 指定的文件不存在
 | `GET /api/summary` | `{"summary", "concurrency"}` |
 | `GET /api/registry` | `{"path", "hash", "mtime"}`；`hash` 是原始字节的 sha256（十六进制小写） |
 | `GET /api/projects` | `{"projects": [ … ]}` —— **一行一条道**（taskgroup）加上它的任务计数；每行另带归属的 `project` id |
-| `GET /api/tasks` | `{"tasks": [ … ], "count"}`；过滤 `?status=`、`?project=`、`?limit=` |
+| `GET /api/projects?by=project` | `{"projects": [ {"id", "path", "aliases", "taskgroups", "summary"} ]}` —— **一行一个项目**，内嵌它名下的道记录，并把各道状态计数求和（`running`、`verifying`、`done`、`failed`、`blocked`、`timeout`、`cancelled`） |
+| `GET /api/tasks` | `{"tasks": [ … ], "count"}`；过滤 `?status=`、`?project=`、`?limit=`。`?project=` 既可以给**项目 id**（该项目名下所有道），也可以给**道 id**（就那一条道）；两层都不认识的 id 返回空集，不报错 |
 | `GET /api/tasks/<id>` | 单个任务详情连同它的事件 |
 | `GET /api/tasks/<id>/events` | `{"task_id", "events"}` |
 | `GET /api/tasks/<id>/log` | 一段日志窗口（默认尾部，或用 `?offset=` 向前续读） |

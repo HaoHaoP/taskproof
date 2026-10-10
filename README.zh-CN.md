@@ -245,6 +245,9 @@ verify_kind = "build"       # check | build | none
 [`examples/projects.example.toml`](examples/projects.example.toml)，字段参考与
 硬错误清单见 [`docs/REGISTRY.zh-CN.md`](docs/REGISTRY.zh-CN.md)。
 
+静态看板的左栏按**项目**聚合：一行一个项目，hover 显示它名下的道；任务卡上
+也标注它跑在哪条道。
+
 ## 安全与卫生
 
 - **保护路径是"快照比对"，不只是 diff。** 禁改路径在跑前跑后各做一次指纹，因此 `.git/`

@@ -261,7 +261,8 @@ The endpoints the frontend reads:
 | `GET /api/summary` | `{"summary", "concurrency"}` |
 | `GET /api/registry` | `{"path", "hash", "mtime"}`; `hash` is the lowercase SHA-256 of the raw bytes |
 | `GET /api/projects` | `{"projects": [ … ]}` — **one row per lane** (taskgroup) plus its task tallies; each row also carries the owning `project` id |
-| `GET /api/tasks` | `{"tasks": [ … ], "count"}`; filters `?status=`, `?project=`, `?limit=` |
+| `GET /api/projects?by=project` | `{"projects": [ {"id", "path", "aliases", "taskgroups", "summary"} ]}` — **one row per project**, nesting its lane records and summing their lifecycle counts (`running`, `verifying`, `done`, `failed`, `blocked`, `timeout`, `cancelled`) |
+| `GET /api/tasks` | `{"tasks": [ … ], "count"}`; filters `?status=`, `?project=`, `?limit=`. `?project=` names a **project id** (every lane it owns) or a **lane id** (that lane alone); an id neither layer knows is an empty set, not an error |
 | `GET /api/tasks/<id>` | one task detail with its events |
 | `GET /api/tasks/<id>/events` | `{"task_id", "events"}` |
 | `GET /api/tasks/<id>/log` | a log window (tail, or forward from `?offset=`) |

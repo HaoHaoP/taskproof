@@ -38,6 +38,18 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
 _DEFAULT_LIMIT = 20
 
+#: Stable buckets in the grouped `/api/projects?by=project` summary. Every key is
+#: always present so a client can draw the same set of columns without guessing.
+_PROJECT_SUMMARY_STATUSES = (
+    "running",
+    "verifying",
+    "done",
+    "failed",
+    "blocked",
+    "timeout",
+    "cancelled",
+)
+
 #: `GET /api/tasks/<id>/log` — with no `offset`, return the file's last
 #: LOG_TAIL_BYTES. There is deliberately no "page backwards" affordance: the
 #: window is the tail, and later requests resume forward from `next`.
@@ -351,6 +363,8 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/registry":
             return self._registry()
         if path == "/api/projects":
+            if _first(parse_qs(parsed.query), "by") == "project":
+                return 200, {"projects": self._projects_by_project()}
             return 200, {"projects": self._projects()}
         if path == "/api/tasks":
             return self._tasks(parse_qs(parsed.query))
@@ -427,6 +441,51 @@ class _Handler(BaseHTTPRequestHandler):
             projects.append(record)
         return projects
 
+    def _projects_by_project(self):
+        """`GET /api/projects?by=project` -- one row per owning project.
+
+        This is deliberately a separate view: the historical `/api/projects`
+        payload stays one row per lane for the desktop client. The grouped view
+        nests each project's lane records and sums their lifecycle statuses.
+        """
+        reg_path = registry.workspace_registry_path(self.workspace)
+        reg = registry.load(reg_path)
+        probes = registry.read_probe_flags(reg_path)
+        conn = storage.connect(storage.db_path(self.workspace))
+        try:
+            storage.migrate(conn)
+            lane_counts = {}
+            for row in conn.execute(
+                "SELECT project, status, COUNT(*) AS count "
+                "FROM tasks GROUP BY project, status"
+            ):
+                lane_counts.setdefault(row["project"], {})[row["status"]] = int(
+                    row["count"]
+                )
+        finally:
+            conn.close()
+
+        projects = []
+        for project in reg.projects:
+            lanes = reg.lanes_for(project.id)
+            summary = {status: 0 for status in _PROJECT_SUMMARY_STATUSES}
+            for lane in lanes:
+                for status, count in lane_counts.get(lane.id, {}).items():
+                    if status in summary:
+                        summary[status] += count
+            projects.append(
+                {
+                    "id": project.id,
+                    "path": project.path,
+                    "aliases": list(project.aliases),
+                    "taskgroups": [
+                        registry.taskgroup_record(lane, probes) for lane in lanes
+                    ],
+                    "summary": summary,
+                }
+            )
+        return projects
+
     def _registry(self):
         reg_path = registry.workspace_registry_path(self.workspace)
         try:
@@ -443,19 +502,54 @@ class _Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 limit = _DEFAULT_LIMIT
 
+        project_key = _first(query, "project")
+        project_ids = None
+        if project_key is not None:
+            project_ids = self._project_filter_ids(project_key)
+
         conn = storage.connect(storage.db_path(self.workspace))
         try:
             storage.migrate(conn)
-            rows = storage.list_tasks(
-                conn,
-                status=_first(query, "status"),
-                project=_first(query, "project"),
-                limit=limit,
-            )
+            status = _first(query, "status")
+            if project_ids is None:
+                rows = storage.list_tasks(conn, status=status, limit=limit)
+            else:
+                rows = []
+                for lane_id in project_ids:
+                    rows.extend(
+                        storage.list_tasks(
+                            conn, status=status, project=lane_id, limit=limit
+                        )
+                    )
+                rows.sort(
+                    key=lambda row: row["created_at"] or "",
+                    reverse=True,
+                )
+                rows = rows[:limit]
             tasks = _with_live_files_many(rows)
         finally:
             conn.close()
         return 200, {"tasks": tasks, "count": len(tasks)}
+
+    def _project_filter_ids(self, key):
+        """Resolve `?project=` to lane ids while preserving lane-only fallback.
+
+        A taskgroup id wins over a project id (the old filter contract). A
+        project id expands to every lane it owns. If the registry is missing or
+        malformed, the key is treated as a lane id exactly as it was before this
+        endpoint learned about projects. Unknown keys return no rows, not 500.
+        """
+        if not key:
+            return []
+        try:
+            reg = registry.load(registry.workspace_registry_path(self.workspace))
+        except RegistryError:
+            return [key]
+        if any(lane.id == key for lane in reg.taskgroups):
+            return [key]
+        if any(project.id == key for project in reg.projects):
+            return [lane.id for lane in reg.lanes_for(key)]
+        return []
 
     def _detail(self, task_id):
         detail = dispatch.task_detail(self.workspace, task_id)
