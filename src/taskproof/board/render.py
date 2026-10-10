@@ -139,7 +139,12 @@ def _load_registered_projects(workspace):
         reg = registry.load(registry.workspace_registry_path(workspace))
     except Exception:
         return []
-    return [{"id": p.id, "path": p.path, "group": p.group} for p in reg.projects]
+    # One swimlane per lane (taskgroup), same shape as before: the board shows
+    # a line per dispatchable unit, ordered as it always has been.
+    return [
+        {"id": tg.id, "path": tg.path, "group": tg.group}
+        for tg in reg.taskgroups
+    ]
 
 
 def _known_project_ids(workspace):

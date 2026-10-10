@@ -224,18 +224,24 @@ REST 表面是**只读**的。所有写操作都留在 CLI 里 —— 注册项�
 ## 注册表
 
 taskproof 能派活的东西全写在工作区的一个 TOML 文件里
-（`~/.taskproof/projects.toml`）：路径、并发组、以及事后必须通过的验收命令。
+（`~/.taskproof/projects.toml`），分两层：**项目**（仓与默认路径）与一条或多条
+**任务组**（道，各自带验收命令与锁）。
 
 ```toml
 [[project]]
 id   = "my-app"
 path = "/absolute/path/to/my-app"
-group = "my-app"
+
+[[taskgroup]]
+id     = "my-app"
+project = "my-app"
 verify = "npm run build"    # 由 taskproof 在智能体退出后执行
 verify_kind = "build"       # check | build | none
 ```
 
-`taskproof register <路径>` 会追加一条。带注释的起点见
+老式的扁平 `[[project]]` 块只要带验收命令就照旧可用：它被读成「项目 + 一条同名
+道」。`taskproof register <路径>` 会追加一个 `[[taskgroup]]`（加 `--project`
+可挂到已存在的项目下）。带注释的起点见
 [`examples/projects.example.toml`](examples/projects.example.toml)，字段参考与
 硬错误清单见 [`docs/REGISTRY.zh-CN.md`](docs/REGISTRY.zh-CN.md)。
 

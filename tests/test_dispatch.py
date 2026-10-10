@@ -77,6 +77,10 @@ def registry_toml(
     if verify is not None:
         lines.append(f"verify = {_q(verify)}")
         lines.append(f"verify_kind = {_q(verify_kind)}")
+    else:
+        # Even without an acceptance command this is a lane: any lane field on a
+        # `[[project]]` block makes it a same-named taskgroup (zero migration).
+        lines.append('verify_kind = "none"')
     if forbidden:
         joined = ", ".join(_q(f) for f in forbidden)
         lines.append(f"forbidden_paths = [{joined}]")
@@ -810,7 +814,9 @@ class ConcurrencyGateTest(DispatchBase):
         self.write_registry(verify="exit 0", group="g")
         conn = self.open_conn()
         try:
-            scopes = concurrency.acquire(conn, "t-other", "g", cap=3, ttl=60)
+            # The lock is the taskgroup id ("proj"); the legacy `group` key is
+            # not a lane knob any more.
+            scopes = concurrency.acquire(conn, "t-other", "proj", cap=3, ttl=60)
             with self.assertRaises(ConcurrencyError):
                 dispatch(self.ws, "proj", "x", adapter="custom:sh -c 'echo hello'")
         finally:

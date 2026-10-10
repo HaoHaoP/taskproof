@@ -1,58 +1,87 @@
-# taskproof project registry — EXAMPLE
+# taskproof registry — EXAMPLE
 #
 # Copy to <workspace>/projects.toml and edit. This file is CONFIGURATION:
 # commit it to your own repository if you like. Runtime state lives in SQLite.
 #
-# Only one task per `group` runs at a time; `group` therefore expresses
-# "these repositories must not be built simultaneously" (shared build output,
-# same monorepo, same device, ...). Different groups run in parallel up to
-# `concurrency`.
+# Two layers:
+#   [[project]]    a repository / filter unit: id, path (default), aliases.
+#   [[taskgroup]]  one lane ("道") tasks are dispatched onto: id, owning
+#                  project, path (defaults to the project path), aliases and the
+#                  acceptance command. The concurrency lock IS the taskgroup, so
+#                  one task per lane runs at a time.
+#
+# A legacy `[[project]]` block that carries verify / verify_kind /
+# forbidden_paths / result_schema is still read as a same-named project *plus* a
+# same-named lane, so older files keep working with zero migration.
 
 [defaults]
 concurrency = 3   # global cap on simultaneous tasks
 timeout = 1800    # seconds before a task is judged stuck and terminated
 
 # ---------------------------------------------------------------------------
-# A minimal entry: one path, one acceptance command.
+# A single-lane repository.
+#
+# `[[project]]` names the repo; `[[taskgroup]]` is the lane it dispatches onto.
+# Because the project id equals the lane id, `taskproof run my-app "..."` works.
 # ---------------------------------------------------------------------------
 [[project]]
 id = "my-app"
 path = "/absolute/path/to/my-app"
-group = "my-app"
 aliases = ["app"]
-# The acceptance command is run by taskproof AFTER the agent exits, in this
-# workdir. The agent's own "I'm done" is never evidence.
+
+[[taskgroup]]
+id = "my-app"
+project = "my-app"
+# `path` omitted -> inherits the project's path.
+# The acceptance command runs AFTER the agent exits, in this workdir. The
+# agent's own "I'm done" is never evidence.
 verify = "npm run build"
 verify_kind = "build"          # check | build | none
 forbidden_paths = [".git/", "dist/", "node_modules/"]
 
 # ---------------------------------------------------------------------------
-# A repository with no runnable acceptance command yet.
+# A lane that stands up its own project.
+#
+# With no `project` key the lane id is also the project id (the compat rule),
+# so `--project` is only needed when several lanes share one repo.
 # `verify_kind = "none"` records verification as SKIPPED — never as passed.
 # ---------------------------------------------------------------------------
-[[project]]
+[[taskgroup]]
 id = "docs-site"
 path = "/absolute/path/to/docs-site"
-group = "docs"
 verify_kind = "none"
 
 # ---------------------------------------------------------------------------
-# A backend where the cheap check is preferred over a full build.
+# A repo with two lanes.
+#
+# The project owns the shared default path; each lane may override it (a
+# subdirectory, an independent clone, ...). `taskproof run api-service "..."`
+# is an error here — a bare project id is refused when it has several lanes.
 # ---------------------------------------------------------------------------
 [[project]]
 id = "api-service"
 path = "/absolute/path/to/api-service"
-group = "api"
+
+[[taskgroup]]
+id = "api-service"
+project = "api-service"
 verify = "mvn -q -DskipTests compile"
 verify_kind = "check"
 forbidden_paths = [".git/", "target/"]
+
+[[taskgroup]]
+id = "api-service-docs"
+project = "api-service"
+path = "/absolute/path/to/api-service/site"
+verify = "npm test"
+verify_kind = "check"
 
 # ---------------------------------------------------------------------------
 # Structured results (`result_schema`)
 #
 # `codex exec` accepts `--output-schema`, which constrains the agent's final
 # answer to JSON. taskproof always ships a default schema; override it per
-# project with `result_schema`:
+# taskgroup with `result_schema`:
 #
 #   (omit)  or  result_schema = "default"
 #       Use the package-shipped default schema (recommended).
@@ -64,7 +93,7 @@ forbidden_paths = [".git/", "target/"]
 #       taskproof never silently falls back to the default.
 #
 # Example:
-#   [[project]]
+#   [[taskgroup]]
 #   id = "custom-json"
 #   path = "/absolute/path/to/repo"
 #   verify_kind = "none"

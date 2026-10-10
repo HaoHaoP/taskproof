@@ -275,19 +275,26 @@ What the console does today:
 ## Registry
 
 Everything taskproof may dispatch is declared in one TOML file in the workspace
-(`~/.taskproof/projects.toml`): the path, the concurrency group, and the
-acceptance command that has to pass afterwards.
+(`~/.taskproof/projects.toml`) in two layers: a **project** (the repository and
+its default path) and one or more **taskgroups** (the lanes it dispatches onto,
+each with its own acceptance command and lock).
 
 ```toml
 [[project]]
 id   = "my-app"
 path = "/absolute/path/to/my-app"
-group = "my-app"
+
+[[taskgroup]]
+id     = "my-app"
+project = "my-app"
 verify = "npm run build"    # run by taskproof, after the agent exits
 verify_kind = "build"       # check | build | none
 ```
 
-`taskproof register <path>` appends an entry. See
+A flat, older `[[project]]` block that carries the acceptance command still
+works unchanged: it reads as a project plus a same-named lane. `taskproof
+register <path>` appends a `[[taskgroup]]` (add `--project` to hang it off an
+existing project). See
 [`examples/projects.example.toml`](examples/projects.example.toml) for a
 commented starting point, and [`docs/REGISTRY.md`](docs/REGISTRY.md) for the
 field reference and the list of hard errors.

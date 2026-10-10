@@ -53,17 +53,19 @@ class SchemaResolutionTest(unittest.TestCase):
         return path
 
     def test_omitted_defaults_to_packaged_schema(self):
+        # A lane that omits `result_schema` gets the packaged default. It is a
+        # self-contained taskgroup, so it also stands up project "p".
         path = self.write(
             f"""
-            [[project]]
+            [[taskgroup]]
             id = "p"
             path = {_q(self.tmp.name)}
             """
         )
-        project = registry.load(path).by_id("p")
-        self.assertEqual(project.result_schema, "default")
+        taskgroup = registry.load(path).by_id("p")
+        self.assertEqual(taskgroup.result_schema, "default")
 
-        resolved = registry.result_schema_path(project)
+        resolved = registry.result_schema_path(taskgroup)
         self.assertEqual(resolved, registry.builtin_result_schema_path())
         self.assertTrue(os.path.isfile(resolved))
         with open(resolved, encoding="utf-8") as fh:

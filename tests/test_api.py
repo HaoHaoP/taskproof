@@ -121,6 +121,20 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIsInstance(body["projects"], list)
         self.assertEqual([p["id"] for p in body["projects"]], ["proj"])
+        # One row per lane: the historical keys are all present, plus the
+        # owning `project` id. This pins the "shape unchanged, one added field"
+        # contract the dashboard's `?project=` filter relies on.
+        row = body["projects"][0]
+        self.assertEqual(row["project"], "proj")
+        self.assertEqual(
+            set(row),
+            {
+                "id", "project", "path", "group", "aliases", "verify",
+                "verify_kind", "forbidden_paths", "result_schema",
+                "auto_registered", "probe", "probe_exit",
+                "tasks", "in_progress", "failed", "last_activity",
+            },
+        )
 
     def test_tasks_list_and_filters(self):
         status, body = self._request("/api/tasks")

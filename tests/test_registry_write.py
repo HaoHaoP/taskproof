@@ -70,28 +70,45 @@ class _Base(unittest.TestCase):
 class AppendTest(_Base):
     def test_append_preserves_every_existing_byte(self):
         before = self.read()
-        registry.append_project(
+        registry.append_taskgroup(
             self.path,
             self.hash(),
-            {"id": "gamma", "path": "/tmp/gamma", "group": "gamma"},
+            {"id": "gamma", "path": "/tmp/gamma", "verify": "exit 0"},
         )
         after = self.read()
         self.assertTrue(after.startswith(before), "existing bytes were rewritten")
-        self.assertIn('id = "gamma"', after.decode("utf-8"))
+        text = after.decode("utf-8")
+        self.assertIn("[[taskgroup]]", text)
+        self.assertIn('id = "gamma"', text)
 
     def test_append_is_readable_by_load(self):
-        registry.append_project(
+        registry.append_taskgroup(
             self.path, self.hash(), {"id": "gamma", "path": "/tmp/gamma"}
         )
         reg = registry.load(self.path)
+        # gamma is self-contained: it stands up its own project.
         self.assertEqual([p.id for p in reg.projects], ["alpha", "beta", "gamma"])
+        self.assertEqual(reg.require("gamma").project, "gamma")
+
+    def test_append_stale_hash_is_a_conflict_and_does_not_write(self):
+        stale = self.hash()
+        with open(self.path, "a", encoding="utf-8") as fh:
+            fh.write("# hand edit\n")
+        current = self.read()
+        with self.assertRaises(registry.RegistryConflictError) as ctx:
+            registry.append_taskgroup(
+                self.path, stale, {"id": "gamma", "path": "/tmp/gamma"}
+            )
+        self.assertEqual(ctx.exception.current_hash, hashlib.sha256(current).hexdigest())
+        self.assertEqual(self.read(), current)
 
 
 class UpdateTest(_Base):
     def test_update_touches_only_the_named_lines(self):
         before = self.text().splitlines(keepends=True)
         registry.update_project(
-            self.path, "alpha", self.hash(), {"group": "renamed", "aliases": ["a", "aa"]}
+            self.path, "alpha", self.hash(),
+            {"path": "/tmp/alpha2", "aliases": ["a", "aa"]},
         )
         after = self.text().splitlines(keepends=True)
         diff = [
@@ -101,12 +118,12 @@ class UpdateTest(_Base):
         ]
         self.assertEqual(
             sorted(diff),
-            sorted(['-group = "alpha"\n', '+group = "renamed"\n',
+            sorted(['-path = "/tmp/alpha"\n', '+path = "/tmp/alpha2"\n',
                     '-aliases = ["a"]\n', '+aliases = ["a", "aa"]\n']),
         )
 
     def test_update_preserves_unknown_keys_and_comments(self):
-        registry.update_project(self.path, "alpha", self.hash(), {"group": "x"})
+        registry.update_project(self.path, "alpha", self.hash(), {"aliases": ["x"]})
         text = self.text()
         self.assertIn('note = "custom key load() drops"', text)
         self.assertIn("# alpha: a note that belongs to alpha", text)
@@ -115,7 +132,7 @@ class UpdateTest(_Base):
     def test_update_does_not_touch_the_next_project(self):
         marker = "# an upstream note"
         before = self.read()[self.text().index(marker):]
-        registry.update_project(self.path, "alpha", self.hash(), {"group": "x"})
+        registry.update_project(self.path, "alpha", self.hash(), {"aliases": ["x"]})
         after = self.read()[self.text().index(marker):]
         self.assertEqual(after, before)
 
@@ -125,13 +142,13 @@ class UpdateTest(_Base):
             fh.write("# hand edit\n")
         current = self.read()
         with self.assertRaises(registry.RegistryConflictError) as ctx:
-            registry.update_project(self.path, "alpha", stale, {"group": "x"})
+            registry.update_project(self.path, "alpha", stale, {"aliases": ["x"]})
         self.assertEqual(ctx.exception.current_hash, hashlib.sha256(current).hexdigest())
         self.assertEqual(self.read(), current)
 
     def test_update_unknown_id(self):
         with self.assertRaises(registry.RegistryNotFoundError):
-            registry.update_project(self.path, "nope", self.hash(), {"group": "x"})
+            registry.update_project(self.path, "nope", self.hash(), {"aliases": ["x"]})
 
     def test_update_rejects_immutable_fields(self):
         before = self.read()
@@ -140,10 +157,10 @@ class UpdateTest(_Base):
         self.assertEqual(self.read(), before)
 
     def test_invalid_candidate_never_replaces_the_file(self):
-        # An empty group is refused by validation; the file must stay byte-equal.
+        # A relative path is refused by validation; the file must stay equal.
         before = self.read()
         with self.assertRaises(RegistryError):
-            registry.update_project(self.path, "alpha", self.hash(), {"group": ""})
+            registry.update_project(self.path, "alpha", self.hash(), {"path": "rel"})
         self.assertEqual(self.read(), before)
 
     def test_result_schema_is_mutable(self):
@@ -178,6 +195,114 @@ class DeleteTest(_Base):
         text = self.text()
         self.assertNotIn("# beta: note directly above the block", text)
         self.assertIn("# an upstream note separated by a blank line", text)
+
+
+TWO_LAYER = '''\
+# two-layer registry, keep every comment
+[defaults]
+concurrency = 2
+
+# the repo itself
+[[project]]
+id = "api"
+path = "/tmp/api"
+
+# the primary lane (note that belongs to it)
+[[taskgroup]]
+id = "api-main"
+project = "api"
+verify = "make check"
+verify_kind = "check"
+note = "unknown key survives"
+
+# a second lane
+[[taskgroup]]
+id = "api-docs"
+project = "api"
+path = "/tmp/api/site"
+verify = "npm test"
+verify_kind = "check"
+'''
+
+
+class TwoLayerWriteTest(_Base):
+    """Surgical writes must work on both `[[project]]` and `[[taskgroup]]`."""
+
+    def setUp(self):
+        super().setUp()
+        with open(self.path, "w", encoding="utf-8") as fh:
+            fh.write(TWO_LAYER)
+
+    def test_append_taskgroup_under_existing_project(self):
+        before = self.read()
+        registry.append_taskgroup(
+            self.path,
+            self.hash(),
+            {"id": "api-worker", "project": "api", "verify": "make lint"},
+        )
+        after = self.read()
+        self.assertTrue(after.startswith(before))
+        reg = registry.load(self.path)
+        self.assertEqual(
+            [t.id for t in reg.lanes_for("api")],
+            ["api-main", "api-docs", "api-worker"],
+        )
+        # The new lane inherits the project's path.
+        self.assertEqual(reg.require("api-worker").path, "/tmp/api")
+
+    def test_update_taskgroup_touches_only_its_line(self):
+        before = self.text().splitlines(keepends=True)
+        registry.update_project(
+            self.path, "api-main", self.hash(), {"verify": "make test"}
+        )
+        after = self.text().splitlines(keepends=True)
+        diff = [
+            line
+            for line in difflib.unified_diff(before, after, n=0)
+            if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+        ]
+        self.assertEqual(diff, ['-verify = "make check"\n', '+verify = "make test"\n'])
+        self.assertIn('note = "unknown key survives"', self.text())
+        self.assertIn("# the primary lane", self.text())
+
+    def test_update_taskgroup_path_overrides_inheritance(self):
+        registry.update_project(
+            self.path, "api-docs", self.hash(), {"path": "/tmp/api/web"}
+        )
+        self.assertEqual(registry.load(self.path).require("api-docs").path, "/tmp/api/web")
+
+    def test_update_project_block_does_not_touch_its_lanes(self):
+        marker = "# the primary lane"
+        before = self.read()[self.text().index(marker):]
+        registry.update_project(self.path, "api", self.hash(), {"path": "/tmp/api2"})
+        after = self.read()[self.text().index(marker):]
+        self.assertEqual(after, before)
+        self.assertEqual(registry.load(self.path).require("api-main").path, "/tmp/api2")
+
+    def test_delete_taskgroup_keeps_project_and_neighbour(self):
+        registry.delete_project(self.path, "api-main", self.hash())
+        text = self.text()
+        self.assertNotIn('id = "api-main"', text)
+        self.assertNotIn("# the primary lane", text)
+        self.assertIn('id = "api-docs"', text)
+        self.assertIn('id = "api"', text)
+        self.assertEqual([t.id for t in registry.load(self.path).taskgroups], ["api-docs"])
+
+    def test_deleting_a_project_with_lanes_is_refused(self):
+        # Removing the project would orphan its lanes, which `load` rejects; the
+        # candidate never reaches disk.
+        before = self.read()
+        with self.assertRaises(RegistryError):
+            registry.delete_project(self.path, "api", self.hash())
+        self.assertEqual(self.read(), before)
+
+    def test_delete_project_then_its_lanes(self):
+        registry.delete_project(self.path, "api-main", self.hash())
+        registry.delete_project(self.path, "api-docs", self.hash())
+        registry.delete_project(self.path, "api", self.hash())
+        text = self.text()
+        self.assertNotIn("[[project]]", text)
+        self.assertNotIn("[[taskgroup]]", text)
 
 
 class SetDefaultTest(_Base):

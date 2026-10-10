@@ -408,9 +408,12 @@ class _Handler(BaseHTTPRequestHandler):
         finally:
             conn.close()
         projects = []
-        for project in reg.projects:
-            record = registry.project_record(project, probes)
-            stat = overview.get(project.id) or {}
+        # One row per lane (taskgroup), unchanged shape: the dashboard keys its
+        # `?project=` filter off the row id. The only addition is the owning
+        # `project` field inside `taskgroup_record`.
+        for taskgroup in reg.taskgroups:
+            record = registry.taskgroup_record(taskgroup, probes)
+            stat = overview.get(taskgroup.id) or {}
             record.update(
                 {
                     # Overview numbers, derived from the same aggregate SQL the

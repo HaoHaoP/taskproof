@@ -88,8 +88,8 @@ events.jsonl —— 审计流水
 ```sql
 tasks
   id            TEXT PK     t-20261007-001
-  project       TEXT        注册表 id
-  group         TEXT        并发分组
+  project       TEXT        任务组 id（本次运行瞄准的那条道）
+  group         TEXT        锁名（如今就等于任务组 id）
   brief         TEXT        任务描述
   status        TEXT        running|verifying|done|failed|blocked|timeout|cancelled
   adapter       TEXT        codex|claude|gemini|opencode|custom:<cmd>
@@ -118,6 +118,16 @@ claims                          -- 并发守卫，带过期回收
   claimed_at TEXT
   expires_at TEXT               -- 死进程会被自动回收
 ```
+
+**注册表模型：项目与任务组。** 注册表有两种块。`[[project]]` 是仓 / 筛选单位
+（`id` + `path` + `aliases`），本身不可派活；`[[taskgroup]]`（一条道）才是
+可派活的单位：`id`、归属 `project`、`path`（缺省继承项目）、验收命令与结果
+契约。并发锁就是任务组自己。
+
+`tasks` 表不变：`project` 存本次运行瞄准的**任务组 id**，`group` 存锁名
+（如今就等于任务组 id）。拆分之前写入的行里存的也正好是这两个值，因此**无需
+任何数据迁移**。老式的扁平 `[[project]]` 块只要带任一道字段，就被读成「项目 +
+一条同名道」（见 `docs/REGISTRY.zh-CN.md`）。
 
 ## 适配器契约
 
@@ -261,9 +271,10 @@ presence   只比文件集合的增删
 
 ```
 taskproof init                          初始化工作区（建库、写示例注册表）
-taskproof register <path> [--dry-run]   探测仓库并登记
-taskproof projects                      列已登记项目
-taskproof run <project|path> "<brief>"  派活（主命令）
+taskproof register <path> [--project P] [--dry-run]   探测仓库并追加一条道
+taskproof projects                      列项目（每个项目一行，带它的道）
+taskproof taskgroups                    列任务组（道）：id / project / path / verify
+taskproof run <taskgroup|project|path> "<brief>"  派活（主命令）
           [--adapter X] [--model X] [--reasoning X]
           [--read-only] [--worktree] [--no-verify] [--timeout N]
 taskproof tasks [--status S] [--project P] [--limit N]

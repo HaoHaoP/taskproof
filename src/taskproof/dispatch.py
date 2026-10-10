@@ -162,9 +162,9 @@ def dispatch(
     # registry we are about to read).
     prepare_workspace(workspace)
 
-    # ① resolve the project. A missing/unknown key is a RegistryError (exit 2).
+    # ① resolve the taskgroup. A missing/unknown key is a RegistryError (exit 2).
     reg = registry.load(registry.workspace_registry_path(workspace))
-    project = reg.require(project_key)
+    taskgroup = reg.require(project_key)
 
     effective_timeout = timeout if timeout is not None else reg.timeout
 
@@ -194,7 +194,7 @@ def dispatch(
         ttl = max(1, int(effective_timeout)) + 60
         try:
             scopes = concurrency.acquire(
-                conn, task_id, project.group, cap=setting.value, ttl=ttl
+                conn, task_id, taskgroup.group, cap=setting.value, ttl=ttl
             )
         except ConcurrencyError as exc:
             raise _cap_aware_refusal(exc, setting) from None
@@ -206,8 +206,8 @@ def dispatch(
             # ④ the task row + the `started` event.
             task = Task(
                 id=task_id,
-                project=project.id,
-                group=project.group,
+                project=taskgroup.id,
+                group=taskgroup.group,
                 brief=brief,
                 status=STATUS_RUNNING,
                 adapter=adapter,
@@ -223,8 +223,8 @@ def dispatch(
                 task_id,
                 "started",
                 {
-                    "project": project.id,
-                    "group": project.group,
+                    "project": taskgroup.id,
+                    "group": taskgroup.group,
                     "adapter": adapter,
                     "read_only": read_only,
                     "worktree": worktree,
@@ -247,7 +247,7 @@ def dispatch(
             _execute_claimed(
                 conn,
                 task_id=task_id,
-                project=project,
+                taskgroup=taskgroup,
                 adapter_obj=adapter_obj,
                 adapter_name=adapter,
                 brief=brief,
@@ -268,7 +268,7 @@ def _execute_claimed(
     conn,
     *,
     task_id: str,
-    project,
+    taskgroup,
     adapter_obj,
     adapter_name: str,
     brief: str,
@@ -286,16 +286,16 @@ def _execute_claimed(
     which stays the caller's.
     """
     worktree_path = None
-    run_dir = project.path
+    run_dir = taskgroup.path
     try:
         if worktree:
-            if not _is_git_repo(project.path):
+            if not _is_git_repo(taskgroup.path):
                 raise UsageError(
-                    f"--worktree needs a git repository, but {project.path} "
+                    f"--worktree needs a git repository, but {taskgroup.path} "
                     "is not one",
                     hint="run without --worktree, or point the registry at a git checkout",
                 )
-            worktree_path = _create_worktree(project.path, task_id)
+            worktree_path = _create_worktree(taskgroup.path, task_id)
             run_dir = worktree_path
             storage.append_event(conn, task_id, "worktree_created", {"path": run_dir})
 
@@ -308,7 +308,7 @@ def _execute_claimed(
         _execute(
             conn,
             task_id=task_id,
-            project=project,
+            taskgroup=taskgroup,
             adapter_obj=adapter_obj,
             adapter_name=adapter_name,
             brief=brief,
@@ -340,11 +340,11 @@ def _execute_claimed(
                         "changed": changed,
                         # The source repo, so `rm` can unregister the checkout
                         # without a registry lookup.
-                        "repo": project.path,
+                        "repo": taskgroup.path,
                     },
                 )
             else:
-                error = _remove_worktree(project.path, worktree_path)
+                error = _remove_worktree(taskgroup.path, worktree_path)
                 if error:
                     storage.append_event(
                         conn,
@@ -407,7 +407,7 @@ def _execute(
     conn,
     *,
     task_id: str,
-    project,
+    taskgroup,
     adapter_obj,
     adapter_name: str,
     brief: str,
@@ -424,11 +424,11 @@ def _execute(
     """
     log_path = os.path.join(workspace, "logs", f"{task_id}.log")
 
-    # Resolve the structured-result contract for THIS project: the project
+    # Resolve the structured-result contract for THIS taskgroup: the taskgroup
     # setting wins, otherwise the package default. `None` means structured
     # output is disabled — that is recorded rather than done silently, so a
     # free-text result can always be explained after the fact.
-    schema_path = registry.result_schema_path(project)
+    schema_path = registry.result_schema_path(taskgroup)
     if schema_path is None:
         storage.append_event(
             conn,
@@ -455,7 +455,7 @@ def _execute(
     git_rules = []
     file_rules = []
     presence_rules = []
-    for raw in project.forbidden_paths or []:
+    for raw in taskgroup.forbidden_paths or []:
         # Keep the historical untyped `.git/` spelling working: it has always
         # meant the state probe since card 30. An explicit `file:.git/` opts
         # back into the file fingerprint signal.
@@ -671,7 +671,7 @@ def _execute(
                 "violations": violations,
                 # Flat, backwards-compatible list for older boards/callers.
                 "paths": violation_paths,
-                "rules": list(project.forbidden_paths),
+                "rules": list(taskgroup.forbidden_paths),
                 # True when a protected tree was too large to walk fully, so the
                 # guarantee for that rule was partial.
                 "snapshot_truncated": forbidden_truncated,
@@ -681,7 +681,7 @@ def _execute(
     # ⑦ acceptance, run in the PROJECT workdir — never the workspace. A run that
     # is skipped (read-only, --no-verify, or no configured command) is recorded
     # as SKIPPED, never as a pass.
-    skip_reason = _skip_reason(read_only, skip_verify, project.verify)
+    skip_reason = _skip_reason(read_only, skip_verify, taskgroup.verify)
     outcome = None
     if skip_reason is not None:
         verify_status = VERIFY_SKIPPED
@@ -697,10 +697,10 @@ def _execute(
         # recorded as `verifying` rather than a stale `running`.
         storage.update_task(conn, task_id, status=STATUS_VERIFYING)
         storage.append_event(
-            conn, task_id, "verifying", {"command": project.verify}
+            conn, task_id, "verifying", {"command": taskgroup.verify}
         )
         outcome = verify.run_acceptance(
-            run_dir, project.verify, timeout=timeout
+            run_dir, taskgroup.verify, timeout=timeout
         )
         ran = outcome.ran
         if not outcome.ran:
@@ -709,7 +709,7 @@ def _execute(
             verify_exit_field = None
         else:
             verify_status = "PASSED" if outcome.passed else "FAILED"
-            verify_cmd_field = project.verify
+            verify_cmd_field = taskgroup.verify
             verify_exit_field = outcome.exit_code
         note = outcome.note
 
@@ -1216,16 +1216,16 @@ def verify_task(workspace: str, task_id: str) -> verify.VerifyOutcome:
         row = storage.get_task(conn, task_id)
         if row is None:
             raise UsageError(f"no such task: {task_id}")
-        project = registry.load(
+        taskgroup = registry.load(
             registry.workspace_registry_path(workspace)
         ).require(row["project"])
-        workdir = row["workdir"] or project.path
+        workdir = row["workdir"] or taskgroup.path
 
-        outcome = verify.run_acceptance(workdir, project.verify)
+        outcome = verify.run_acceptance(workdir, taskgroup.verify)
         status = VERIFY_SKIPPED if not outcome.ran else (
             "PASSED" if outcome.passed else "FAILED"
         )
-        fields = {"verify_cmd": project.verify if outcome.ran else VERIFY_SKIPPED}
+        fields = {"verify_cmd": taskgroup.verify if outcome.ran else VERIFY_SKIPPED}
         if outcome.exit_code is not None:
             fields["verify_exit"] = outcome.exit_code
         if outcome.files_changed is not None:

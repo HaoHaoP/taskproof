@@ -10,6 +10,19 @@
 `examples/projects.example.toml` 是一份可直接用的起点。本文是参考手册，那份
 文件是导览。
 
+## 两层：项目与任务组
+
+一条登记项是两种东西之一：
+
+* **项目**（`[[project]]`）—— 仓 / 筛选单位：`id`、默认 `path`、`aliases`。
+  它本身**不可派活**。
+* **任务组**（`[[taskgroup]]`，"道"）—— 一条可以派活的道：`id`、归属
+  `project`、`path`（缺省继承项目）、`aliases`、验收命令与结果契约。
+
+项目把「同一个仓里发生过的所有事」的身份聚在一起；任务组是一次运行真正瞄准
+的单位。**并发锁就是任务组自己**，所以一条道同时只跑一个任务。把锁拆到多条道
+共享，是另一个特性，本格式不表达。
+
 ## 结构
 
 ```toml
@@ -17,23 +30,58 @@
 concurrency = 3      # 同时运行的任务数上限
 timeout     = 1800   # 秒；超过则判定卡死并终止
 
+# 仓：一个身份、一个默认路径。
 [[project]]
-id   = "my-app"
-path = "/absolute/path/to/my-app"
-group = "my-app"
+id      = "my-app"
+path    = "/absolute/path/to/my-app"
+aliases = ["app"]
+
+# 一条道。路径继承自项目。
+[[taskgroup]]
+id     = "my-app"
+project = "my-app"
 verify = "npm run build"
 verify_kind = "build"
 ```
 
 `[defaults]` 可省略；两个键省略时取上面显示的值。
 
-## 项目字段
+一个项目可以带**多条道** —— 子目录、另一份克隆、与仓共享的文档构建。每条道
+有自己的验收命令；写了 `path` 就覆盖项目默认路径：
+
+```toml
+[[project]]
+id   = "api-service"
+path = "/absolute/path/to/api-service"
+
+[[taskgroup]]
+id      = "api-service"
+project = "api-service"
+verify  = "mvn -q -DskipTests compile"
+
+[[taskgroup]]
+id      = "api-service-docs"
+project = "api-service"
+path    = "/absolute/path/to/api-service/site"   # 子目录
+verify  = "npm test"
+```
+
+## `[[project]]` 字段
 
 | 字段 | 必填 | 默认 | 说明 |
 |---|---|---|---|
-| `id` | 是 | — | 唯一。所有命令都靠它指代项目。重复 id 是硬错误。 |
-| `path` | 是 | — | 必须是**绝对路径**。 |
-| `group` | 否 | `"default"` | 并发组。见下。 |
+| `id` | 是 | — | 唯一。重复 id 是硬错误。 |
+| `path` | 是 | — | 必须是**绝对路径**。它名下各条道的默认路径。 |
+| `aliases` | 否 | `[]` | 别名，凡是能写 id 的地方都能写它。 |
+| `verify` / `verify_kind` / `forbidden_paths` / `result_schema` | 否 | — | 不是项目字段。`[[project]]` 块上只要出现其中任意一个，就触发下面的兼容规则。 |
+
+## `[[taskgroup]]` 字段
+
+| 字段 | 必填 | 默认 | 说明 |
+|---|---|---|---|
+| `id` | 是 | — | 唯一。命令可以拿它指代一条道；它同时也是锁名。 |
+| `project` | 否 | 任务组 `id` | 归属项目。省略 ⟺ 这条道自成一个同名项目。 |
+| `path` | 否 | 项目的 `path` | 必须是**绝对路径**。写了就覆盖项目默认值。 |
 | `aliases` | 否 | `[]` | 别名，凡是能写 id 的地方都能写它。 |
 | `verify` | 否 | — | 验收命令；由 taskproof 在智能体退出**之后**执行。 |
 | `verify_kind` | 否 | `"none"` | `check` / `build` / `none`。其它取值是硬错误。 |
@@ -41,18 +89,44 @@ verify_kind = "build"
 | `result_schema` | 否 | `"default"` | `"default"`、`"none"`，或指向 JSON Schema 的绝对路径。 |
 | `auto_registered` | 否 | `false` | 由 `taskproof register` 写入，不打算手改。 |
 
+## 读旧格式：零迁移
+
+一个 `[[project]]` 块只要带**任一**道字段 —— `verify`、`verify_kind`、
+`forbidden_paths`、`result_schema` —— 就被读成**两条**声明：
+
+* 项目 `id = <块 id>`，`path` / `aliases` 照搬；
+* 任务组 `id = <块 id>`、`project = <块 id>`，路径继承，道字段照搬。
+
+于是拆分之前写的注册表**一个字都不用改**就能继续跑：每个原本可派活的块变成
+「项目 + 一条同名道」，`taskproof run <旧 id> "…"` 照旧解析。不带任何道字段的
+`[[project]]` 块是纯筛选项目（0 条道），在挂上道之前不可派活。
+
+旧的 `group` 键只被当作名字：锁现在是任务组 id，所以两个共享 `group` 的块会变成
+两条彼此独立的道。共享锁不在本格式的范围内。
+
+## 分辨率顺序
+
+`by_id` / `require`（因而 `run`、`accept`、`tasks --project` 等）按下面的顺序匹配：
+
+1. **任务组**的 `id`，然后是任务组 `alias`；
+2. **项目**的 `id`，然后是项目 `alias` —— 仅当该项目**只有一条道**时才能解析。
+   项目有多条道是硬错误，报文会列出候选，因此裸的项目 id 绝不会被静默派错道；
+3. 路径：先按道路径精确匹配，再按项目路径。
+
+按工作目录推断（`resolve_scope`）保持旧行为：cwd 落在某条道的路径**或其子目录**
+下即匹配，**路径最深**的那条道胜出，因此嵌套的检出的优先级高于父仓库。两条道在
+同一深度命中时视为歧义并拒绝，报文点名候选。
+
 ## 需要讲清的语义
 
-**`group` 是串行键，不是标签。** 同一组同时只跑一个任务；不同组并行，上限为
-`concurrency`。不写 `group` 的项目落进 `default`，于是*所有*省略它的项目共用
-一条道、全部串行。两个仓库可以同时构建就给不同组；不能同时构建（共享构建产物、
-同一个 monorepo、同一台设备）就给同一组。
+**道的锁就是它的 id。** 每条任务组同时只跑一个任务；不同任务组并行，上限为
+`concurrency`。给每条道自己的 id；旧文件里的 `group` 键不再把两条道并成一把锁。
 
 **缺 `verify` 记为「跳过」，绝不是「通过」。** 没有验收命令时 `verify_kind`
 被强制为 `none`，验收记为 skipped。这是刻意的：*"没检查"* 与 *"检查了且通过"*
 在审计流里绝不能长得一样。
 
-**验收命令不等于智能体的自述。** `verify` 在智能体进程退出之后、于项目路径下
+**验收命令不等于智能体的自述。** `verify` 在智能体进程退出之后、于道的路径下
 执行。"我干完了"从来不算证据。
 
 **自定义 schema 文件不存在是硬错误。** `result_schema` 指向一个不存在的路径会
@@ -116,19 +190,24 @@ git 的记账文件；因此只读的 `git status` 刷新 index 不算违规，�
 注册表文件不存在
 TOML 非法
 [defaults] 不是表
-某个 [[project]] 项不是表
+某个 [[project]] / [[taskgroup]] 项不是表
 某个项目缺 id 或 path
+某个任务组缺 id
+某个任务组引用了不存在的项目
+不含 project、又没有 path 的任务组
 path 不是绝对路径
-项目 id 重复
+项目 id 重复 / 任务组 id 重复
 verify_kind 不是 check / build / none 之一
 result_schema 既不是 "default"、"none"，也不是绝对路径
 result_schema 指定的文件不存在
+裸项目 id 对应多条道
 ```
 
 ## 编辑方式
 
 这个文件是配置：你愿意的话，把它提交进你自己的仓库。`taskproof register <path>`
-会追加一条，是添加项目的正规入口；但手改完全可以 —— 每次运行都会重新读它。
+会追加一个 `[[taskgroup]]`，是添加一条道的正规入口；但手改完全可以 —— 每次运行
+都会重新读它。
 
 运行期状态从不落在这里。任务、事件与判定在 SQLite 存储里；审计流是 JSONL。
 
@@ -145,7 +224,7 @@ result_schema 指定的文件不存在
 | `GET /api/health` | `{"ok", "version", "concurrency"}` |
 | `GET /api/summary` | `{"summary", "concurrency"}` |
 | `GET /api/registry` | `{"path", "hash", "mtime"}`；`hash` 是原始字节的 sha256（十六进制小写） |
-| `GET /api/projects` | `{"projects": [ … ]}` —— 每条是注册表项目加上它的任务计数 |
+| `GET /api/projects` | `{"projects": [ … ]}` —— **一行一条道**（taskgroup）加上它的任务计数；每行另带归属的 `project` id |
 | `GET /api/tasks` | `{"tasks": [ … ], "count"}`；过滤 `?status=`、`?project=`、`?limit=` |
 | `GET /api/tasks/<id>` | 单个任务详情连同它的事件 |
 | `GET /api/tasks/<id>/events` | `{"task_id", "events"}` |
@@ -154,17 +233,19 @@ result_schema 指定的文件不存在
 ## 注册表写入
 
 `projects.toml` 由 CLI 编辑，绝不经过 API。`taskproof config` 调用
-`registry.set_default`；`taskproof register` 追加一个块。底层注册表写入函数
-（`append_project` / `update_project` / `delete_project`）在 `expected_hash`
+`registry.set_default`；`taskproof register` 追加一个新的 `[[taskgroup]]` 块
+（用 `--project` 挂到已存在的项目下；不写就自成一个项目）。底层注册表写入函数
+（`append_taskgroup` / `update_project` / `delete_project`）在 `expected_hash`
 对不上时抛 `RegistryConflictError`，而不是悄悄覆盖手改过的文件。
+`update_project` / `delete_project` 对**两种**块都生效。
 
 ### 外科式改写
 
 写入按字节进行，绝不把解析后的 TOML 整体重新序列化 —— 那会把
 手写注释、以及 `registry.load` 不认识的键全部冲掉。正确做法是：读整个文件
-文本，按行定位 `[[project]]` 块边界，只在目标块的范围内按行改 / 加 / 删键；
-其它字节一律原样保留。删除块时，紧贴其上、中间没有空行隔开的注释一起删；
-被空行隔开的注释留下，这样邻近项目的手写说明不会被误删。改完先
+文本，按行定位 `[[project]]` / `[[taskgroup]]` 块边界，只在目标块的范围内按行
+改 / 加 / 删键；其它字节一律原样保留。删除块时，紧贴其上、中间没有空行隔开的
+注释一起删；被空行隔开的注释留下，这样邻近块的手写说明不会被误删。改完先
 用 `tomllib` 回读，再用 `load` 校验，只有通过才原子落盘（同目录临时文件 +
 `os.replace`）。解析或校验不过的候选，绝不会碰到真正的文件。
 

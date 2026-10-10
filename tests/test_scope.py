@@ -14,15 +14,23 @@ import unittest
 import tempfile
 
 from taskproof import registry
-from taskproof.models import Project
+from taskproof.models import Project, Taskgroup
 
 
-def make_registry(projects):
-    return registry.Registry(list(projects), {})
+def make_registry(taskgroups):
+    """A registry whose every taskgroup is the sole lane of its own project."""
+    projects = {}
+    for taskgroup in taskgroups:
+        projects.setdefault(
+            taskgroup.project, Project(id=taskgroup.project, path=taskgroup.path)
+        )
+    return registry.Registry(list(projects.values()), list(taskgroups), {})
 
 
 def project(pid, path, **kwargs):
-    return Project(id=pid, path=path, group=pid, **kwargs)
+    """A single-lane project: lane id == project id (the compat fallback)."""
+    aliases = kwargs.pop("aliases", [])
+    return Taskgroup(id=pid, project=pid, path=path, aliases=aliases, **kwargs)
 
 
 class ResolveScopeTest(unittest.TestCase):
@@ -137,6 +145,112 @@ class ResolveScopeTest(unittest.TestCase):
         self.assertEqual(scope, "ghost")
         self.assertEqual(source, "来自 --project")
         self.assertIsNone(registry.resolve_scope(None, cwd=self.root)[0])
+
+
+class MultiLaneScopeTest(unittest.TestCase):
+    """A project id resolves only when it has exactly one lane; cwd picks the
+    deepest lane path and refuses a tie."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = os.path.realpath(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _mkdir(self, *parts):
+        path = os.path.join(self.root, *parts)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def _reg(self, taskgroups):
+        projects = {}
+        for tg in taskgroups:
+            projects.setdefault(tg.project, Project(id=tg.project, path=tg.path))
+        return registry.Registry(list(projects.values()), list(taskgroups), {})
+
+    def test_single_lane_project_id_resolves_to_that_lane(self):
+        app = self._mkdir("app")
+        tg = Taskgroup(id="app-main", project="app", path=app)
+        reg = self._reg([tg])
+        self.assertEqual(reg.by_id("app").id, "app-main")
+
+    def test_multi_lane_project_id_is_refused_with_candidates(self):
+        app = self._mkdir("app")
+        reg = self._reg(
+            [
+                Taskgroup(id="app-main", project="app", path=app),
+                Taskgroup(id="app-docs", project="app", path=app),
+            ]
+        )
+        with self.assertRaises(registry.RegistryError) as ctx:
+            reg.by_id("app")
+        message = str(ctx.exception)
+        self.assertIn("app-main", message)
+        self.assertIn("app-docs", message)
+
+    def test_cwd_picks_the_deepest_lane_path(self):
+        app = self._mkdir("app")
+        site = self._mkdir("app", "site")
+        reg = self._reg(
+            [
+                Taskgroup(id="app-main", project="app", path=app),
+                Taskgroup(id="app-docs", project="app", path=site),
+            ]
+        )
+        self.assertEqual(registry.resolve_scope(reg, cwd=site)[0], "app-docs")
+        self.assertEqual(registry.resolve_scope(reg, cwd=app)[0], "app-main")
+
+    def test_cwd_tie_is_refused_with_candidates(self):
+        app = self._mkdir("app")
+        reg = self._reg(
+            [
+                Taskgroup(id="lane-a", project="app", path=app),
+                Taskgroup(id="lane-b", project="app", path=app),
+            ]
+        )
+        with self.assertRaises(registry.RegistryError) as ctx:
+            registry.resolve_scope(reg, cwd=app)
+        message = str(ctx.exception)
+        self.assertIn("lane-a", message)
+
+    def test_project_path_resolves_only_when_lane_is_unique(self):
+        # A project path may differ from every lane path (lanes live in
+        # subdirectories). Resolution must fall through to the project and then
+        # hand back the one lane -- never a bare `Project` object.
+        app = self._mkdir("app")
+        main = self._mkdir("app", "main")
+        reg = registry.Registry(
+            [Project(id="app", path=app)],
+            [Taskgroup(id="app-main", project="app", path=main)],
+            {},
+        )
+        self.assertEqual(reg.by_id(app).id, "app-main")
+
+    def test_multi_lane_project_path_is_refused_with_candidates(self):
+        app = self._mkdir("app")
+        main = self._mkdir("app", "main")
+        docs = self._mkdir("app", "docs")
+        reg = registry.Registry(
+            [Project(id="app", path=app)],
+            [
+                Taskgroup(id="app-main", project="app", path=main),
+                Taskgroup(id="app-docs", project="app", path=docs),
+            ],
+            {},
+        )
+        with self.assertRaises(registry.RegistryError) as ctx:
+            reg.by_id(app)
+        message = str(ctx.exception)
+        self.assertIn("app-main", message)
+        self.assertIn("app-docs", message)
+
+    def test_bare_project_path_resolves_to_nothing(self):
+        # A project with no lanes is a filter-only unit: its path resolves to
+        # no taskgroup, never a bare `Project`.
+        app = self._mkdir("app")
+        reg = registry.Registry([Project(id="app", path=app)], [], {})
+        self.assertIsNone(reg.by_id(app))
 
 
 if __name__ == "__main__":

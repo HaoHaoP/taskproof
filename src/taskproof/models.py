@@ -27,11 +27,30 @@ TERMINAL_STATUSES = (
 
 @dataclass
 class Project:
-    """One registry entry — see examples/projects.example.yaml."""
+    """A repository / filter unit: where the work happens and what to call it.
+
+    A project is *not* dispatchable on its own — it is the shared identity and
+    default path that one or more :class:`Taskgroup` lanes hang off. Renaming a
+    project (or adding a lane) never splits its history.
+    """
 
     id: str
     path: str
-    group: str = "default"
+    aliases: List[str] = field(default_factory=list)
+
+
+@dataclass
+class Taskgroup:
+    """One lane ("道"): the unit a task is dispatched onto.
+
+    It owns the acceptance command, the forbidden-path rules and the structured
+    result contract; ``path`` defaults to the owning project's path but may
+    point anywhere (an independent clone, a subdirectory, ...).
+    """
+
+    id: str
+    project: str
+    path: str
     aliases: List[str] = field(default_factory=list)
     verify: Optional[str] = None
     verify_kind: str = "none"  # check | build | none
@@ -41,6 +60,16 @@ class Project:
     #: (fall back to free text, never silent), or an absolute path to a custom
     #: JSON Schema. See `registry.result_schema_path`.
     result_schema: str = "default"
+
+    @property
+    def group(self) -> str:
+        """The concurrency lock name for this lane.
+
+        The lock *is* the taskgroup: one task per taskgroup runs at a time.
+        Sharing one lock across several lanes is a separate feature and is not
+        expressed by this model yet.
+        """
+        return self.id
 
 
 @dataclass

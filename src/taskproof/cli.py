@@ -68,9 +68,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path")
     p.add_argument("--dry-run", action="store_true", help="probe only, write nothing")
     p.add_argument("--id")
-    p.add_argument("--group")
+    p.add_argument("--project", help="attach this lane to an existing project id")
+    # Deprecated and ignored: the concurrency lock is the taskgroup id itself,
+    # but the flag stays so older scripts keep running.
+    p.add_argument("--group", help=argparse.SUPPRESS)
 
-    sub.add_parser("projects", help="list registered projects")
+    sub.add_parser("projects", help="list registered projects (with their lanes)")
+
+    sub.add_parser("taskgroups", help="list registered taskgroups (lanes)")
 
     p = sub.add_parser("run", help="dispatch one task (primary command)")
     p.add_argument("project", help="project id, alias, or path")
@@ -235,37 +240,37 @@ def _toml_string(value) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _append_project_block(reg_path, *, project_id, path, group, command, kind, probe):
-    """Append one [[project]] table, leaving every existing byte untouched."""
-    lines = [
-        "",
-        "[[project]]",
-        f"id = {_toml_string(project_id)}",
-        f"path = {_toml_string(path)}",
-        f"group = {_toml_string(group)}",
-    ]
-    if command:
-        lines.append(f"verify = {_toml_string(command)}")
-        lines.append(f"verify_kind = {_toml_string(kind)}")
-        if probe:
-            lines.append(f"probe = {_toml_string(probe)}")
-    else:
-        lines.append('verify_kind = "none"')
-    with open(reg_path, "a", encoding="utf-8") as handle:
-        handle.write("\n".join(lines) + "\n")
+def _append_taskgroup_block(reg_path, *, taskgroup_id, path, project,
+                            command, kind, probe, probe_exit):
+    """Append one `[[taskgroup]]` block through the surgical writer.
+
+    Every existing byte is preserved and the candidate is validated by `load`
+    before it replaces the file. A missing `project` means the lane stands up a
+    same-named project (the zero-migration compat rule).
+    """
+    entry = {
+        "id": taskgroup_id,
+        "project": project,
+        "path": path,
+        "verify": command,
+        "verify_kind": kind,
+        "probe": probe,
+        "probe_exit": probe_exit,
+    }
+    registry.append_taskgroup(reg_path, registry.registry_hash(reg_path), entry)
 
 
 def _register_human(payload) -> str:
     lines = [
-        f"project: {payload['id']}  ({payload['path']})",
-        f"group:   {payload['group']}",
+        f"project:   {payload['project']}  ({payload['path']})",
+        f"taskgroup: {payload['id']}  (lock: {payload['group']})",
     ]
     if payload["verify"]:
-        lines.append(f"verify:  {payload['verify']}")
-        lines.append(f"probe:   {payload['probe']}")
+        lines.append(f"verify:    {payload['verify']}")
+        lines.append(f"probe:     {payload['probe']}")
     else:
-        lines.append("verify:  (none inferred — set one by hand)")
-    lines.append("hint:    you may add an AGENTS.md to describe the repo to agents")
+        lines.append("verify:    (none inferred — set one by hand)")
+    lines.append("hint:      you may add an AGENTS.md to describe the repo to agents")
     if payload["dry_run"]:
         lines.append("(dry run: nothing written)")
     return "\n".join(lines)
@@ -279,17 +284,20 @@ def cmd_register(args):
         raise UsageError(f"not a directory: {args.path}")
 
     draft = registry.probe_repository(path)
-    project_id = args.id or draft["id"]
-    group = args.group or draft["group"]
+    taskgroup_id = args.id or draft["id"]
+    project = args.project or None
     command = draft["verify"]
     kind = draft["verify_kind"]
     probe = draft["probe"]
     probe_exit = draft["probe_exit"]
 
     payload = {
-        "id": project_id,
+        "id": taskgroup_id,
+        "project": project or taskgroup_id,
         "path": path,
-        "group": group,
+        # The lock is the taskgroup id. `group` is kept in the payload so older
+        # callers that read it keep working.
+        "group": taskgroup_id,
         "verify": command,
         "verify_kind": kind,
         "probe": probe,
@@ -302,19 +310,20 @@ def cmd_register(args):
         dispatch.prepare_workspace(args.workspace)
         reg_path = registry.workspace_registry_path(args.workspace)
         reg = registry.load(reg_path)
-        if any(project.id == project_id for project in reg.projects):
+        if any(tg.id == taskgroup_id for tg in reg.taskgroups):
             raise RegistryError(
-                f"project id already registered: {project_id}",
+                f"taskgroup id already registered: {taskgroup_id}",
                 hint=f"edit {reg_path}, or choose a different --id",
             )
-        _append_project_block(
+        _append_taskgroup_block(
             reg_path,
-            project_id=project_id,
+            taskgroup_id=taskgroup_id,
             path=path,
-            group=group,
+            project=project,
             command=command,
             kind=kind,
             probe=probe,
+            probe_exit=probe_exit,
         )
         payload["registered"] = True
         payload["registry"] = reg_path
@@ -324,31 +333,102 @@ def cmd_register(args):
 
 
 def _read_probe_flags(reg_path) -> dict:
-    """{id: probe} for the entries that carry a `probe` key.
+    """{id: {probe, probe_exit}} for entries that carry probe metadata.
 
-    `registry.load` drops unknown keys, so the raw TOML is read here. Read-only.
+    Delegates to `registry.read_probe_flags`, which reads both `[[project]]`
+    (legacy) and `[[taskgroup]]` blocks from the raw TOML (`registry.load` drops
+    these human/API-only keys). Read-only.
     """
-    import tomllib
+    return registry.read_probe_flags(reg_path)
 
-    probes = {}
-    try:
-        with open(reg_path, "rb") as handle:
-            data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
-        return probes
-    for entry in data.get("project", []) or []:
-        if isinstance(entry, dict) and isinstance(entry.get("id"), str):
-            probe = entry.get("probe")
-            if probe is not None:
-                probes[entry["id"]] = probe
-    return probes
+
+def _lane_overview(reg, stats, probes):
+    """Project rows: one per project, each carrying its lanes and totals."""
+    projects = []
+    known_lane_ids = set()
+    for project in reg.projects:
+        lanes = reg.lanes_for(project.id)
+        lane_records = []
+        totals = {"tasks": 0, "in_progress": 0, "failed": 0}
+        last_activity = None
+        for lane in lanes:
+            known_lane_ids.add(lane.id)
+            stat = stats.get(lane.id) or {}
+            flags = probes.get(lane.id) or {}
+            probe = flags.get("probe")
+            if probe is None and lane.verify_kind == "none":
+                probe = "none"  # no acceptance command -> the task is SKIPPED
+            lane_records.append(
+                {
+                    "id": lane.id,
+                    "path": lane.path,
+                    "group": lane.group,
+                    "aliases": list(lane.aliases),
+                    "verify": lane.verify,
+                    "verify_kind": lane.verify_kind,
+                    "probe": probe,
+                    "tasks": int(stat.get("total", 0)),
+                    "in_progress": int(stat.get("in_progress", 0)),
+                    "failed": int(stat.get("failed", 0)),
+                    "last_activity": stat.get("last_activity"),
+                }
+            )
+            totals["tasks"] += int(stat.get("total", 0))
+            totals["in_progress"] += int(stat.get("in_progress", 0))
+            totals["failed"] += int(stat.get("failed", 0))
+            activity = stat.get("last_activity")
+            if activity and (last_activity is None or activity > last_activity):
+                last_activity = activity
+        single = lane_records[0] if len(lane_records) == 1 else None
+        projects.append(
+            {
+                "id": project.id,
+                "path": project.path,
+                "aliases": list(project.aliases),
+                "taskgroups": lane_records,
+                "tasks": totals["tasks"],
+                "in_progress": totals["in_progress"],
+                "failed": totals["failed"],
+                "last_activity": last_activity,
+                # Convenience mirror of the single lane's lane-level fields, so
+                # callers written against the old one-block-per-entry view keep
+                # reading `verify`/`group`/`probe` for single-lane projects.
+                "group": single["group"] if single else None,
+                "verify": single["verify"] if single else None,
+                "verify_kind": single["verify_kind"] if single else None,
+                "probe": single["probe"] if single else None,
+            }
+        )
+    # Tasks may name a lane that is no longer in the registry (hand-edited
+    # config or database). Keep it so the totals still match `tasks` exactly.
+    for row in stats.values():
+        if row["project"] in known_lane_ids:
+            continue
+        projects.append(
+            {
+                "id": row["project"],
+                "path": None,
+                "aliases": [],
+                "taskgroups": [],
+                "group": None,
+                "verify": None,
+                "verify_kind": None,
+                "probe": None,
+                "tasks": int(row["total"]),
+                "in_progress": int(row["in_progress"]),
+                "failed": int(row["failed"]),
+                "last_activity": row["last_activity"],
+            }
+        )
+    return projects
 
 
 def cmd_projects(args):
     """Project overview: registry configuration joined with task aggregates.
 
-    The numbers come from a single aggregate query (`storage.project_overview`)
-    so they can never disagree with `tasks`.
+    One row per project, carrying its taskgroups (lanes). The numbers come from
+    a single aggregate query (`storage.project_overview`) so they can never
+    disagree with `tasks`.
     """
     reg_path = registry.workspace_registry_path(args.workspace)
     reg = registry.load(reg_path)
@@ -365,64 +445,55 @@ def cmd_projects(args):
             conn.close()
     stats = {row["project"]: row for row in overview}
 
-    projects = []
-    known = set()
-    for project in reg.projects:
-        stat = stats.get(project.id) or {}
-        probe = probes.get(project.id)
-        if probe is None and project.verify_kind == "none":
-            probe = "none"  # no acceptance command -> the task is always SKIPPED
-        projects.append(
-            {
-                "id": project.id,
-                "group": project.group,
-                "path": project.path,
-                "verify": project.verify,
-                "verify_kind": project.verify_kind,
-                "probe": probe,
-                "tasks": int(stat.get("total", 0)),
-                "in_progress": int(stat.get("in_progress", 0)),
-                "failed": int(stat.get("failed", 0)),
-                "last_activity": stat.get("last_activity"),
-            }
-        )
-        known.add(project.id)
-    # Tasks may name a project that is no longer in the registry (hand-edited
-    # config or database). Keep it so the totals still match `tasks` exactly.
-    for row in overview:
-        if row["project"] in known:
-            continue
-        projects.append(
-            {
-                "id": row["project"],
-                "group": None,
-                "path": None,
-                "verify": None,
-                "verify_kind": None,
-                "probe": None,
-                "tasks": int(row["total"]),
-                "in_progress": int(row["in_progress"]),
-                "failed": int(row["failed"]),
-                "last_activity": row["last_activity"],
-            }
-        )
+    projects = _lane_overview(reg, stats, probes)
     payload = {"projects": projects, "registry": reg_path}
 
     if not projects:
         human = f"no projects registered in {reg_path}"
     else:
         lines = [
-            f"{'ID':<20} {'GROUP':<14} {'PROBE':<7} {'TASKS':>5} "
+            f"{'ID':<20} {'TASKGROUPS':<22} {'PROBE':<7} {'TASKS':>5} "
             f"{'ACTV':>4} {'FAIL':>4} {'LAST ACTIVITY':<25} VERIFY"
         ]
         for project in projects:
+            lanes = ",".join(tg["id"] for tg in project["taskgroups"]) or "-"
             lines.append(
-                f"{project['id']:<20} {str(project['group'] or '-'):<14} "
+                f"{project['id']:<20} {lanes:<22} "
                 f"{str(project['probe'] or '-'):<7} {project['tasks']:>5} "
                 f"{project['in_progress']:>4} {project['failed']:>4} "
                 f"{str(project['last_activity'] or '—'):<25} {project['verify'] or '-'}"
             )
             lines.append(f"  path: {project['path'] or '-'}")
+            for lane in project["taskgroups"]:
+                lines.append(
+                    f"  taskgroup: {lane['id']} -> {lane['path']} "
+                    f"({lane['verify'] or 'no verify command'})"
+                )
+        human = "\n".join(lines)
+    emit(args, payload, human)
+    return 0
+
+
+def cmd_taskgroups(args):
+    """List every taskgroup (lane): id, owning project, path and verify command."""
+    reg_path = registry.workspace_registry_path(args.workspace)
+    reg = registry.load(reg_path)
+    probes = _read_probe_flags(reg_path)
+
+    taskgroups = [registry.taskgroup_record(tg, probes) for tg in reg.taskgroups]
+    payload = {"taskgroups": taskgroups, "registry": reg_path}
+
+    if not taskgroups:
+        human = f"no taskgroups registered in {reg_path}"
+    else:
+        lines = [
+            f"{'ID':<20} {'PROJECT':<16} {'PATH':<40} VERIFY"
+        ]
+        for tg in taskgroups:
+            lines.append(
+                f"{tg['id']:<20} {tg['project']:<16} "
+                f"{tg['path']:<40} {tg['verify'] or '-'}"
+            )
         human = "\n".join(lines)
     emit(args, payload, human)
     return 0
@@ -1172,6 +1243,7 @@ COMMANDS = {
     "init": cmd_init,
     "register": cmd_register,
     "projects": cmd_projects,
+    "taskgroups": cmd_taskgroups,
     "run": cmd_run,
     "tasks": cmd_tasks,
     "show": cmd_show,

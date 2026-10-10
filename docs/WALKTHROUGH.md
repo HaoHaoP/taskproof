@@ -47,14 +47,14 @@ is a placeholder pointing at a path that does not exist -- entries arrive throug
 ## 3. Register a repository
 
 ```bash
-taskproof register /tmp/tp-walkthrough/demo-library --group demo
+taskproof register /tmp/tp-walkthrough/demo-library
 ```
 
 ```
-project: demo-library  (/tmp/tp-walkthrough/demo-library)
-group:   demo
-verify:  (none inferred — set one by hand)
-hint:    you may add an AGENTS.md to describe the repo to agents
+project:   demo-library  (/tmp/tp-walkthrough/demo-library)
+taskgroup: demo-library  (lock: demo-library)
+verify:    (none inferred — set one by hand)
+hint:      you may add an AGENTS.md to describe the repo to agents
 ```
 
 `register` probes the repository and appends an entry. It does **not** invent an
@@ -71,10 +71,9 @@ This is the part that decides what "done" means. In the workspace's
 concurrency = 3   # global cap on simultaneous tasks
 timeout = 1800    # seconds before a task is judged stuck
 
-[[project]]
+[[taskgroup]]
 id = "demo-library"
 path = "/tmp/tp-walkthrough/demo-library"
-group = "demo"
 verify = "sh check.sh"
 verify_kind = "check"
 result_schema = "none"
@@ -92,9 +91,10 @@ taskproof projects
 ```
 
 ```
-ID                   GROUP          PROBE   TASKS ACTV FAIL LAST ACTIVITY             VERIFY
-demo-library         demo           -           0    0    0 —                         sh check.sh
+ID                   TASKGROUPS             PROBE   TASKS ACTV FAIL LAST ACTIVITY             VERIFY
+demo-library         demo-library           -           0    0    0 —                         sh check.sh
   path: /tmp/tp-walkthrough/demo-library
+  taskgroup: demo-library -> /tmp/tp-walkthrough/demo-library (sh check.sh)
 ```
 
 ## 5. Dispatch a task
@@ -165,7 +165,7 @@ taskproof log t-20261008-001
 ```
 
 ```
-started        {"project": "demo-library", "group": "demo", "adapter": "custom:sh fix.sh", ...}
+started        {"project": "demo-library", "group": "demo-library", "adapter": "custom:sh fix.sh", ...}
 result_schema  {"enabled": false, "path": null, "note": "structured result disabled ..."}
 adapter        {"exit_code": 0, "degraded": true, "summary": "wrote src/lib.py"}
 verify         {"status": "PASSED", "ran": true, "exit_code": 0, "note": "", "output_tail": "ok"}
