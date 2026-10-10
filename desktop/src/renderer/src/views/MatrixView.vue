@@ -12,7 +12,7 @@
  * address bar, mirrors it into the store (which owns the fetch), and wires the
  * answers to markup.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import StatusMark from '../components/StatusMark.vue'
@@ -21,17 +21,15 @@ import TaskDrawer from '../components/TaskDrawer.vue'
 import type { ProjectGroup, Task } from '../api/client'
 import { ICONS } from '../icons'
 import {
-  CAP_MAX,
-  CAP_MIN,
   DEFAULT_CAPS,
   HIDE_KEY,
   RANGES,
   boardQuery,
   canGrowBudget,
-  clampCap,
+  capChipLabel,
+  capMenuFor,
   columnWindow,
   filterBoard,
-  foldControlFor,
   gridTracks,
   groupColumns,
   hiddenTally,
@@ -41,7 +39,9 @@ import {
   visibleProjects,
   withColumnOpen,
   type BoardFilter,
+  type CapMenu,
   type ColumnWindow,
+  type MatrixLabel,
   type RangeChoice
 } from '../matrix'
 import { COLUMNS, columnLabelKey } from '../contract'
@@ -101,9 +101,9 @@ function capFor(key: string): number {
   return settings.settings.columnCaps[key] ?? DEFAULT_CAPS[key] ?? 0
 }
 
-/** Every column's window, keyed by column. The fold bar reads `hidden`; the
- *  cell reads `visible`. Computed once per column so the template does not
- *  re-slice inside each `v-if`. */
+/** Every column's window, keyed by column. The chip and menu read `hidden` /
+ *  `total`; the cell reads `visible`. Computed once per column so the template
+ *  does not re-slice inside each `v-if`. */
 const windows = computed<Record<string, ColumnWindow>>(() => {
   const out: Record<string, ColumnWindow> = {}
   for (const column of COLUMNS) {
@@ -113,11 +113,29 @@ const windows = computed<Record<string, ColumnWindow>>(() => {
   return out
 })
 
-/** The fold bar each column draws -- `null` when it hides nothing and has
- *  nothing to collapse. Pure rule, mapped to markup only. */
-const folds = computed<Record<string, ReturnType<typeof foldControlFor>>>(() => {
-  const out: Record<string, ReturnType<typeof foldControlFor>> = {}
-  for (const column of COLUMNS) out[column.key] = foldControlFor(windows.value[column.key], capFor(column.key))
+/** The chip copy each column draws, including the empty-column state. */
+const capChips = computed<Record<string, MatrixLabel>>(() => {
+  const out: Record<string, MatrixLabel> = {}
+  for (const column of COLUMNS) {
+    out[column.key] = capChipLabel(
+      windows.value[column.key],
+      capFor(column.key),
+      filter.value.open.includes(column.key)
+    )
+  }
+  return out
+})
+
+/** The fixed choices and state-dependent action each column's menu draws. */
+const capMenus = computed<Record<string, CapMenu>>(() => {
+  const out: Record<string, CapMenu> = {}
+  for (const column of COLUMNS) {
+    out[column.key] = capMenuFor(
+      windows.value[column.key],
+      capFor(column.key),
+      filter.value.open.includes(column.key)
+    )
+  }
   return out
 })
 
@@ -138,12 +156,6 @@ const shown = computed<Record<string, Task[]>>(() => {
   for (const column of COLUMNS) out[column.key] = windows.value[column.key].visible
   return out
 })
-
-function countIn(columnKey: string): number {
-  // The header tallies the whole scope, not the window: a folded column still
-  // says how many cards it actually holds.
-  return (columns.value[columnKey] ?? []).length
-}
 
 function tasksIn(projectId: string, columnKey: string): Task[] {
   // A task's own `project` column is the lane, not the owning project: file it
@@ -193,44 +205,23 @@ function closeColumn(key: string): void {
   applyFilter({ open: withColumnOpen(filter.value.open, key, false) })
 }
 
-/** The header's cap control: the value the column shows as `全`/N, and the
- *  inline editor that replaces it while the number is being typed. */
-const editingCap = ref<string | null>(null)
-const capDraft = ref<number | string>(0)
-
-function capLabel(key: string): string {
-  return capFor(key) === 0 ? t('board.capAll') : String(capFor(key))
-}
-
-function beginCap(key: string): void {
-  capDraft.value = capFor(key)
-  editingCap.value = key
-}
-
-function focusCap(el: unknown): void {
-  if (el instanceof HTMLInputElement) {
-    el.focus()
-    el.select()
+/** One dropdown command: a fixed cap value, or the current column's fold /
+ *  unfold action. The menu never offers an action its pure decision did not
+ *  produce, so this handler cannot repeat that state logic. */
+function onCapCommand(key: string, command: unknown): void {
+  if (command === 'expand') {
+    openColumn(key)
+    return
   }
+  if (command === 'collapse') {
+    closeColumn(key)
+    return
+  }
+  if (typeof command === 'number') settings.setColumnCap(key, command)
 }
 
-function cancelCap(): void {
-  editingCap.value = null
-}
-
-function commitCap(key: string): void {
-  if (editingCap.value !== key) return
-  editingCap.value = null
-  const draft = capDraft.value
-  const value = typeof draft === 'number' && Number.isFinite(draft) ? clampCap(draft) : null
-  if (value === null || value === capFor(key)) return
-  settings.setColumnCap(key, value)
-}
-
-/** `-` / `+` step by one within `0..200`; the control never writes out of
- *  range, so the main process's normaliser has nothing to reject from here. */
-function stepCap(key: string, delta: number): void {
-  settings.setColumnCap(key, clampCap(capFor(key) + delta))
+function capCommand(key: string): (command: unknown) => void {
+  return (command) => onCapCommand(key, command)
 }
 
 function isExpanded(id: string): boolean {
@@ -426,7 +417,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
             {{ t(columnLabelKey(column.key)) }}
           </span>
           <span class="rt">
-            <span class="n">{{ countIn(column.key) }}</span>
             <!-- The lane switch: one per header, same shape on every one. It
                  hides *this* column and lives in the header for that reason. -->
             <button
@@ -441,85 +431,59 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
           </span>
 
           <!-- The per-column control band, *inside* the header so it rides the
-               sticky band: the fold bar (left, only when this column hides
-               cards or can be folded) and this column's cap control (right,
-               always). They share one line so neither pushes the label row onto
-               a second line. -->
+               sticky band. The chip is the whole second line: its text states
+               what the column is showing, and the dropdown holds the fixed cap
+               choices plus any current fold / unfold action. It is a real
+               control, so both the chip and its commands stop propagation. -->
           <div class="hdctl">
-            <button
-              v-if="folds[column.key]?.mode === 'expand'"
-              type="button"
-              class="fold"
-              :data-col="column.key"
-              :aria-label="t('board.expandColumn', { name: t(columnLabelKey(column.key)) })"
-              @click.stop="openColumn(column.key)"
-            >
-              {{ t('board.expand', { n: folds[column.key]?.n ?? 0 }) }}
-            </button>
-            <button
-              v-else-if="folds[column.key]?.mode === 'collapse'"
-              type="button"
-              class="fold collapse"
-              :data-col="column.key"
-              :aria-label="t('board.collapseColumn', { name: t(columnLabelKey(column.key)) })"
-              @click.stop="closeColumn(column.key)"
-            >
-              {{ t('board.collapse') }}
-            </button>
-
-            <!-- The cap control: minus / N / plus. `0` reads as 全 (no fold);
-                 the number opens an inline editor committed on enter or blur.
-                 Every handler stops, so no click here can reach the header's
-                 hide switch or the board's filter. -->
-            <span
-              class="cap-ctl"
-              :data-col="column.key"
-              :title="t('board.capTitle')"
-              @click.stop
-              @dblclick.stop
+            <el-dropdown
+              class="cap-dd"
+              trigger="click"
+              placement="bottom-end"
+              popper-class="cap-menu-popper"
+              :teleported="true"
+              @command="capCommand(column.key)"
             >
               <button
                 type="button"
-                class="cap-step"
-                :disabled="capFor(column.key) <= CAP_MIN"
-                :aria-label="t('board.capDown')"
-                @click.stop="stepCap(column.key, -1)"
-              >
-                −
-              </button>
-              <input
-                v-if="editingCap === column.key"
-                :ref="focusCap"
-                v-model.number="capDraft"
-                class="cap-input"
-                type="number"
-                min="0"
-                max="200"
-                :aria-label="t('board.capLabel')"
+                class="cap-chip"
+                :data-col="column.key"
+                :title="t('board.capMenu.title')"
                 @click.stop
-                @keydown.enter.stop.prevent="commitCap(column.key)"
-                @keydown.esc.stop.prevent="cancelCap"
-                @blur="commitCap(column.key)"
-              />
-              <button
-                v-else
-                type="button"
-                class="cap-val"
-                :aria-label="t('board.capLabel')"
-                @click.stop="beginCap(column.key)"
+                @dblclick.stop
               >
-                {{ capLabel(column.key) }}
+                <span class="cap-chip-label">
+                  {{ t(capChips[column.key].key, capChips[column.key].params) }}
+                </span>
+                <span class="cap-caret" aria-hidden="true">▾</span>
               </button>
-              <button
-                type="button"
-                class="cap-step"
-                :disabled="capFor(column.key) >= CAP_MAX"
-                :aria-label="t('board.capUp')"
-                @click.stop="stepCap(column.key, 1)"
-              >
-                ＋
-              </button>
-            </span>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item disabled class="cap-menu-title">
+                    {{ t('board.capMenu.title') }}
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-for="option in capMenus[column.key].options"
+                    :key="option.value"
+                    :command="option.value"
+                  >
+                    <span class="cap-option-label">
+                      {{ t(option.label.key, option.label.params) }}
+                    </span>
+                    <span v-if="option.checked" class="cap-check" aria-hidden="true">✓</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-for="action in capMenus[column.key].actions"
+                    :key="action.kind"
+                    divided
+                    :command="action.kind"
+                    :class="`cap-action cap-action-${action.kind}`"
+                  >
+                    {{ t(action.label.key, action.label.params) }}
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
 
@@ -702,10 +666,9 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   align-items: center;
   gap: 6px;
 }
-/* The band must answer as the header itself: the label and the tallies are
-   decoration, so they do not intercept a hit -- only the hide switch (the one
-   control up here) does. This is what makes `elementFromPoint` on any point of
-   the band return `.hd`/`.fold` and never a card that scrolled underneath. */
+/* The band must answer as the header itself: the label and tally are
+   decoration, so they do not intercept a hit -- only the hide switch does. The
+   chip is a real control in `.hdctl`, not part of this decoration layer. */
 .hd .lb,
 .hd .rt {
   pointer-events: none;
@@ -715,10 +678,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
 }
 .hd .rt .lane-hide * {
   pointer-events: none;
-}
-.hd .n {
-  font: 11px/1 var(--mono);
-  color: var(--ink-4);
 }
 /* The per-column hide switch. Same shape in every header, so the row reads as
    one control repeated, not a menu. It is the header's own column it hides. */
@@ -808,107 +767,88 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   color: var(--ink-4);
   opacity: 0.4;
 }
-/* The per-column control band: the fold bar and the cap control share one
-   full-width line under the label row, so the label + count never wrap. The
-   fold bar takes the slack (`flex: 1`) and the cap control stays its own size,
-   so neither squeezes the other out. */
+/* The per-column control band: the chip is the only thing on this full-width
+   line under the label row, so the header keeps one self-describing number. */
 .hdctl {
   flex: 1 0 100%;
   display: flex;
   align-items: center;
-  gap: 6px;
   min-width: 0;
 }
-/* The fold bar rides inside its own column's header, so the sticky band carries
-   it and it stays pinned as the grid scrolls. A column that hides nothing draws
-   no bar at all, so the cap control simply rides the right edge by itself. */
-.fold {
-  flex: 1 1 auto;
+.cap-dd {
+  display: block;
+  width: 100%;
   min-width: 0;
-  margin: 0;
-  padding: 9px 10px;
-  text-align: left;
+}
+.cap-dd :deep(.el-tooltip__trigger) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+/* Every column's chip. Its own click stops, but the Element Plus trigger still
+   sees the same click and opens the menu. */
+.cap-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  color: var(--ink-2);
   font: 11.5px/1 var(--sans);
-  color: var(--accent);
-  background: transparent;
-  border: 1px dashed var(--rule);
-  border-radius: var(--r-card);
+  text-align: left;
   cursor: pointer;
+}
+.cap-chip:hover,
+.cap-chip:focus-visible {
+  border-color: var(--rule-2);
+  background: var(--raise);
+  color: var(--ink);
+}
+.cap-chip-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fold:hover {
-  background: var(--raise);
-}
-.fold.collapse {
-  color: var(--ink-4);
-}
-/* Every column's cap control: −  N  ＋. It is a real control (unlike `.lb` /
-   `.rt`, which are decoration), so it keeps pointer events; each handler also
-   stops propagation, so a click can never reach the hide switch or the filter.
-   `margin-left: auto` parks it at the right whether or not a fold bar shares
-   the line. */
-.cap-ctl {
+.cap-caret {
   flex: none;
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
-  padding: 1px;
-  border: 1px solid var(--rule);
-  border-radius: var(--r-ctl);
-  background: var(--panel);
-  color: var(--ink-3);
-  font: 11px/1 var(--mono);
-}
-.cap-ctl .cap-step,
-.cap-ctl .cap-val {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.cap-ctl .cap-val {
-  min-width: 24px;
-  color: var(--ink-2);
-  font-weight: 600;
-}
-.cap-ctl .cap-step:hover:not(:disabled),
-.cap-ctl .cap-val:hover {
-  background: var(--raise);
-  color: var(--ink);
-}
-.cap-ctl .cap-step:disabled {
   color: var(--ink-4);
-  opacity: 0.45;
-  cursor: default;
-}
-.cap-ctl .cap-input {
-  width: 38px;
-  height: 18px;
-  padding: 0 4px;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  background: var(--sunken);
-  color: var(--ink);
-  font: 11px/1 var(--mono);
-  text-align: center;
+  font-size: 9px;
+  transform: translateY(-0.5px);
 }
 </style>
 
-<!-- The dropdown is teleported to the body, so its header row cannot live in
-     the scoped block. Keyed under the popper's own class so no other select
-     picks it up. -->
+<!-- These poppers are teleported to the body, so their content cannot live in
+     the scoped block. Each rule is keyed under that popper's own class. -->
 <style>
+.cap-menu-popper {
+  min-width: 176px;
+}
+.cap-menu-popper .el-dropdown-menu__item {
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 30px;
+  padding: 7px 10px;
+  font: 12px/1.2 var(--sans);
+}
+.cap-menu-popper .el-dropdown-menu__item.cap-menu-title {
+  color: var(--ink-4);
+  font-size: 10.5px;
+  cursor: default;
+}
+.cap-menu-popper .el-dropdown-menu__item.cap-action {
+  color: var(--accent);
+}
+.cap-menu-popper .cap-check {
+  flex: none;
+  color: var(--accent);
+  font-weight: 700;
+}
 .sel-projects-popper .sel-head {
   display: flex;
   gap: 6px;

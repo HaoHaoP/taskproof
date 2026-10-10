@@ -11,10 +11,11 @@ import {
   MIN_BUDGET,
   boardQuery,
   canGrowBudget,
+  capChipLabel,
+  capMenuFor,
   clampCap,
   columnWindow,
   filterBoard,
-  foldControlFor,
   gridTracks,
   groupColumns,
   hiddenTally,
@@ -61,7 +62,7 @@ function task(id: string, fields: Partial<Task> = {}): Task {
 const NOW = Date.parse('2026-10-08T12:00:00+08:00')
 const DAY = 24 * 60 * 60 * 1000
 
-describe('column window and its fold bar', () => {
+describe('column window and its cap chip', () => {
   const rows = Array.from({ length: 25 }, (_, i) =>
     task(`d${i}`, { status: 'done', created_at: new Date(NOW - i * 1000).toISOString() })
   )
@@ -100,13 +101,53 @@ describe('column window and its fold bar', () => {
     expect(columnWindow(rows, false, DEFAULT_CAPS.done).hidden).toBe(15)
   })
 
-  it('draws expand(15) folded, collapse unfolded, and no bar at cap 0', () => {
-    expect(foldControlFor(columnWindow(rows, false, 10), 10)).toEqual({ mode: 'expand', n: 15 })
-    expect(foldControlFor(columnWindow(rows, true, 10), 10)).toEqual({ mode: 'collapse', n: 0 })
-    // no fold is its own value: cap 0 never draws a bar
-    expect(foldControlFor(columnWindow(rows, false, 0), 0)).toBeNull()
-    // a cap the column does not exceed has nothing to fold
-    expect(foldControlFor(columnWindow(rows.slice(0, 5), false, 10), 10)).toBeNull()
+  it('labels the empty, uncapped, uncut, unfolded and folded states', () => {
+    expect(capChipLabel(columnWindow([], false, 10), 10, false)).toEqual({
+      key: 'board.capChip.empty',
+      params: {}
+    })
+    expect(capChipLabel(columnWindow(rows, false, 0), 0, false)).toEqual({
+      key: 'board.capChip.all',
+      params: { total: 25 }
+    })
+    expect(capChipLabel(columnWindow(rows.slice(0, 4), false, 10), 10, false)).toEqual({
+      key: 'board.capChip.all',
+      params: { total: 4 }
+    })
+    expect(capChipLabel(columnWindow(rows, true, 10), 10, true)).toEqual({
+      key: 'board.capChip.expanded',
+      params: { total: 25, cap: 10 }
+    })
+    expect(capChipLabel(columnWindow(rows, false, 10), 10, false)).toEqual({
+      key: 'board.capChip.capped',
+      params: { cap: 10, total: 25 }
+    })
+  })
+
+  it('offers the five fixed choices with the current one checked', () => {
+    const menu = capMenuFor(columnWindow(rows.slice(0, 4), false, 10), 10, false)
+    expect(menu.options.map((option) => option.value)).toEqual([5, 10, 20, 50, 0])
+    expect(menu.options.filter((option) => option.checked).map((option) => option.value)).toEqual([10])
+    expect(menu.options[0].label).toEqual({ key: 'board.capMenu.option', params: { n: 5 } })
+    expect(menu.options[4].label).toEqual({ key: 'board.capMenu.all', params: {} })
+
+    const all = capMenuFor(columnWindow(rows, false, 0), 0, false)
+    expect(all.options.filter((option) => option.checked).map((option) => option.value)).toEqual([0])
+  })
+
+  it('adds only the expand or collapse action the current state can perform', () => {
+    const folded = capMenuFor(columnWindow(rows, false, 10), 10, false)
+    expect(folded.actions).toEqual([
+      { kind: 'expand', label: { key: 'board.capMenu.expand', params: { hidden: 15 } } }
+    ])
+
+    const unfolded = capMenuFor(columnWindow(rows, true, 10), 10, true)
+    expect(unfolded.actions).toEqual([
+      { kind: 'collapse', label: { key: 'board.capMenu.collapse', params: { cap: 10 } } }
+    ])
+
+    expect(capMenuFor(columnWindow(rows.slice(0, 5), false, 10), 10, false).actions).toEqual([])
+    expect(capMenuFor(columnWindow(rows, false, 0), 0, false).actions).toEqual([])
   })
 })
 
