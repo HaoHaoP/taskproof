@@ -220,10 +220,6 @@ function onCapCommand(key: string, command: unknown): void {
   if (typeof command === 'number') settings.setColumnCap(key, command)
 }
 
-function capCommand(key: string): (command: unknown) => void {
-  return (command) => onCapCommand(key, command)
-}
-
 function isExpanded(id: string): boolean {
   return route.params.taskId === id
 }
@@ -442,7 +438,7 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
               placement="bottom-end"
               popper-class="cap-menu-popper"
               :teleported="true"
-              @command="capCommand(column.key)"
+              @command="(value) => onCapCommand(column.key, value)"
             >
               <button
                 type="button"
