@@ -13,6 +13,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { compileTemplate, parse } from 'vue/compiler-sfc'
 import { COLUMNS } from '../contract'
 
 const view = readFileSync(new URL('./MatrixView.vue', import.meta.url), 'utf-8')
@@ -193,9 +194,30 @@ describe('matrix grid columns', () => {
     expect(headerMarkup).toContain('class="cap-chip"')
     expect(headerMarkup).toContain('capChips[column.key]')
     expect(headerMarkup).toContain('capMenus[column.key]')
-    expect(headerMarkup).toContain('@command="capCommand(column.key)"')
+    // 调用表达式会被 Vue 当内联语句编译、返回值丢弃；这里必须保留箭头函数转发。
+    expect(headerMarkup).toContain('@command="(value) => onCapCommand(column.key, value)"')
     expect(view).toMatch(/:data-col="column\.key"/)
     expect(view).toMatch(/settings\.setColumnCap\(key, command\)/)
+  })
+
+  it('compiles the cap command handler to forward the event value', () => {
+    // This is the layer that catches the TP-card71 trap: Vue compiles an event
+    // call expression as an inline statement, so its return value is discarded.
+    const { descriptor, errors: parseErrors } = parse(view, { filename: 'MatrixView.vue' })
+    expect(parseErrors).toEqual([])
+    expect(descriptor.template, 'MatrixView.vue has no template').not.toBeNull()
+
+    const { code, errors } = compileTemplate({
+      source: descriptor.template?.content ?? '',
+      filename: 'MatrixView.vue',
+      id: 'matrix-view-card71'
+    })
+    expect(errors).toEqual([])
+
+    const commandBinding = code.match(/onCommand:\s*([^\n]+)/)?.[1]
+    expect(commandBinding, 'compiled dropdown has no onCommand binding').toBeTruthy()
+    expect(commandBinding).toContain('onCapCommand(column.key')
+    expect(commandBinding).not.toMatch(/\bcapCommand\s*\(/)
   })
 
   it('removes the old fold bar, stepper/editor and first-row count', () => {
