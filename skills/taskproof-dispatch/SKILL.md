@@ -52,6 +52,8 @@ Fields are defined by `docs/REGISTRY.md`; the ones that matter at dispatch time:
 | `verify_kind` | no | `"none"` | `check` / `build` / `none` |
 | `forbidden_paths` | no | `[]` | Prefixes the agent must not touch; a trailing `/` covers the whole directory tree |
 | `result_schema` | no | `"default"` | `default` / `none` / an absolute path to a JSON Schema |
+| `workspace` | no | `"none"` | `none` / `worktree` — see "a lane owns a checkout" below |
+| `link` | no | `[]` | Dependency paths (workspace-relative) symlinked from the main checkout |
 
 Semantics to remember:
 
@@ -62,6 +64,8 @@ Semantics to remember:
 - The gate ignores Python byte-code (`__pycache__` segments, `.pyc` / `.pyo`) because it is a byproduct of running the tool, not authored work — but that is not a licence to litter. **When you run Python inside a card's worktree, use `python3 -B` (or `export PYTHONDONTWRITEBYTECODE=1`)**, or build data with the main-tree / installed package instead of importing from the worktree. Belt and suspenders, not a replacement for the gate.
 - A type prefix is not an exception: `presence:` adds a *weaker* observation for its own rule and never cancels a `file` or directory rule that also covers the path. In particular `presence:t/__pycache__/` does **not** exempt byte-code from a `t/` rule.
 - One repository owning several lanes is the normal shape (one per stack or per working copy); that is what the project layer exists for.
+- **A lane owns a checkout.** `workspace = "worktree"` gives the lane one long-lived git worktree beside the repository (`<repo>-ws-<lane>`), created lazily the first time a card actually fires into it and **reused by every card after**; the run directory is the lane's own place inside it, so a lane pointing at a subdirectory runs in that subdirectory. `link = ["web/node_modules", …]` symlinks dependencies from the main checkout into it (without it the usual markers are probed: `package.json` -> `node_modules`, `Cargo.toml` -> `target`; a Python venv is deliberately never inferred — its config and console scripts hard-code absolute paths). The default is `none` on purpose: a verify command that `cd`s to an absolute main-tree path would silently accept the *main tree* from inside a workspace. `taskproof workspaces` lists these; `taskproof workspace-rm <lane>` prints the evidence (uncommitted changes, unmerged commits) and refuses to delete one that still holds work unless `--force`. `--worktree` keeps its one-off meaning; when a lane has a workspace, that one wins.
+- The `.git` rule reads `refs/heads/*` **minus the branches another worktree has checked out**: a commit in a sibling checkout is not this card's doing. The card's own HEAD and branch, new branches and tags, `refs/remotes/*` and the stash are still caught.
 
 ## 2. Write the card to a file
 
@@ -109,7 +113,7 @@ taskproof run my-lane --adapter codex --timeout 1800 "$(cat /tmp/cards/tp-card19
 - `--adapter`: `codex` / `claude` / `gemini` / `opencode` / `custom:<cmd>`.
 - `--timeout`: seconds; overrides `[defaults] timeout` in the registry.
 - `--cap N`: a one-off global cap for this dispatch only.
-- `--worktree`: a fresh checkout beside the repository, kept when it has changes.
+- `--worktree`: a fresh checkout beside the repository, kept when it has changes. A *one-off*: a lane that declares `workspace = "worktree"` has a long-lived checkout instead, and that one wins.
 - Card in a file, passed with `$(cat ...)`: saves escaping, and makes backup and re-runs easy.
 
 **There is no parked state.** `run` starts the card there and then. If the cap is full it exits **75** and records nothing: wait and retry, raise the cap for this dispatch (`--cap N`), or persist a new one (`config --concurrency N`).
@@ -123,6 +127,9 @@ taskproof show <task-id>
 taskproof log <task-id>
 taskproof log <task-id> --follow
 taskproof verify <task-id>
+taskproof workspaces
+taskproof workspace-rm my-lane            # prints the evidence, refuses unless clean
+taskproof workspace-rm my-lane --force
 ```
 
 `log` prints the task's full event stream; `--follow` follows it all the way to the terminal state.
@@ -130,6 +137,8 @@ taskproof verify <task-id>
 `verifying` is a **real, persisted state**: while the acceptance command runs, the card is written as `verifying`, so a long build or test suite is visible on the board instead of hiding inside `running`. A card sitting there is not stuck — it is being accepted.
 
 `verify <id>` re-runs the registered acceptance command for an existing task and appends a `verify` event. That is the main agent's review step (section 9): it records the re-run as a fact instead of asserting one.
+
+`workspaces` lists the lanes that declared one, with its path and what is still in it. `workspace-rm` prints the evidence (uncommitted changes, unmerged commits, the worktree unregistration) and deletes only a workspace that holds no work — `--force` overrides and says so in its output. Deleting a lane's checkout is never a side effect of anything else: `rm <id>` deletes the task (and the one-off checkout that task itself left), never a lane's workspace.
 
 ## 5.1 Human sign-off: `accept`
 
@@ -147,7 +156,7 @@ taskproof verify <task-id>
 1. Look at `group` first: **lanes with different locks should be fired at the same time**. Giving one project several lanes exists for exactly this — as long as the file ranges do not overlap, dispatching them together is safe and is the main lever for cutting total time.
 2. The **global cap** is workspace-level and is always shown together with its **effective value and where it comes from** — `auto` (machine-detected), `toml` (`[defaults] concurrency`), or `cli` (a one-off `run --cap N`). Ask with `taskproof config --show` (or `taskproof doctor`) instead of assuming a number: a fresh workspace carries no key and auto-detects `clamp(2, cores // 4, 6)`, or 2 when RAM < 8 GB. Count how many are running with `taskproof tasks --all` first; if you are within the cap, fire the independent work together, and do not blindly fire until the slots are full. Change the persisted value with `taskproof config --concurrency N` (comment-preserving, non-retroactive); raise it for a single dispatch with `run --cap N`.
 3. **Fire now; ordering is yours.** Nothing parks a card and no daemon pushes a queue — the sequence of cards is the main agent's decision, which is also what keeps the per-card commit boundary. A refused dispatch (exit 75, same lock busy or cap full) leaves no trace in the ledger: wait for the lane to drain and fire again.
-4. The only legitimate way to run within one lane in parallel: add another **lane** (its own `path`, e.g. a worktree), give it a different `group`, and pass `--worktree` at run time; do this **only for cards whose file ranges do not overlap** — the main agent merges both diffs back into the main tree afterwards in one batch.
+4. The only legitimate way to run within one lane in parallel: add another **lane** (its own `path`), give it a different `group`, and let it declare `workspace = "worktree"` so it has a checkout of its own (`--worktree` still works for a one-off); do this **only for cards whose file ranges do not overlap** — the main agent merges both diffs back into the main tree afterwards in one batch.
 5. Therefore **there is exactly one criterion for serialising: the same lock and overlapping file ranges**. Every other case should run in parallel.
 6. Batch the main agent's own rhythm too: collect reviews and commits and do them together; do not let "wait for me to commit" become the metronome for the whole chain.
 
