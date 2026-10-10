@@ -205,6 +205,61 @@ jobs:
           body: |
             **Version / 版本:** `${{ github.ref_name }}`
 
+            #### What's new / 更新内容
+
+            **English**
+
+            This release is mostly *subtraction*: what was not earning its keep
+            is gone.
+
+            - **The queue is gone.** No parked state, no daemon: `run` fires a
+              card there and then, and the order of cards is the dispatcher's
+              decision. A refused dispatch still leaves no trace.
+            - **`verifying` is a real state.** While acceptance runs the card is
+              written as `verifying`, so a long build or test suite is visible
+              instead of hiding inside `running`.
+            - **A project is not a lane.** The registry has two layers now: a
+              `[[project]]` (a repository — the unit the board filters by) and
+              one or more `[[taskgroup]]` lanes (the unit you dispatch into,
+              each with its own lock). Old one-block-per-lane files still read.
+            - **A lane can own a workspace.** `workspace = "worktree"` gives a
+              lane one long-lived checkout beside the repository, created the
+              first time a card fires into it and reused after; `link = [...]`
+              symlinks dependencies in from the main checkout so nothing is
+              reinstalled.
+            - **The gate stopped blaming the wrong tree.** A sibling worktree's
+              branch is no longer read as the running card's doing, which retires
+              the old "do not commit while a card is in flight" rule.
+            - **The console is a viewer.** Every write path is gone from the
+              desktop app and the local REST API serves reads only — dispatching,
+              accepting and registry edits all live in the CLI.
+            - **The board reads better.** One row per project, each card names the
+              lane it ran in, and every column's display cap is settable in that
+              column's own header (5 / 10 / 20 / 50 / all). There is no separate
+              expand switch.
+
+            **中文**
+
+            这一版主要是**做减法**：没在挣饭吃的那些东西都去掉了。
+
+            - **排队没了。** 没有 parked 状态、也没有守护进程：`run` 当场发车，
+              卡的先后就是派活人的决定；被拒的派发同样不留痕。
+            - **`verifying` 是真状态。** 验收在跑时卡就写在 `verifying` 里 ——
+              长编译、长测试看得见，不再藏在 `running` 里。
+            - **项目不是道。** 注册表分成两层：`[[project]]`（一个仓，看板按它筛选）
+              与一条或多条 `[[taskgroup]]`（道，派活进它、各带一把锁）。
+              旧的"一块 = 一条道"写法原样可读。
+            - **道可以有自己的工作区。** `workspace = "worktree"` 让这条道在仓旁
+              拥有自己长驻的检出，第一次发车时创建、之后一直复用；`link = [...]`
+              把依赖从主树软链进来，什么也不必重装。
+            - **闸门不再冤枉别的工作树。** 兄弟工作树的提交不再算在在飞那张卡头上
+              —— 旧的"发车在飞时不提交主树"这条纪律随之作废。
+            - **控制台只是看板。** 桌面端所有写路径都撤掉了，本地 REST 只读 ——
+              派活、放行、改注册表都走 CLI。
+            - **看板更好读。** 一个项目一行；卡片上写明自己跑在哪条道；每一列的
+              显示上限都能在列头里改（5 / 10 / 20 / 50 / 全部）——
+              没有单独的"展开"开关。
+
             **English**
 
             taskproof is a conveyor belt for AI coding agents: it dispatches
