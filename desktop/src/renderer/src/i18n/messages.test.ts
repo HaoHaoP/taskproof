@@ -212,3 +212,39 @@ describe('card 59 message keys (read-only console)', () => {
     }
   })
 })
+
+/** Every leaf key path in a nested message object, sorted. */
+function keyPaths(messages: Record<string, unknown>, prefix = ''): string[] {
+  const out: string[] = []
+  for (const [key, value] of Object.entries(messages)) {
+    const path = prefix ? `${prefix}.${key}` : key
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      out.push(...keyPaths(value as Record<string, unknown>, path))
+    } else {
+      out.push(path)
+    }
+  }
+  return out.sort()
+}
+
+describe('the two locales declare the same keys (card 64)', () => {
+  it('has an identical leaf-key set in en and zh-CN', () => {
+    expect(keyPaths(zhCN as Record<string, unknown>)).toEqual(keyPaths(en as Record<string, unknown>))
+  })
+
+  it('names the lane on the card and in the drawer, in both locales', () => {
+    expect(at(en, 'card.lane')).toBe('lane')
+    expect(at(zhCN, 'card.lane')).toBe('道')
+    expect(at(en, 'ev.lane')).toBe('lane')
+    expect(at(zhCN, 'ev.lane')).toBe('道')
+  })
+
+  it('keeps project = project and lane = lane in both locales', () => {
+    expect(at(en, 'board.project')).toBe('Project')
+    expect(at(zhCN, 'board.project')).toBe('项目')
+    expect(at(en, 'rail.title')).toBe('Projects')
+    expect(at(zhCN, 'rail.title')).toBe('项目')
+    expect(at(en, 'rail.lanes')).toBe('lanes')
+    expect(at(zhCN, 'rail.lanes')).toBe('条道')
+  })
+})

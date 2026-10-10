@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { acceptancePassed } from './card'
+import { acceptancePassed, laneLabel } from './card'
 
 const cardSfc = readFileSync(new URL('./components/TaskCard.vue', import.meta.url), 'utf-8')
 
@@ -37,5 +37,27 @@ describe('acceptancePassed — the badge never lies', () => {
     expect(cardSfc).toMatch(/const passBadge = computed\(\(\) => acceptancePassed\(props\.task\)\)/)
     expect(cardSfc).toMatch(/v-if="passBadge" class="stamp good"/)
     expect(cardSfc).toMatch(/t\('card\.acceptancePassed'\)/)
+  })
+})
+
+/**
+ * TP-card64: a card drawn under a *project* row still has to name the lane its
+ * task ran in. A task row's `project` column is that lane id; `laneLabel` is the
+ * one pure rule for it, so the card body only wires the answer to markup.
+ */
+describe('laneLabel — the lane the card ran in', () => {
+  it('is the task row\'s own project column (the lane id)', () => {
+    expect(laneLabel({ project: 'alpha-core' })).toBe('alpha-core')
+    // A single-lane project names itself -- the uncollected-registry compat.
+    expect(laneLabel({ project: 'solo' })).toBe('solo')
+  })
+
+  it('marks the card with a small meta item, reusing the existing meta styling', () => {
+    // A small text item (not a new badge), so the card's density and colours
+    // are untouched -- it is one more span inside the existing `.meta` row.
+    expect(cardSfc).toMatch(/const lane = computed\(\(\) => laneLabel\(props\.task\)\)/)
+    expect(cardSfc).toMatch(/<span class="lane" :title="t\('card\.lane'\)">\{\{ lane \}\}<\/span>/)
+    // No card-local lane CSS: it inherits `.meta`, so no colour is introduced.
+    expect(cardSfc).not.toMatch(/\.lane\s*\{/)
   })
 })

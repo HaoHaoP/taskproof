@@ -14,7 +14,7 @@
  *    ordering key, so the fetch-coverage check and the filter agree on what
  *    "older" means.
  */
-import type { Project, Task } from './api/client'
+import type { ProjectGroup, Task } from './api/client'
 import { COLUMNS, type Column } from './contract'
 
 /** How many cards a windowed terminal column (done, cancelled) shows before the
@@ -289,23 +289,64 @@ export function inRange(task: Task, range: RangeChoice, now: number): boolean {
   return created >= rangeStart(range, now)
 }
 
-/** The whole board's filter, applied together: range, then project set. */
-export function filterBoard(tasks: Task[], filter: BoardFilter, now: number): Task[] {
+/**
+ * The lane (taskgroup) -> owning project map the board needs to file a task
+ * under the right project row. A task row's `project` column stores the *lane*
+ * id, not the owning project id; the registry's grouped view is the only place
+ * that knows the ownership, because every nested lane record carries its own
+ * `project` back-pointer. Built here so the store, the view and the tests all
+ * read one mapping. Registry order, later entries winning a duplicate.
+ */
+export function laneProjectMap(groups: ProjectGroup[]): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const group of groups) {
+    for (const lane of group.taskgroups) map[lane.id] = group.id
+  }
+  return map
+}
+
+/** The project a task's lane belongs to, falling back to the lane id itself.
+ *  The fallback is the uncollected-registry compat path: a project that has not
+ *  been folded into a taskgroup yet has lane id == project id, so identity is
+ *  the right answer there. A lane the grouped view no longer lists (a removed
+ *  taskgroup with old rows left behind) keeps its lane id, which draws under no
+ *  project row -- the same as today, where such a lane had no row either. */
+export function owningProject(task: Task, laneProject: Record<string, string>): string {
+  return laneProject[task.project] ?? task.project
+}
+
+/**
+ * The whole board's filter, applied together: range, then the *project* set.
+ * A task survives when the project its lane belongs to is selected, so the one
+ * `filter.projects` set drives both the project rows (`visibleProjects`) and
+ * the cards filed under them -- the board never shows a row without its cards
+ * or cards without their row. `laneProject` is the lane -> project map; a task
+ * whose lane is missing from it falls back to its own lane id (see
+ * `owningProject`).
+ */
+export function filterBoard(
+  tasks: Task[],
+  filter: BoardFilter,
+  now: number,
+  laneProject: Record<string, string>
+): Task[] {
   return tasks.filter(
     (task) =>
       inRange(task, filter.range, now) &&
-      (filter.projects === null || filter.projects.includes(task.project))
+      (filter.projects === null || filter.projects.includes(owningProject(task, laneProject)))
   )
 }
 
 /**
- * The projects whose lane the board draws. This reads the *same* `filter.projects`
- * set `filterBoard` uses to keep cards, so a lane can never disagree with the
- * cards inside it -- the defect card 38 exists to fix, where a lane could be
- * hidden while its cards stayed behind in another lane. `null` (the default)
- * draws every project, in registry order.
+ * The project rows the board draws a lane for. This reads the *same*
+ * `filter.projects` set `filterBoard` keeps cards by, so a project the
+ * multi-select drops loses its row and its cards together, never one without
+ * the other -- the defect card 38 exists to fix, where a row could be hidden
+ * while its cards stayed behind in another. `null` (the default) draws every
+ * project, in registry order. Generic over `{id}` so it reads grouped project
+ * rows and the historical lane records alike.
  */
-export function visibleProjects(projects: Project[], filter: BoardFilter): Project[] {
+export function visibleProjects<T extends { id: string }>(projects: T[], filter: BoardFilter): T[] {
   if (filter.projects === null) return [...projects]
   const chosen = new Set(filter.projects)
   return projects.filter((project) => chosen.has(project.id))

@@ -12,6 +12,7 @@ import {
   createClient,
   type BoardClient,
   type Project,
+  type ProjectGroup,
   type Summary,
   type Task,
   type TaskEvent
@@ -22,6 +23,7 @@ import {
   DEFAULT_RANGE,
   MAX_BUDGET,
   MIN_BUDGET,
+  laneProjectMap,
   needsMoreBudget,
   type RangeChoice
 } from '../matrix'
@@ -60,7 +62,15 @@ export const useBoardStore = defineStore('board', () => {
   const lastError = ref<string | null>(null)
 
   const tasks = ref<Task[]>([])
+  /** The flat, one-row-per-lane registry overview. The projects page and the
+   *  empty-state banner still read it; the board draws its project rows from
+   *  `projectGroups` instead. */
   const projects = ref<Project[]>([])
+  /** The grouped (D2 shape C) view: one row per project with its lanes nested.
+   *  This is the board's row source. */
+  const projectGroups = ref<ProjectGroup[]>([])
+  /** Lifecycle tallies by status word, as the API reports them. The mast and
+   *  the tasks page's "taken M of N" read the same object. */
   const summary = ref<Summary>({})
   /** The board's time range; the view mirrors it from the address bar. It
    *  drives the *fetch budget*, not the filtering (which the view does). */
@@ -126,6 +136,15 @@ export const useBoardStore = defineStore('board', () => {
     Object.values(summary.value).reduce((sum, count) => sum + (count || 0), 0)
   )
 
+  /**
+   * Lane (taskgroup) id -> owning project id, rebuilt from every group's nested
+   * `taskgroups`. A task row's `project` column is a *lane* id, so the board
+   * needs this map to file the card under the right project row. Holding it
+   * here means the view never re-derives the mapping, and it comes from the
+   * grouped view alone -- no extra lane-list request.
+   */
+  const laneProject = computed(() => laneProjectMap(projectGroups.value))
+
   async function connect(): Promise<void> {
     const baseUrl = await resolveBaseUrl()
     client = createClient(baseUrl)
@@ -168,12 +187,14 @@ export const useBoardStore = defineStore('board', () => {
       }
     }
     try {
-      const [nextProjects, nextTasks, nextSummary] = await Promise.all([
+      const [nextProjects, nextGroups, nextTasks, nextSummary] = await Promise.all([
         client!.projects(),
+        client!.projectGroups(),
         fetchTasks(),
         client!.summary()
       ])
       projects.value = nextProjects
+      projectGroups.value = nextGroups
       tasks.value = nextTasks
       summary.value = nextSummary
       lastError.value = null
@@ -398,6 +419,8 @@ export const useBoardStore = defineStore('board', () => {
     lastError,
     tasks,
     projects,
+    projectGroups,
+    laneProject,
     summary,
     total,
     range,

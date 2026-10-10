@@ -14,7 +14,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import StatusMark from './StatusMark.vue'
 import type { Task } from '../api/client'
-import { acceptancePassed } from '../card'
+import { acceptancePassed, laneLabel } from '../card'
 import { duration } from '../format'
 
 const props = defineProps<{ task: Task; expanded?: boolean }>()
@@ -35,6 +35,10 @@ const stamp = computed(() => {
  *  green (see `acceptancePassed`). It answers "the result is fine, only the
  *  boundary was crossed" without ever claiming a pass that was not earned. */
 const passBadge = computed(() => acceptancePassed(props.task))
+
+/** The lane the task ran in, from the task row itself (see `laneLabel`). Shown
+ *  as one small meta item -- the existing density and colours are untouched. */
+const lane = computed(() => laneLabel(props.task))
 </script>
 
 <template>
@@ -65,6 +69,7 @@ const passBadge = computed(() => acceptancePassed(props.task))
       <span>{{ t('card.attempt') }} {{ task.attempt ?? 0 }}</span>
       <span>{{ duration(task.started_at, task.finished_at) }}</span>
       <span>{{ t('card.files') }} {{ task.files_changed_live ?? task.files_changed ?? 0 }}</span>
+      <span class="lane" :title="t('card.lane')">{{ lane }}</span>
     </span>
   </div>
 </template>

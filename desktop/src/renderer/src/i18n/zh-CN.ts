@@ -3,7 +3,7 @@ export default {
 
   nav: { matrix: '矩阵', projects: '项目', tasks: '任务', settings: '设置', collapse: '收起侧栏', expand: '展开侧栏' },
 
-  rail: { title: '项目', all: '全选', none: '清空', tasks: '个任务' },
+  rail: { title: '项目', all: '全选', none: '清空', tasks: '个任务', lanes: '条道' },
 
   /* The matrix's board-level filter and its finished-column window. */
   board: {
@@ -42,7 +42,7 @@ export default {
 
   tally: { tasks: '任务', flying: '处理中', failed: '未通过' },
 
-  card: { attempt: '尝试', files: '文件', acceptancePassed: '验收已过' },
+  card: { attempt: '尝试', files: '文件', acceptancePassed: '验收已过', lane: '道' },
 
   tasks: {
     title: '全部任务',
@@ -223,6 +223,7 @@ export default {
     files: '改动文件',
     adapter: '适配器',
     group: '并发组',
+    lane: '道',
     notrun: '未跑'
   },
 
