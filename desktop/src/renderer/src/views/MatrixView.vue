@@ -451,7 +451,7 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
                 <span class="cap-chip-label">
                   {{ t(capChips[column.key].key, capChips[column.key].params) }}
                 </span>
-                <span class="cap-caret" aria-hidden="true">▾</span>
+                <span class="cap-caret" aria-hidden="true" v-html="ICONS.caret" />
               </button>
               <template #dropdown>
                 <el-dropdown-menu>
@@ -771,12 +771,10 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   align-items: center;
   min-width: 0;
 }
+/* Do not style Element Plus's internal `.el-tooltip__trigger` to lay out this
+   control: that class also lands on .cap-chip, and its extra class selector
+   outranks .cap-chip's own display rule. Own the full-width layout here. */
 .cap-dd {
-  display: block;
-  width: 100%;
-  min-width: 0;
-}
-.cap-dd :deep(.el-tooltip__trigger) {
   display: block;
   width: 100%;
   min-width: 0;
@@ -806,6 +804,7 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   color: var(--ink);
 }
 .cap-chip-label {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -814,8 +813,8 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
 .cap-caret {
   flex: none;
   color: var(--ink-4);
-  font-size: 9px;
-  transform: translateY(-0.5px);
+  display: inline-flex;
+  align-items: center;
 }
 </style>
 

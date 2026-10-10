@@ -19,6 +19,8 @@ export const ICONS = {
     '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.6" y="2.4" width="12.8" height="11.2" rx="2.2"/><path d="M6.4 2.4v11.2"/><path d="M10.6 6.4L8.9 8l1.7 1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   expand:
     '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.6" y="2.4" width="12.8" height="11.2" rx="2.2"/><path d="M6.4 2.4v11.2"/><path d="M9 6.4L10.7 8L9 9.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  caret:
+    '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 6.6L8 9.8l3.2-3.2"/></svg>',
   pencil:
     '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M11.2 2.5l2.3 2.3-8.1 8.1-3 .7.7-3 8.1-8.1z"/><path d="M9.7 4l2.3 2.3"/></svg>',
   trash:
