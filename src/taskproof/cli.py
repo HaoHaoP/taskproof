@@ -77,6 +77,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("taskgroups", help="list registered taskgroups (lanes)")
 
+    sub.add_parser(
+        "workspaces", help="list lanes that declare a long-lived workspace"
+    )
+
+    p = sub.add_parser(
+        "workspace-rm",
+        help="delete a lane's long-lived workspace (prints evidence first)",
+    )
+    p.add_argument("lane", help="taskgroup id, alias, or path")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="delete even with uncommitted changes or unmerged commits",
+    )
+
     p = sub.add_parser("run", help="dispatch one task (primary command)")
     p.add_argument("project", help="project id, alias, or path")
     p.add_argument("brief", help="what the agent should do")
@@ -496,6 +511,81 @@ def cmd_taskgroups(args):
             )
         human = "\n".join(lines)
     emit(args, payload, human)
+    return 0
+
+
+def cmd_workspaces(args):
+    """List every lane that opts into a long-lived workspace, with live status.
+
+    Read-only: it reports the workspace path, whether it has been built yet, how
+    many uncommitted changes and unmerged commits it holds, and which dependency
+    paths are symlinked from the main checkout.
+    """
+    rows = dispatch.list_workspaces(args.workspace)
+    payload = {
+        "workspaces": rows,
+        "registry": registry.workspace_registry_path(args.workspace),
+    }
+    if not rows:
+        human = "no lanes declare a workspace"
+    else:
+        lines = [
+            f"{'ID':<20} {'PROJECT':<16} {'BUILT':<6} {'CHANGES':>7} "
+            f"{'UNMERGED':>8} {'LINKS':<22} WORKSPACE"
+        ]
+        for row in rows:
+            links = ",".join(row["links"]) or "-"
+            lines.append(
+                f"{row['id']:<20} {row['project']:<16} "
+                f"{('yes' if row['exists'] else 'no'):<6} "
+                f"{row['changed']:>7} {row['unmerged']:>8} "
+                f"{links:<22} {row['workspace'] or '-'}"
+            )
+        human = "\n".join(lines)
+    emit(args, payload, human)
+    return 0
+
+
+def _workspace_evidence(status: dict) -> str:
+    """The before-deletion evidence `workspace-rm` must always print."""
+    lines = [
+        f"workspace: {status['workspace'] or '-'}",
+        f"repository: {status['repo'] or '-'}",
+        f"uncommitted changes ({status['changed']}):",
+    ]
+    lines += [f"  {line}" for line in status["changed_files"]] or ["  (none)"]
+    lines.append(f"unmerged commits ({status['unmerged']}):")
+    lines += [f"  {line}" for line in status["unmerged_commits"]] or ["  (none)"]
+    lines.append("this unregisters the git worktree (git worktree remove --force)")
+    return "\n".join(lines)
+
+
+def cmd_workspace_rm(args):
+    status = dispatch.lane_workspace_status(args.workspace, args.lane)
+    evidence = _workspace_evidence(status)
+
+    if not status["exists"]:
+        emit(
+            args,
+            {"workspace": status, "removed": False},
+            evidence + "\nno workspace directory; nothing to remove",
+        )
+        return 0
+
+    # The evidence goes out BEFORE anything is deleted, so an operator always
+    # sees what is at stake -- including on a refusal (the error below follows).
+    if not args.json:
+        print(evidence, flush=True)
+
+    result = dispatch.remove_workspace(args.workspace, args.lane, force=args.force)
+
+    if args.json:
+        emit(args, {"workspace": status, "result": result}, "")
+        return 0
+    note = ""
+    if result.get("forced"):
+        note = "  (forced: uncommitted changes / unmerged commits present)"
+    print(f"removed workspace: {result['path']}{note}", flush=True)
     return 0
 
 
@@ -1244,6 +1334,8 @@ COMMANDS = {
     "register": cmd_register,
     "projects": cmd_projects,
     "taskgroups": cmd_taskgroups,
+    "workspaces": cmd_workspaces,
+    "workspace-rm": cmd_workspace_rm,
     "run": cmd_run,
     "tasks": cmd_tasks,
     "show": cmd_show,

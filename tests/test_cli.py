@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 
@@ -504,6 +505,112 @@ class RunCapCliTest(CliBase):
             "--adapter", "custom:echo hi", "--cap", "0",
         )
         self.assertEqual(code, 64)
+
+
+class WorkspaceCliTest(CliBase):
+    """Card 66: `workspaces` lists opt-in lanes; `workspace-rm` prints evidence,
+    refuses a dirty workspace with a file-naming message, and `--force` overrides.
+
+    Driven through `cli.main` against a real temporary git repo -- the same
+    in-process seam as every other CLI test, never the operator's registry.
+    """
+
+    def setUp(self):
+        super().setUp()
+        for args in (
+            ["init", "-q"],
+            ["config", "user.email", "t@t"],
+            ["config", "user.name", "t"],
+        ):
+            subprocess.run(["git", *args], cwd=self.proj, check=True)
+        with open(os.path.join(self.proj, "seed.txt"), "w", encoding="utf-8") as fh:
+            fh.write("seed\n")
+        subprocess.run(["git", "add", "seed.txt"], cwd=self.proj, check=True)
+        subprocess.run(["git", "commit", "-qm", "seed"], cwd=self.proj, check=True)
+        self.run_cli("--workspace", self.ws, "init")
+        self.write_registry(workspace="worktree")
+
+    def write_registry(self, **kwargs):
+        # Opt this lane into a long-lived workspace by appending the lane field
+        # to the shared `[[project]]` block (which a lane field promotes).
+        os.makedirs(self.ws, exist_ok=True)
+        body = registry_toml(self.proj, **{k: v for k, v in kwargs.items()
+                                           if k != "workspace"})
+        body = body.rstrip("\n") + f'\nworkspace = "{kwargs.get("workspace", "none")}"\n'
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write(body)
+
+    def run_cli_both(self, *argv):
+        """Like `run_cli`, but also returns stderr (for the refusal message)."""
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def _ws_path(self):
+        return os.path.join(self.tmp, "project-ws-proj")
+
+    def _build(self):
+        code, out = self.run_cli(
+            "--workspace", self.ws, "--json", "run", "proj", "make ws",
+            "--adapter", "custom:echo hi",
+        )
+        self.assertEqual(code, 0, out)
+        self.assertTrue(os.path.isdir(self._ws_path()))
+        return json.loads(out)["task_id"]
+
+    def test_workspaces_lists_opt_in_lane_before_it_is_built(self):
+        code, out = self.run_cli("--workspace", self.ws, "workspaces")
+        self.assertEqual(code, 0)
+        self.assertIn("proj", out)
+
+        code, out = self.run_cli("--workspace", self.ws, "--json", "workspaces")
+        self.assertEqual(code, 0)
+        rows = json.loads(out)["workspaces"]
+        self.assertEqual([r["id"] for r in rows], ["proj"])
+        self.assertFalse(rows[0]["exists"])
+
+    def test_workspaces_reports_a_built_clean_workspace(self):
+        self._build()
+        code, out = self.run_cli("--workspace", self.ws, "--json", "workspaces")
+        self.assertEqual(code, 0)
+        row = json.loads(out)["workspaces"][0]
+        self.assertTrue(row["exists"])
+        self.assertEqual(row["changed"], 0)
+        self.assertEqual(row["unmerged"], 0)
+
+    def test_workspace_rm_clean_exits_zero(self):
+        self._build()
+        code, out = self.run_cli("--workspace", self.ws, "workspace-rm", "proj")
+        self.assertEqual(code, 0)
+        self.assertIn("removed workspace", out)
+        self.assertFalse(os.path.exists(self._ws_path()))
+
+    def test_workspace_rm_dirty_is_refused_with_the_file_name(self):
+        self._build()
+        with open(os.path.join(self._ws_path(), "dirty.txt"), "w", encoding="utf-8") as fh:
+            fh.write("x\n")
+        code, out, err = self.run_cli_both(
+            "--workspace", self.ws, "workspace-rm", "proj"
+        )
+        self.assertEqual(code, 64)
+        # Evidence precedes deletion (stdout), and the refusal names the file.
+        self.assertIn("dirty.txt", out)
+        self.assertIn("dirty.txt", err)
+        self.assertIn("--force", err)
+        self.assertTrue(os.path.isdir(self._ws_path()))
+
+    def test_workspace_rm_force_deletes_a_dirty_workspace(self):
+        self._build()
+        with open(os.path.join(self._ws_path(), "dirty.txt"), "w", encoding="utf-8") as fh:
+            fh.write("x\n")
+        code, out, _ = self.run_cli_both(
+            "--workspace", self.ws, "workspace-rm", "proj", "--force"
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("forced", out)
+        self.assertFalse(os.path.exists(self._ws_path()))
+
 
 
 if __name__ == "__main__":

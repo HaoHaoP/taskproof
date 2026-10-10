@@ -31,8 +31,11 @@ from taskproof.dispatch import (
     _worktree_target_path,
     cancel_task,
     dispatch,
+    lane_workspace_status,
+    list_workspaces,
     prepare_workspace,
     remove_task,
+    remove_workspace,
     summary_counts,
     task_detail,
 )
@@ -1130,6 +1133,303 @@ class WorktreeTest(DispatchBase):
             dispatch(self.ws, "proj", "x", worktree=True,
                      adapter="custom:sh -c 'echo hello'")
         self.assertEqual(self.active_claims(), 0)
+
+
+class LaneWorkspaceTest(unittest.TestCase):
+    """A lane that declares ``workspace = "worktree"`` gets ONE long-lived
+    checkout, created lazily on its first real run and reused forever after.
+
+    Everything here is a *real* run driven through ``dispatch`` on a temporary
+    git repository; nothing is a hand-built fixture and no package manager is
+    ever invoked.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = os.path.realpath(self._tmp.name)
+        self.ws = os.path.join(self.tmp, "workspace")
+        os.makedirs(self.ws)
+        self.repo = os.path.join(self.tmp, "project")
+        os.makedirs(self.repo)
+        self._git("init", "-q")
+        self._git("config", "user.email", "t@t")
+        self._git("config", "user.name", "t")
+        self._write(os.path.join(self.repo, "seed.txt"), "seed\n")
+        self._git("add", "seed.txt")
+        self._git("commit", "-qm", "seed")
+        conn = storage.connect(storage.db_path(self.ws))
+        storage.migrate(conn)
+        conn.close()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    # -- helpers ----------------------------------------------------------
+
+    def _git(self, *args, cwd=None):
+        return subprocess.run(
+            ["git", *args], cwd=cwd or self.repo, check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+
+    def _write(self, path, text):
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def _registry(self, *, lane_id="lane", path=None, workspace="worktree", link=None):
+        path = path or self.repo
+        lines = [
+            "[defaults]", "concurrency = 3", "timeout = 60", "",
+            "[[taskgroup]]", f'id = "{lane_id}"', f'path = "{path}"',
+            'verify = "exit 0"', 'verify_kind = "check"',
+        ]
+        if workspace is not None:
+            lines.append(f'workspace = "{workspace}"')
+        if link is not None:
+            joined = ", ".join(f'"{item}"' for item in link)
+            lines.append(f"link = [{joined}]")
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+
+    def _two_lane_registry(self):
+        body = (
+            "[defaults]\nconcurrency = 3\ntimeout = 60\n\n"
+            f'[[taskgroup]]\nid = "lane"\npath = "{self.repo}"\n'
+            'verify = "exit 0"\nverify_kind = "check"\nworkspace = "worktree"\n\n'
+            f'[[taskgroup]]\nid = "plain"\npath = "{self.repo}"\n'
+            'verify = "exit 0"\nverify_kind = "check"\n'
+        )
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write(body)
+
+    def _run(self, lane_id="lane", command="custom:sh -c 'echo done'", **kwargs):
+        return dispatch(self.ws, lane_id, "do it", adapter=command, **kwargs)
+
+    def _workdir(self, task_id):
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            return storage.get_task(conn, task_id)["workdir"]
+        finally:
+            conn.close()
+
+    def _events(self, task_id):
+        return task_detail(self.ws, task_id)["events"]
+
+    def _workspace_path(self, lane_id="lane"):
+        return os.path.join(self.tmp, f"project-ws-{lane_id}")
+
+    def _worktree_listing(self):
+        return self._git("worktree", "list", "--porcelain").stdout
+
+    # -- lifecycle --------------------------------------------------------
+
+    def test_second_card_reuses_the_same_workspace(self):
+        self._registry()
+        first = self._run(command="custom:sh -c 'sleep 0.2; echo done'")
+        second = self._run(command="custom:sh -c 'sleep 0.2; echo done'")
+
+        self.assertEqual(self._workdir(first), self._workdir(second))
+        self.assertEqual(self._workdir(first), self._workspace_path())
+        # Exactly one workspace directory exists; the second run reused it.
+        dirs = sorted(n for n in os.listdir(self.tmp) if "-ws-" in n)
+        self.assertEqual(dirs, ["project-ws-lane"])
+        first_names = [e["event"] for e in self._events(first)]
+        second_names = [e["event"] for e in self._events(second)]
+        self.assertIn("workspace_created", first_names)
+        self.assertIn("workspace", second_names)
+        self.assertNotIn("workspace_created", second_names)
+        reused = [e for e in self._events(second) if e["event"] == "workspace"][0]
+        self.assertTrue(reused["payload"]["reused"])
+
+    def test_none_is_the_default_and_runs_in_place(self):
+        self._registry(workspace=None)
+        task_id = self._run()
+        self.assertEqual(self._workdir(task_id), self.repo)
+        self.assertEqual([n for n in os.listdir(self.tmp) if "-ws-" in n], [])
+
+    def test_subdirectory_lane_runs_at_the_matching_offset(self):
+        self._write(os.path.join(self.repo, "desktop", "app.js"), "x\n")
+        self._git("add", "desktop/app.js")
+        self._git("commit", "-qm", "desktop")
+        self._registry(path=os.path.join(self.repo, "desktop"))
+        task_id = self._run()
+        self.assertEqual(
+            self._workdir(task_id),
+            os.path.join(self._workspace_path(), "desktop"),
+        )
+
+    def test_workspace_is_never_auto_removed(self):
+        self._registry()
+        task_id = self._run(
+            command="custom:sh -c 'echo made > made.txt && echo ok'"
+        )
+        self.assertTrue(os.path.isdir(self._workspace_path()))
+        names = [e["event"] for e in self._events(task_id)]
+        self.assertNotIn("worktree_removed", names)
+        self.assertNotIn("worktree", names)
+
+    def test_foreign_directory_at_the_workspace_path_is_refused(self):
+        os.makedirs(self._workspace_path())
+        self._registry()
+        with self.assertRaises(UsageError) as ctx:
+            self._run()
+        self.assertIn("workspace-rm", str(ctx.exception.hint))
+
+    # -- dependency links -------------------------------------------------
+
+    def test_explicit_link_points_at_the_main_tree_and_is_idempotent(self):
+        self._write(os.path.join(self.repo, "desktop", "node_modules", "dep.txt"), "dep\n")
+        self._registry(link=["desktop/node_modules"])
+        self._run()
+
+        link = os.path.join(self._workspace_path(), "desktop", "node_modules")
+        self.assertTrue(os.path.islink(link))
+        self.assertEqual(
+            os.readlink(link), os.path.join(self.repo, "desktop", "node_modules")
+        )
+        # The main tree's copy, not a fresh install: node_modules is not in git.
+        self.assertFalse(os.path.isdir(os.path.join(self.repo, ".git", "modules")))
+        before = os.lstat(link).st_mtime_ns
+        time.sleep(0.01)
+        self._run()
+        self.assertTrue(os.path.islink(link))
+        self.assertEqual(os.lstat(link).st_mtime_ns, before)
+
+    def test_probe_links_node_modules_when_package_json_is_present(self):
+        self._write(os.path.join(self.repo, "package.json"), "{}\n")
+        self._git("add", "package.json")
+        self._git("commit", "-qm", "pkg")
+        self._registry(link=None)  # nothing declared -> probe
+        task_id = self._run()
+        link = os.path.join(self._workspace_path(), "node_modules")
+        self.assertTrue(os.path.islink(link))
+        self.assertEqual(os.readlink(link), os.path.join(self.repo, "node_modules"))
+        created = [e for e in self._events(task_id) if e["event"] == "workspace_created"][0]
+        self.assertEqual(created["payload"]["links"], ["node_modules"])
+
+    def test_probe_ignores_a_python_only_project(self):
+        # Python virtualenvs are deliberately never probed: pyvenv.cfg and the
+        # console-script shebangs hardcode absolute paths, so a symlinked venv
+        # would resolve back to the main tree (or break outright).
+        self._write(os.path.join(self.repo, "pyproject.toml"), "[project]\n")
+        self._git("add", "pyproject.toml")
+        self._git("commit", "-qm", "py")
+        self._registry(link=None)
+        task_id = self._run()
+        created = [e for e in self._events(task_id) if e["event"] == "workspace_created"][0]
+        self.assertEqual(created["payload"]["links"], [])
+        for name in ("node_modules", "target", ".venv", "venv"):
+            self.assertFalse(os.path.lexists(os.path.join(self._workspace_path(), name)))
+
+    # -- --worktree interaction ------------------------------------------
+
+    def test_worktree_flag_is_ignored_when_the_lane_owns_a_workspace(self):
+        self._registry()
+        task_id = self._run(worktree=True)
+        dirs = sorted(
+            n for n in os.listdir(self.tmp) if "-ws-" in n or "-wt-" in n
+        )
+        self.assertEqual(dirs, ["project-ws-lane"])
+        created = [e for e in self._events(task_id) if e["event"] == "workspace_created"][0]
+        self.assertTrue(created["payload"]["worktree_flag_ignored"])
+        self.assertIn("ignored", created["payload"]["note"])
+
+    # -- workspace-rm -----------------------------------------------------
+
+    def test_workspace_rm_removes_a_clean_workspace(self):
+        # A declared dependency symlink is taskproof's plumbing, not dirt: the
+        # workspace must still count as clean even though git sees an untracked
+        # `desktop/node_modules` link (which git would otherwise collapse to
+        # `?? desktop/`). This pins that exclusion.
+        self._write(
+            os.path.join(self.repo, "desktop", "node_modules", "dep.txt"), "dep\n"
+        )
+        self._registry(link=["desktop/node_modules"])
+        self._run()
+        self.assertIn("project-ws-lane", self._worktree_listing())
+        self.assertEqual(lane_workspace_status(self.ws, "lane")["changed_files"], [])
+
+        result = remove_workspace(self.ws, "lane")
+
+        self.assertTrue(result["removed"])
+        self.assertFalse(result["forced"])
+        self.assertFalse(os.path.exists(self._workspace_path()))
+        self.assertNotIn("project-ws-lane", self._worktree_listing())
+
+    def test_workspace_rm_refuses_dirty_and_force_deletes(self):
+        self._registry()
+        self._run()
+        self._write(os.path.join(self._workspace_path(), "dirty.txt"), "x\n")
+
+        status = lane_workspace_status(self.ws, "lane")
+        self.assertEqual(status["changed"], 1)
+        self.assertEqual(status["changed_files"], ["?? dirty.txt"])
+
+        with self.assertRaises(UsageError) as ctx:
+            remove_workspace(self.ws, "lane")
+        self.assertIn("dirty.txt", str(ctx.exception))
+        self.assertIn("--force", ctx.exception.hint)
+        self.assertTrue(os.path.isdir(self._workspace_path()))
+
+        result = remove_workspace(self.ws, "lane", force=True)
+        self.assertTrue(result["removed"])
+        self.assertTrue(result["forced"])
+        self.assertFalse(os.path.exists(self._workspace_path()))
+
+    def test_workspace_rm_refuses_unmerged_commits(self):
+        self._registry()
+        self._run()
+        workspace = self._workspace_path()
+        self._write(os.path.join(workspace, "commit.txt"), "c\n")
+        self._git("add", "commit.txt", cwd=workspace)
+        self._git(
+            "-c", "user.email=t@t", "-c", "user.name=t",
+            "commit", "-qm", "work", cwd=workspace,
+        )
+        status = lane_workspace_status(self.ws, "lane")
+        self.assertEqual(status["unmerged"], 1)
+        with self.assertRaises(UsageError) as ctx:
+            remove_workspace(self.ws, "lane")
+        self.assertIn("unmerged", str(ctx.exception))
+        self.assertTrue(os.path.isdir(workspace))
+
+    def test_list_workspaces_reports_only_opt_in_lanes(self):
+        self._two_lane_registry()
+        self._run("lane")
+        rows = list_workspaces(self.ws)
+        self.assertEqual([row["id"] for row in rows], ["lane"])
+        self.assertTrue(rows[0]["exists"])
+        self.assertEqual(rows[0]["changed"], 0)
+        self.assertEqual(rows[0]["unmerged"], 0)
+
+    # -- rm keeps the lane workspace -------------------------------------
+
+    def test_rm_keeps_the_lane_workspace_but_deletes_its_own_worktree(self):
+        self._two_lane_registry()
+        lane_task = self._run("lane")
+        plain_task = self._run(
+            "plain",
+            command="custom:sh -c 'echo made > made.txt && echo ok'",
+            worktree=True,
+        )
+        lane_ws = self._workspace_path("lane")
+        plain_wt = os.path.join(self.tmp, f"project-wt-{plain_task}")
+        self.assertTrue(os.path.isdir(lane_ws))
+        self.assertTrue(os.path.isdir(plain_wt))
+
+        remove_task(self.ws, lane_task)
+        self.assertTrue(
+            os.path.isdir(lane_ws), "rm must not touch the lane's workspace"
+        )
+
+        remove_task(self.ws, plain_task)
+        self.assertFalse(
+            os.path.exists(plain_wt),
+            "rm still deletes the task's own --worktree checkout",
+        )
 
 
 class VerifyingLifecycleTest(DispatchBase):

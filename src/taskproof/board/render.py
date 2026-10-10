@@ -342,6 +342,11 @@ def _event_kind(name) -> str:
         "worktree_created": "工作树",
         "worktree_removed": "清理工作树",
         "worktree_cleanup_failed": "清理失败",
+        # Long-lived per-lane workspaces (card 66). The `worktree_*` labels above
+        # stay for historical ledgers written by the one-time `--worktree` flag.
+        "workspace_created": "建工作区",
+        "workspace": "复用工作区",
+        "workspace_removed": "删工作区",
     }.get(str(name or ""), str(name or "事件"))
 
 

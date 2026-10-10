@@ -288,7 +288,16 @@ def _execute_claimed(
     worktree_path = None
     run_dir = taskgroup.path
     try:
-        if worktree:
+        # A lane that declares `workspace = "worktree"` wins over the one-time
+        # `--worktree` flag: it already IS the long-lived checkout, so creating a
+        # second one-off worktree would be wrong. The workspace is created or
+        # reused here -- the first moment a card actually has a slot and is about
+        # to run, never merely by editing the registry.
+        if taskgroup.workspace == "worktree":
+            _, run_dir = _ensure_lane_workspace(
+                conn, task_id, taskgroup, worktree_flag=worktree
+            )
+        elif worktree:
             if not _is_git_repo(taskgroup.path):
                 raise UsageError(
                     f"--worktree needs a git repository, but {taskgroup.path} "
@@ -1201,6 +1210,433 @@ def _remove_worktree(repo_path: str, path: str) -> Optional[str]:
         except (OSError, subprocess.SubprocessError):
             pass
     return error
+
+
+# ---------------------------------------------------------------------------
+# Taskgroup workspaces
+#
+# A lane may declare `workspace = "worktree"`: instead of running in the main
+# checkout, taskproof lazily creates ONE long-lived git worktree beside the
+# repo and reuses it for every card on that lane. It is never removed
+# automatically -- `taskproof workspace-rm <lane>` is the only way out. This is
+# deliberately a per-lane opt-in; the default (`workspace = "none"`) keeps the
+# historical in-place behaviour.
+# ---------------------------------------------------------------------------
+
+#: Build file -> dependency directory to symlink from the main checkout into a
+#: lane workspace. Mirrors `registry.infer_verify`: a short, opinionated list,
+#: not a general-purpose detector. Python virtual environments are deliberately
+#: NOT here: `pyvenv.cfg` and the console-script shebangs under `bin/` record
+#: absolute paths, so a symlinked venv would resolve back to the main tree (or
+#: break outright) instead of isolating the run.
+_DEPENDENCY_LINKS = (
+    ("package.json", "node_modules"),
+    ("Cargo.toml", "target"),
+)
+
+
+def _git_toplevel(path: str) -> Optional[str]:
+    """Absolute git repository root containing ``path``, or None.
+
+    Read-only probe. A ``path`` that is not inside a work tree (or where git is
+    unavailable) yields None rather than raising, so callers can decide.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    root = proc.stdout.strip()
+    return root or None
+
+
+def _git_worktree_paths(repo_root: str) -> list:
+    """Every checkout path git has registered for ``repo_root`` (realpath'd)."""
+    try:
+        proc = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    paths = []
+    for line in proc.stdout.splitlines():
+        if line.startswith("worktree "):
+            paths.append(os.path.realpath(line[len("worktree "):].strip()))
+    return paths
+
+
+def _lane_workspace_path(lane, repo_root: str) -> str:
+    """The sibling directory a lane's long-lived workspace lives in.
+
+    ``<repo root name>-ws-<lane id>`` BESIDE the repo root, never inside it, so
+    a workspace can never pollute the main checkout's ``git status``.
+    """
+    repo_abs = os.path.abspath(repo_root)
+    return os.path.join(
+        os.path.dirname(repo_abs), f"{os.path.basename(repo_abs)}-ws-{lane.id}"
+    )
+
+
+def _lane_run_dir(lane, repo_root: str, workspace_root: str) -> str:
+    """Where inside the workspace this lane's cards run.
+
+    A ``path`` under the repo root maps to the same relative location inside the
+    workspace; a ``path`` that IS the repo root (or outside it, e.g. its own
+    independent clone) runs at the workspace root.
+    """
+    repo = os.path.realpath(repo_root)
+    lane_path = os.path.realpath(lane.path)
+    if lane_path == repo:
+        return workspace_root
+    try:
+        common = os.path.commonpath([repo, lane_path])
+    except ValueError:  # different drives on Windows
+        return workspace_root
+    if common == repo:
+        rel = os.path.relpath(lane_path, repo)
+        if rel and rel != ".":
+            return os.path.join(workspace_root, rel)
+    return workspace_root
+
+
+def _probe_dependency_links(lane, repo_root: Optional[str] = None) -> list:
+    """Dependency directories to symlink in, inferred from build files.
+
+    Detection mirrors ``registry.infer_verify`` (a marker file in the lane path),
+    but the returned path is workspace-root-relative -- the same base an explicit
+    ``link`` uses -- so a subdirectory lane links ``<lane rel>/node_modules``
+    rather than the repository root's copy.
+    """
+    prefix = ""
+    if repo_root:
+        rel = os.path.relpath(os.path.realpath(lane.path), os.path.realpath(repo_root))
+        if rel not in (".", ""):
+            prefix = rel
+    found = []
+    for marker, link in _DEPENDENCY_LINKS:
+        if os.path.isfile(os.path.join(lane.path, marker)):
+            found.append(os.path.join(prefix, link) if prefix else link)
+    return found
+
+
+def _lane_links(lane, repo_root: Optional[str] = None) -> list:
+    """The relative paths to symlink from the main tree into the workspace.
+
+    An explicit ``link`` wins; otherwise the build-file probe supplies the
+    defaults (``package.json`` -> ``node_modules``, ``Cargo.toml`` -> ``target``).
+    """
+    if lane.link:
+        return list(lane.link)
+    return _probe_dependency_links(lane, repo_root)
+
+
+def _ensure_links(repo_root: str, workspace_root: str, links) -> list:
+    """Idempotently symlink ``links`` from the main tree into the workspace.
+
+    Each target is ``<workspace>/<rel>`` pointing at ``<repo root>/<rel>`` --
+    the main checkout's copy, so dependencies are shared rather than reinstalled.
+    An existing target (symlink or real directory) is left untouched. Returns the
+    links this call actually created; no package manager is ever invoked.
+    """
+    created = []
+    for rel in links:
+        target = os.path.join(workspace_root, rel)
+        if os.path.lexists(target):
+            continue
+        parent = os.path.dirname(target)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        os.symlink(os.path.join(repo_root, rel), target)
+        created.append(rel)
+    return created
+
+
+def _worktree_add(repo_root: str, path: str, lane) -> None:
+    """``git worktree add --detach`` a fresh, long-lived lane workspace."""
+    proc = subprocess.run(
+        ["git", "worktree", "add", "--detach", path],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if proc.returncode != 0:
+        shutil.rmtree(path, ignore_errors=True)
+        raise UsageError(
+            f"could not create a git worktree for lane '{lane.id}'",
+            hint=(proc.stdout or "").strip()
+            or "git worktree add failed (is the repo clean?)",
+        )
+
+
+def _ensure_lane_workspace(conn, task_id: str, lane, *, worktree_flag: bool = False):
+    """Create-or-reuse ``lane``'s long-lived workspace; return (root, run_dir).
+
+    Called only once a card actually has a slot and is about to run, so simply
+    editing the registry never builds anything. A workspace is created once and
+    reused forever after; a directory that exists but is not a worktree of the
+    same repo is a hard error with the `workspace-rm` remedy. ``worktree_flag``
+    is the one-time ``--worktree`` argument: when set it is ignored, because the
+    lane workspace already is the long-lived checkout.
+    """
+    if not _is_git_repo(lane.path):
+        raise UsageError(
+            f"workspace = \"worktree\" needs a git repository, but {lane.path} "
+            "is not one",
+            hint='set workspace = "none" for this lane, or point it at a git checkout',
+        )
+    repo_root = _git_toplevel(lane.path)
+    if not repo_root:
+        raise UsageError(
+            f"could not find a git repository root for lane '{lane.id}' "
+            f"(path {lane.path})",
+        )
+    repo_root = os.path.realpath(repo_root)
+    workspace_root = _lane_workspace_path(lane, repo_root)
+
+    created = False
+    if os.path.lexists(workspace_root):
+        if os.path.realpath(workspace_root) not in _git_worktree_paths(repo_root):
+            raise UsageError(
+                f"{workspace_root} already exists but is not a worktree of "
+                f"{repo_root}",
+                hint=f"taskproof workspace-rm {lane.id}",
+            )
+    else:
+        _worktree_add(repo_root, workspace_root, lane)
+        created = True
+
+    links = _ensure_links(repo_root, workspace_root, _lane_links(lane, repo_root))
+    run_dir = _lane_run_dir(lane, repo_root, workspace_root)
+
+    payload = {"path": workspace_root, "repo": repo_root, "links": links}
+    if worktree_flag:
+        payload["worktree_flag_ignored"] = True
+        payload["note"] = (
+            "using the lane workspace; --worktree is ignored while "
+            'workspace = "worktree"'
+        )
+    if created:
+        storage.append_event(conn, task_id, "workspace_created", payload)
+    else:
+        payload["reused"] = True
+        storage.append_event(conn, task_id, "workspace", payload)
+    return workspace_root, run_dir
+
+
+def _worktree_changes_list(path: str, *, links=()) -> list:
+    """``git status --porcelain`` lines for a workspace (empty on any failure).
+
+    ``links`` are the dependency symlinks taskproof itself created; they are
+    excluded so a freshly-built workspace counts as clean instead of being
+    flagged as dirty (an untracked ``node_modules`` symlink in a repo that does
+    not gitignore it is taskproof's plumbing, not the adapter's work).
+
+    ``--untracked-files=all`` is essential, not cosmetic: by default git
+    collapses a wholly-untracked directory to ``?? desktop/``, which would hide
+    a link like ``desktop/node_modules`` behind its parent and defeat the
+    exclusion (and equally hide the adapter's own new files).
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    excluded = [item.rstrip("/") for item in links if item]
+    result = []
+    for line in proc.stdout.splitlines():
+        if not line.strip():
+            continue
+        candidate = line[3:].strip().strip('"') if len(line) > 3 else ""
+        if any(
+            candidate == item or candidate.startswith(item + "/")
+            for item in excluded
+        ):
+            continue
+        result.append(line)
+    return result
+
+
+def _unmerged_commits(path: str, repo_root: Optional[str] = None) -> list:
+    """Commits in a workspace that the main checkout has not merged.
+
+    A lane workspace is created ``--detach``, so any commit the adapter makes
+    lives off-branch: exactly the "not merged anywhere" work an operator must be
+    warned about before deleting. The exclusion base is the source repo's HEAD,
+    so a clean, freshly-checked-out workspace lists none while a commit the
+    adapter made (even on its own branch) is listed. ``--not --all`` cannot be
+    used: git's ``--all`` includes HEAD itself, which would hide every commit.
+    """
+    args = ["git", "log", "--oneline", "--no-decorate", "HEAD"]
+    base = None
+    if repo_root:
+        try:
+            probe = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            if probe.returncode == 0 and probe.stdout.strip():
+                base = probe.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            base = None
+    if base:
+        args += ["--not", base]
+    else:
+        args += ["--not", "--branches", "--tags", "--remotes"]
+    try:
+        proc = subprocess.run(
+            args,
+            cwd=path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    return [line for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _lane_workspace_status(lane) -> dict:
+    """Read-only evidence about one lane's long-lived workspace."""
+    repo_root = _git_toplevel(lane.path) if os.path.isdir(lane.path) else None
+    repo_root = os.path.realpath(repo_root) if repo_root else None
+    ws_path = _lane_workspace_path(lane, repo_root) if repo_root else None
+    exists = bool(ws_path) and os.path.isdir(ws_path)
+    links = _lane_links(lane, repo_root)
+    changed_files = _worktree_changes_list(ws_path, links=links) if exists else []
+    unmerged = _unmerged_commits(ws_path, repo_root) if exists else []
+    return {
+        "id": lane.id,
+        "project": lane.project,
+        "path": lane.path,
+        "repo": repo_root,
+        "workspace": ws_path,
+        "exists": exists,
+        "changed_files": changed_files,
+        "changed": len(changed_files),
+        "unmerged_commits": unmerged,
+        "unmerged": len(unmerged),
+        "links": links,
+    }
+
+
+def lane_workspace_status(workspace: str, lane_key: str) -> dict:
+    """Status of one lane's long-lived workspace (`taskproof workspace-rm`)."""
+    reg = registry.load(registry.workspace_registry_path(workspace))
+    return _lane_workspace_status(reg.require(lane_key))
+
+
+def list_workspaces(workspace: str) -> list:
+    """Every lane that declares ``workspace = "worktree"``, with its status."""
+    reg = registry.load(registry.workspace_registry_path(workspace))
+    return [
+        _lane_workspace_status(lane)
+        for lane in reg.taskgroups
+        if lane.workspace == "worktree"
+    ]
+
+
+def remove_workspace(workspace: str, lane_key: str, *, force: bool = False) -> dict:
+    """Delete a lane's long-lived workspace, refusing when it holds work.
+
+    Uncommitted changes or commits that exist on no ref make this refuse unless
+    ``force`` is set; the refusal names the files/commits so nothing is deleted
+    blind. Either way the git worktree is unregistered first
+    (``git worktree remove --force``) with a directory fallback, and a
+    ``workspace_removed`` event records the outcome.
+    """
+    reg = registry.load(registry.workspace_registry_path(workspace))
+    lane = reg.require(lane_key)
+    if lane.workspace != "worktree":
+        raise UsageError(
+            f"lane '{lane.id}' does not declare a workspace "
+            '(workspace = "worktree")',
+            hint="nothing to remove; see `taskproof workspaces`",
+        )
+    repo_root = _git_toplevel(lane.path) if os.path.isdir(lane.path) else None
+    if not repo_root:
+        raise UsageError(
+            f"lane '{lane.id}' path {lane.path} is not a git repository",
+        )
+    repo_root = os.path.realpath(repo_root)
+    ws_path = _lane_workspace_path(lane, repo_root)
+
+    if not os.path.lexists(ws_path):
+        return {
+            "path": ws_path,
+            "repo": repo_root,
+            "removed": False,
+            "forced": False,
+            "changed_files": [],
+            "unmerged_commits": [],
+        }
+
+    changed = _worktree_changes_list(ws_path, links=_lane_links(lane, repo_root))
+    unmerged = _unmerged_commits(ws_path, repo_root)
+    dirty = bool(changed or unmerged)
+    if dirty and not force:
+        detail = "; ".join(
+            part
+            for part in (
+                "uncommitted: " + ", ".join(changed) if changed else "",
+                "unmerged: " + ", ".join(unmerged) if unmerged else "",
+            )
+            if part
+        )
+        raise UsageError(
+            f"workspace {ws_path} still holds work ({detail}); refusing to "
+            "remove",
+            hint="re-run with --force to delete it anyway",
+        )
+
+    error = _remove_worktree(repo_root, ws_path)
+    result = {
+        "path": ws_path,
+        "repo": repo_root,
+        "removed": True,
+        "forced": bool(force and dirty),
+        "changed_files": changed,
+        "unmerged_commits": unmerged,
+    }
+    if error:
+        result["error"] = error
+
+    conn = storage.connect(storage.db_path(workspace))
+    try:
+        storage.migrate(conn)
+        payload = {"path": ws_path, "repo": repo_root}
+        if force and dirty:
+            payload["forced"] = True
+            payload["note"] = "removed while dirty / with unmerged commits"
+        storage.append_event(conn, None, "workspace_removed", payload)
+    finally:
+        conn.close()
+    return result
 
 
 # ---------------------------------------------------------------------------

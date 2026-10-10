@@ -83,6 +83,12 @@ BUILTIN_RESULT_SCHEMA = os.path.join(
 RESULT_SCHEMA_DEFAULT = "default"
 RESULT_SCHEMA_NONE = "none"
 
+#: The only accepted values for a taskgroup's ``workspace`` field. The default
+#: deliberately stays ``"none"``: existing acceptance commands commonly contain
+#: absolute paths to the main checkout, and silently changing their cwd to a
+#: worktree would make those checks pass against the wrong tree.
+VALID_WORKSPACE_MODES = ("none", "worktree")
+
 #: Build file -> (candidate acceptance command, verify_kind). Deliberately a
 #: short, opinionated list, not a general-purpose project detector.
 _BUILD_FILES = (
@@ -110,7 +116,14 @@ _KEY_RE = re.compile(r"^\s*[A-Za-z0-9_-]+\s*=")
 
 #: Any of these on a `[[project]]` block means it is really a lane: it is read
 #: as a project + a same-named taskgroup (zero-migration compatibility).
-_LANE_FIELDS = ("verify", "verify_kind", "forbidden_paths", "result_schema")
+_LANE_FIELDS = (
+    "verify",
+    "verify_kind",
+    "forbidden_paths",
+    "result_schema",
+    "workspace",
+    "link",
+)
 
 
 class RegistryConflictError(RegistryError):
@@ -449,6 +462,32 @@ def _load_group(entry: dict, default: str, label: str, source: str) -> str:
     return group or default
 
 
+def _validated_link_paths(value, field: str, label: str, source: str) -> list:
+    """Validate a registry ``link`` array and return it unchanged.
+
+    Link paths are relative to the workspace root, never to the lane path.
+    They must remain inside that root: absolute paths and any ``..`` segment
+    are configuration errors rather than something to normalise silently.
+    """
+    paths = _load_string_array(value, field, label, source)
+    for item in paths:
+        if not item.strip():
+            raise RegistryError(
+                f"{source}: {label} field '{field}' entries must be non-empty"
+            )
+        if os.path.isabs(item):
+            raise RegistryError(
+                f"{source}: {label} field '{field}' entries must be relative: "
+                f"{item!r}"
+            )
+        if ".." in item.split("/"):
+            raise RegistryError(
+                f"{source}: {label} field '{field}' entries must not contain "
+                f"'..' segments: {item!r}"
+            )
+    return paths
+
+
 def _load_lane_fields(
     entry: dict, label: str, source: str, default_group: str
 ) -> dict:
@@ -493,6 +532,27 @@ def _load_lane_fields(
     forbidden_paths = _load_string_array(
         entry.get("forbidden_paths"), "forbidden_paths", label, source
     )
+
+    workspace = entry.get("workspace", "none")
+    if not isinstance(workspace, str):
+        raise RegistryError(
+            f"{source}: {label} field 'workspace' must be a string "
+            f"(got {type(workspace).__name__})"
+        )
+    workspace = workspace.strip()
+    if workspace not in VALID_WORKSPACE_MODES:
+        raise RegistryError(
+            f"{source}: {label} has invalid workspace {workspace!r} "
+            f"(expected one of {', '.join(VALID_WORKSPACE_MODES)})"
+        )
+
+    link = _validated_link_paths(entry.get("link"), "link", label, source)
+    if link and workspace != "worktree":
+        raise RegistryError(
+            f"{source}: {label} field 'link' is only valid when "
+            "workspace = 'worktree'"
+        )
+
     return {
         "group": _load_group(entry, default_group, label, source),
         "verify": verify_value,
@@ -500,6 +560,8 @@ def _load_lane_fields(
         "forbidden_paths": forbidden_paths,
         "auto_registered": bool(entry.get("auto_registered", False)),
         "result_schema": result_schema,
+        "workspace": workspace,
+        "link": link,
     }
 
 

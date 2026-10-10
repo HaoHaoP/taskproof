@@ -68,6 +68,19 @@ path    = "/absolute/path/to/api-service/site"   # 子目录
 verify  = "npm test"
 ```
 
+一条道还可以声明**长驻工作区** —— 一份持久的 git worktree，首次发车时惰性建好，
+之后每张卡都复用它：
+
+```toml
+[[taskgroup]]
+id        = "api-service-web"
+project   = "api-service"
+path      = "/absolute/path/to/api-service/web"   # 子目录
+verify    = "npm test"
+workspace = "worktree"                            # 逐道启用；缺省是 "none"
+link      = ["desktop/node_modules"]              # 从主树软链依赖
+```
+
 ## `[[project]]` 字段
 
 | 字段 | 必填 | 默认 | 说明 |
@@ -91,12 +104,15 @@ verify  = "npm test"
 | `verify_kind` | 否 | `"none"` | `check` / `build` / `none`。其它取值是硬错误。 |
 | `forbidden_paths` | 否 | `[]` | 前缀匹配的路径，智能体不得触碰。每一项可带 `file:` / `git:` / `presence:` 类型；不带类型即 `file`。 |
 | `result_schema` | 否 | `"default"` | `"default"`、`"none"`，或指向 JSON Schema 的绝对路径。 |
+| `workspace` | 否 | `"none"` | `"none"` 就地跑 —— 缺省值，与今天逐字一致。`"worktree"` 让 taskproof 为这条道惰性建一份**长驻** git worktree 并永久复用。其它取值是硬错误。 |
+| `link` | 否 | `[]` | **相对工作区根**的相对路径（例如 `desktop/node_modules`），从主树软链进工作区。只在 `workspace = "worktree"` 时有意义；绝对路径或含 `..` 段是硬错误。 |
 | `auto_registered` | 否 | `false` | 由 `taskproof register` 写入，不打算手改。 |
 
 ## 读旧格式：零迁移
 
 一个 `[[project]]` 块只要带**任一**道字段 —— `verify`、`verify_kind`、
-`forbidden_paths`、`result_schema` —— 就被读成**两条**声明：
+`forbidden_paths`、`result_schema`、`workspace`、`link` —— 就被读成**两条**
+声明：
 
 * 项目 `id = <块 id>`，`path` / `aliases` 照搬；
 * 任务组 `id = <块 id>`、`project = <块 id>`，路径继承，道字段照搬。
@@ -108,6 +124,9 @@ verify  = "npm test"
 旧的 `group` 键会原样带给隐式生成的那条道；缺失或为空时，这条道的 `group`
 等于它的 id。因此两个共享 `group` 的旧块仍然共享一把锁；若要拆成两条独立的
 道，给其中任意一条写一个不同的 `group`。
+
+隐式生成的那条道绝不会凭空获得工作区：旧块只要没写 `workspace` / `link`，就得到
+`"none"` / `[]`，照样就地跑，与之前完全一致。启用工作区永远是一次显式的逐道修改。
 
 ## 分辨率顺序
 
@@ -127,6 +146,15 @@ verify  = "npm test"
 **道的锁是它的 `group`，缺省等于 id。** 每把锁同时只跑一个任务；不同锁并行，
 上限为 `concurrency`。两条道可以刻意共享一个 `group`，适合它们指向同一份检出
 或其它共享资源的场景。旧 `[[project]]` 块上的 `group` 也会被保留下来。
+
+**声明了工作区就会改变验收的 cwd —— 于是 `verify` 里的绝对路径就成了坑。**
+验收命令跑在道的 `path` 下；`workspace = "worktree"` 的道则改在 worktree 里跑。
+若命令里写死了主树的绝对路径（`cd /absolute/path/to/repo && npm test`），它验的
+其实是**主树**而不是工作区，可能在 workspace 原封不动时就报绿。所以声明了工作区的
+道，验收命令里**不许**出现主树的绝对路径 —— 写相对路径，让 taskproof 去设 cwd。
+这正是缺省值坚持 `"none"` 的原因：把一个验收命令还指着主树的运行静默移进工作区，
+会让"绿"变成谎言。`taskproof workspaces` 列出启用了工作区的道，
+`taskproof workspace-rm <道>` 删除其中一条（删前先打印未提交 / 未合并的证据）。
 
 **缺 `verify` 记为「跳过」，绝不是「通过」。** 没有验收命令时 `verify_kind`
 被强制为 `none`，验收记为 skipped。这是刻意的：*"没检查"* 与 *"检查了且通过"*
@@ -206,6 +234,9 @@ path 不是绝对路径
 verify_kind 不是 check / build / none 之一
 result_schema 既不是 "default"、"none"，也不是绝对路径
 result_schema 指定的文件不存在
+workspace 不是 "none" / "worktree" 之一
+link 项是绝对路径、或含 ".." 段
+道没写 workspace = "worktree" 却写了 link
 裸项目 id 对应多条道
 ```
 
