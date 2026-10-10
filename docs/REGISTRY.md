@@ -72,6 +72,19 @@ path    = "/absolute/path/to/api-service/site"   # a subdirectory
 verify  = "npm test"
 ```
 
+A lane can also opt into a **long-lived workspace** — one persistent git
+worktree, built lazily on the lane's first run and reused by every later card:
+
+```toml
+[[taskgroup]]
+id        = "api-service-web"
+project   = "api-service"
+path      = "/absolute/path/to/api-service/web"   # a subdirectory
+verify    = "npm test"
+workspace = "worktree"                            # opt-in; default is "none"
+link      = ["desktop/node_modules"]              # symlink deps from the main tree
+```
+
 ## `[[project]]` fields
 
 | Field | Required | Default | Notes |
@@ -95,12 +108,15 @@ verify  = "npm test"
 | `verify_kind` | no | `"none"` | `check` / `build` / `none`. Anything else is a hard error. |
 | `forbidden_paths` | no | `[]` | Prefix-matched paths the agent must not touch. Each entry may carry a `file:` / `git:` / `presence:` type; untyped entries are `file`. |
 | `result_schema` | no | `"default"` | `"default"`, `"none"`, or an absolute path to a JSON Schema. |
+| `workspace` | no | `"none"` | `"none"` runs in place — the default, byte-for-byte today's behaviour. `"worktree"` asks taskproof to lazily create ONE long-lived git worktree for this lane and reuse it forever. Any other value is a hard error. |
+| `link` | no | `[]` | Relative paths, **relative to the workspace root** (e.g. `desktop/node_modules`), to symlink from the main checkout into the lane workspace. Only valid with `workspace = "worktree"`; an absolute path or any `..` segment is a hard error. |
 | `auto_registered` | no | `false` | Written by `taskproof register`; not meant to be edited by hand. |
 
 ## Reading a flat, older file (zero migration)
 
 A `[[project]]` block that carries any lane field — `verify`, `verify_kind`,
-`forbidden_paths`, or `result_schema` — is read as **two** declarations:
+`forbidden_paths`, `result_schema`, `workspace`, or `link` — is read as **two**
+declarations:
 
 * a project `id = <block id>` with the block's `path` and `aliases`, and
 * a taskgroup `id = <block id>`, `project = <block id>`, inheriting the path and
@@ -116,6 +132,10 @@ The old `group` key is carried through to the implicit lane. If it is missing
 or empty, the lane's `group` is its id. Two old blocks that shared a `group`
 therefore still share one lock; use a distinct `group` on either block to make
 them independent.
+
+The implicit lane never gains a workspace on its own: an old block that writes
+no `workspace` / `link` gets `"none"` / `[]` and keeps running in place, exactly
+as before. Opting in is always an explicit per-lane edit.
 
 ## Resolution order
 
@@ -142,6 +162,19 @@ runs at a time; different locks run in parallel up to `concurrency`. Two lanes
 may deliberately share a `group`; this is useful when they point at the same
 checkout or another shared resource. A `group` key on a legacy `[[project]]`
 block is preserved for the same reason.
+
+**A declared lane workspace moves the acceptance cwd — so absolute paths in
+`verify` become a trap.** An acceptance command runs in the lane's `path`; a
+`workspace = "worktree"` lane runs it inside the worktree instead. A command
+that hard-codes the main checkout's absolute path (`cd /absolute/path/to/repo &&
+npm test`) then verifies the **main tree**, not the workspace, and can report
+green while the workspace is untouched. So a lane that declares a workspace must
+keep its acceptance command free of the main tree's absolute path — write
+relative paths and let taskproof set the cwd. This is precisely why the default
+stays `"none"`: silently relocating a run whose acceptance command still points
+at the main tree would make "green" a lie. `taskproof workspaces` lists the
+lanes that opted in, and `taskproof workspace-rm <lane>` deletes one (printing
+the uncommitted / unmerged evidence first).
 
 **A missing `verify` is SKIPPED, never "passed".** With no acceptance command,
 `verify_kind` is forced to `none` and verification is recorded as skipped. This
@@ -234,6 +267,9 @@ duplicate project id / duplicate taskgroup id
 verify_kind is not one of check / build / none
 result_schema is neither "default", "none", nor an absolute path
 result_schema file not found
+workspace is not one of "none" / "worktree"
+link entry is absolute or contains a ".." segment
+link is set on a lane whose workspace is not "worktree"
 a bare project id resolves to several lanes
 ```
 

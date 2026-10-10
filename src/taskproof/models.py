@@ -60,6 +60,14 @@ class Taskgroup:
     #: (fall back to free text, never silent), or an absolute path to a custom
     #: JSON Schema. See `registry.result_schema_path`.
     result_schema: str = "default"
+    #: Long-lived workspace policy. ``"none"`` (the default) runs in-place;
+    #: ``"worktree"`` asks taskproof to lazily create one persistent git
+    #: worktree for this lane. It is a per-lane opt-in, never a global default.
+    workspace: str = "none"
+    #: Relative paths to symlink from the main checkout into a lane workspace
+    #: (for example ``desktop/node_modules``). Empty means the dispatcher may
+    #: probe for package-manager dependency directories.
+    link: List[str] = field(default_factory=list)
     #: Concurrency lock name. Empty means this lane's own id; loading fills the
     #: default in so callers never need to special-case an unset value.
     group: str = ""

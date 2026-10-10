@@ -420,5 +420,139 @@ class LegacyPinTest(unittest.TestCase):
         )
 
 
+class WorkspaceFieldTest(unittest.TestCase):
+    """The `workspace` / `link` lane fields (card 66).
+
+    `workspace` is a per-lane opt-in that defaults to `"none"`; `link` lists the
+    dependency paths to symlink from the main checkout into a lane workspace.
+    Both are validated at load time so a bad registry dies with exit 2 rather
+    than silently changing where a run happens.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, body, name="projects.toml"):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(textwrap.dedent(body))
+        return path
+
+    def test_defaults_are_none_and_empty(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "solo"
+            path = "/tmp/solo"
+            """
+        )
+        lane = registry.load(path).require("solo")
+        self.assertEqual(lane.workspace, "none")
+        self.assertEqual(lane.link, [])
+
+    def test_worktree_and_links_parse(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "app"
+            path = "/tmp/app"
+            workspace = "worktree"
+            link = ["desktop/node_modules", "target"]
+            """
+        )
+        lane = registry.load(path).require("app")
+        self.assertEqual(lane.workspace, "worktree")
+        self.assertEqual(lane.link, ["desktop/node_modules", "target"])
+
+    def test_invalid_workspace_value_is_rejected(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "app"
+            path = "/tmp/app"
+            workspace = "clone"
+            """
+        )
+        with self.assertRaises(RegistryError) as ctx:
+            registry.load(path)
+        message = str(ctx.exception)
+        self.assertIn("workspace", message)
+        self.assertIn("clone", message)
+
+    def test_absolute_link_is_rejected(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "app"
+            path = "/tmp/app"
+            workspace = "worktree"
+            link = ["/abs/node_modules"]
+            """
+        )
+        with self.assertRaises(RegistryError) as ctx:
+            registry.load(path)
+        self.assertIn("link", str(ctx.exception))
+
+    def test_parent_segment_link_is_rejected(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "app"
+            path = "/tmp/app"
+            workspace = "worktree"
+            link = ["../outside/node_modules"]
+            """
+        )
+        with self.assertRaises(RegistryError) as ctx:
+            registry.load(path)
+        self.assertIn("..", str(ctx.exception))
+
+    def test_link_without_workspace_is_rejected(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "app"
+            path = "/tmp/app"
+            link = ["node_modules"]
+            """
+        )
+        with self.assertRaises(RegistryError) as ctx:
+            registry.load(path)
+        message = str(ctx.exception)
+        self.assertIn("link", message)
+        self.assertIn("workspace", message)
+
+    def test_non_string_workspace_is_rejected(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "app"
+            path = "/tmp/app"
+            workspace = 3
+            """
+        )
+        with self.assertRaises(RegistryError):
+            registry.load(path)
+
+    def test_legacy_lane_gets_no_workspace_or_links(self):
+        # A flat, older `[[project]]` block carrying a lane field must not
+        # spontaneously acquire a workspace -- the default stays in-place.
+        path = self.write(
+            """
+            [[project]]
+            id = "legacy"
+            path = "/tmp/legacy"
+            verify = "exit 0"
+            verify_kind = "check"
+            """
+        )
+        lane = registry.load(path).require("legacy")
+        self.assertEqual(lane.workspace, "none")
+        self.assertEqual(lane.link, [])
+
+
 if __name__ == "__main__":
     unittest.main()
