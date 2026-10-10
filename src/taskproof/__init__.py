@@ -6,7 +6,9 @@ independently verified and recorded.
 
 import sys
 
-__version__ = "0.1.0"
+# The single source of the version: `pyproject.toml` reads it from here
+# (`[tool.setuptools.dynamic]`), so cutting a release bumps exactly one string.
+__version__ = "0.1.2"
 
 # Fail early and in plain language. Without this, running from a source checkout
 # under an older interpreter surfaces as `ModuleNotFoundError: No module named

@@ -1073,6 +1073,33 @@ class VersionTest(unittest.TestCase):
         self.assertEqual(proc.stdout.strip(), f"taskproof {__version__}")
         self.assertNotIn("\n", proc.stdout.strip())
 
+    def test_the_version_has_one_source(self):
+        """`__init__.__version__` is the only place the number is written.
+
+        The 0.1.1 release bumped `pyproject.toml` by hand and left this module
+        behind, so the wheel's metadata said 0.1.1 while `taskproof --version`
+        still printed 0.1.0 -- the exact divergence a second copy buys you.
+        pyproject now reads the number from here; this pin is what keeps a
+        later release from quietly re-introducing the second copy.
+        """
+        import tomllib
+        from pathlib import Path
+
+        import taskproof
+
+        root = Path(__file__).resolve().parents[1]
+        with open(root / "pyproject.toml", "rb") as handle:
+            pyproject = tomllib.load(handle)
+
+        project = pyproject["project"]
+        self.assertNotIn("version", project, "a static [project] version IS the second copy")
+        self.assertIn("version", project.get("dynamic", []))
+        self.assertEqual(
+            pyproject["tool"]["setuptools"]["dynamic"]["version"],
+            {"attr": "taskproof.__version__"},
+        )
+        self.assertRegex(taskproof.__version__, r"^\d+\.\d+\.\d+$")
+
 
 if __name__ == "__main__":
     unittest.main()
