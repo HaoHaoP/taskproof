@@ -12,8 +12,8 @@ Two layers
   Optional on its own: it is the shared identity a lane hangs off.
 * ``[[taskgroup]]`` — one lane ("道") a task is dispatched onto: ``id``,
   ``project`` (owning project), ``path`` (defaults to the project path),
-  ``aliases``, ``verify``, ``verify_kind``, ``forbidden_paths``,
-  ``result_schema``. The concurrency lock *is* the taskgroup id.
+  ``aliases``, ``group`` (concurrency lock; defaults to the taskgroup id),
+  ``verify``, ``verify_kind``, ``forbidden_paths``, ``result_schema``.
 
 A legacy ``[[project]]`` block that carries any lane field (``verify``,
 ``verify_kind``, ``forbidden_paths`` or ``result_schema``) is read as a
@@ -165,7 +165,7 @@ def probe_repository(path: str) -> dict:
     The CLI and the API both use this so "what register would infer" cannot
     drift between the two entry points. The draft is a ``[[taskgroup]]`` block:
     it carries no ``project``, so it stands up a same-named project (the compat
-    rule). The taskgroup's lock is its own id.
+    rule). The taskgroup's lock defaults to its own id.
     """
     path = os.path.abspath(os.path.expanduser(path))
     taskgroup_id = os.path.basename(os.path.normpath(path)) or path
@@ -438,7 +438,20 @@ def _load_string_array(value, field: str, label: str, source: str) -> list:
     return list(value)
 
 
-def _load_lane_fields(entry: dict, label: str, source: str) -> dict:
+def _load_group(entry: dict, default: str, label: str, source: str) -> str:
+    """Read a lock name, treating missing/empty/blank as the lane's own id."""
+    group = entry.get("group")
+    if group is None:
+        return default
+    if not isinstance(group, str):
+        raise RegistryError(f"{source}: {label} field 'group' must be a string")
+    group = group.strip()
+    return group or default
+
+
+def _load_lane_fields(
+    entry: dict, label: str, source: str, default_group: str
+) -> dict:
     """Validate and canonicalise the lane fields shared by both block kinds."""
     result_schema = entry.get("result_schema", RESULT_SCHEMA_DEFAULT)
     if not isinstance(result_schema, str):
@@ -481,6 +494,7 @@ def _load_lane_fields(entry: dict, label: str, source: str) -> dict:
         entry.get("forbidden_paths"), "forbidden_paths", label, source
     )
     return {
+        "group": _load_group(entry, default_group, label, source),
         "verify": verify_value,
         "verify_kind": verify_kind,
         "forbidden_paths": forbidden_paths,
@@ -540,7 +554,9 @@ def load(path: str) -> Registry:
         project_by_id[project_id] = project
         if any(field in entry for field in _LANE_FIELDS):
             # Zero-migration compat: this block is a project + a same-named lane.
-            lane = _load_lane_fields(entry, f"project '{project_id}'", path)
+            lane = _load_lane_fields(
+                entry, f"project '{project_id}'", path, default_group=project_id
+            )
             legacy_lanes.append((project_id, project_path, lane))
 
     # Explicit taskgroups are validated against every project we have seen,
@@ -600,7 +616,9 @@ def load(path: str) -> Registry:
         project_by_id[implicit_id] = project
 
     for entry, taskgroup_id, owning, explicit in taskgroup_meta:
-        lane = _load_lane_fields(entry, f"taskgroup '{taskgroup_id}'", path)
+        lane = _load_lane_fields(
+            entry, f"taskgroup '{taskgroup_id}'", path, default_group=taskgroup_id
+        )
         aliases = _load_string_array(
             entry.get("aliases"), "aliases", f"taskgroup '{taskgroup_id}'", path
         )
@@ -639,12 +657,12 @@ def workspace_registry_path(workspace: str) -> str:
 # ---------------------------------------------------------------------------
 
 #: Keys `update_project` may change on a `[[taskgroup]]` block. `id` is the
-#: identity and `group` is derived (the lock is the taskgroup), so neither is
-#: mutable.
+#: identity, so it is not mutable; `group` is an editable lock name.
 _TASKGROUP_MUTABLE_FIELDS = (
     "project",
     "path",
     "aliases",
+    "group",
     "verify",
     "verify_kind",
     "forbidden_paths",
@@ -657,6 +675,7 @@ _TASKGROUP_MUTABLE_FIELDS = (
 _PROJECT_MUTABLE_FIELDS = (
     "path",
     "aliases",
+    "group",
     "verify",
     "verify_kind",
     "forbidden_paths",
@@ -727,7 +746,17 @@ def _string_list(value, field: str):
     return list(value)
 
 
-def _normalise_lane_fields(entry: dict, label: str) -> dict:
+def _normalise_group(entry: dict, default: str) -> str:
+    group = entry.get("group")
+    if group is None or group == "":
+        return default
+    if not isinstance(group, str):
+        raise RegistryError("field 'group' must be a string")
+    group = group.strip()
+    return group or default
+
+
+def _normalise_lane_fields(entry: dict, label: str, default_group: str) -> dict:
     verify_value = entry.get("verify")
     if verify_value is not None and not isinstance(verify_value, str):
         raise RegistryError("field 'verify' must be a string or null")
@@ -771,6 +800,7 @@ def _normalise_lane_fields(entry: dict, label: str) -> dict:
             raise RegistryError("field 'probe_exit' must be an integer")
 
     return {
+        "group": _normalise_group(entry, default_group),
         "verify": verify_value,
         "verify_kind": verify_kind,
         "forbidden_paths": forbidden_paths,
@@ -789,7 +819,7 @@ def _normalise_project(entry: dict) -> dict:
     if not os.path.isabs(path):
         raise RegistryError(f"project '{project_id}' path must be absolute: {path}")
     aliases = _string_list(entry.get("aliases"), "aliases")
-    lane = _normalise_lane_fields(entry, project_id)
+    lane = _normalise_lane_fields(entry, project_id, default_group=project_id)
     return {"id": project_id, "path": path, "aliases": aliases, **lane}
 
 
@@ -814,7 +844,9 @@ def _normalise_taskgroup(entry: dict, project_path: Optional[str] = None) -> dic
             )
 
     aliases = _string_list(entry.get("aliases"), "aliases")
-    lane = _normalise_lane_fields(entry, taskgroup_id)
+    lane = _normalise_lane_fields(
+        entry, taskgroup_id, default_group=taskgroup_id
+    )
     return {
         "id": taskgroup_id,
         "project": project,
@@ -835,6 +867,8 @@ def _format_taskgroup_block(taskgroup: dict) -> str:
         lines.append(f"path = {_toml_string(taskgroup['path'])}")
     if taskgroup["aliases"]:
         lines.append(f"aliases = {_array_literal(taskgroup['aliases'])}")
+    if taskgroup["group"] != taskgroup["id"]:
+        lines.append(f"group = {_toml_string(taskgroup['group'])}")
     if taskgroup["verify"]:
         lines.append(f"verify = {_toml_string(taskgroup['verify'])}")
     lines.append(f"verify_kind = {_toml_string(taskgroup['verify_kind'])}")

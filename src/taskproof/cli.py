@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="probe only, write nothing")
     p.add_argument("--id")
     p.add_argument("--project", help="attach this lane to an existing project id")
-    # Deprecated and ignored: the concurrency lock is the taskgroup id itself,
+    # Deprecated and ignored: a new taskgroup's lock defaults to its own id,
     # but the flag stays so older scripts keep running.
     p.add_argument("--group", help=argparse.SUPPRESS)
 
@@ -295,8 +295,8 @@ def cmd_register(args):
         "id": taskgroup_id,
         "project": project or taskgroup_id,
         "path": path,
-        # The lock is the taskgroup id. `group` is kept in the payload so older
-        # callers that read it keep working.
+        # The lock defaults to the taskgroup id. `group` is kept in the payload
+        # so older callers that read it keep working.
         "group": taskgroup_id,
         "verify": command,
         "verify_kind": kind,

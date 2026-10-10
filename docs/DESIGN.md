@@ -98,7 +98,7 @@ into SQLite. TOML rather than YAML because the standard library ships `tomllib`
 tasks
   id            TEXT PK     t-20261007-001
   project       TEXT        taskgroup id (the lane a run targeted)
-  group         TEXT        lock name (= taskgroup id today)
+  group         TEXT        lock name (taskgroup.group; defaults to taskgroup id)
   brief         TEXT        task description
   status        TEXT        running|verifying|done|failed|blocked|timeout|cancelled
   adapter       TEXT        codex|claude|gemini|opencode|custom:<cmd>
@@ -132,11 +132,13 @@ claims                          -- concurrency guard, with expiry-based reclamat
 `[[project]]` is a repository / filter unit (`id` + `path` + `aliases`) and is
 not dispatchable on its own. A `[[taskgroup]]` (a lane, "道") is one
 dispatchable unit: an `id`, an owning `project`, a `path` (defaulting to the
-project's), plus the acceptance command and the result contract. The
-concurrency lock is the taskgroup itself.
+project's), plus the acceptance command and the result contract. The lock name
+is `taskgroup.group`; it defaults to the taskgroup id, and two lanes may set the
+same value to serialize with each other.
 
 The `tasks` table is unchanged: `project` stores the **taskgroup id** the run
-targeted, and `group` stores the lock name — today always the taskgroup id.
+targeted, and `group` stores the lock name — by default the taskgroup id, but a
+shared `group` may intentionally cover several lanes.
 Rows written before the split still hold exactly those values, so no data
 migration is needed. A flat, older `[[project]]` block that carries any lane
 field reads as a project *plus* a same-named lane (see `docs/REGISTRY.md`).

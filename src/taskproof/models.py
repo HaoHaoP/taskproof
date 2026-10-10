@@ -60,16 +60,13 @@ class Taskgroup:
     #: (fall back to free text, never silent), or an absolute path to a custom
     #: JSON Schema. See `registry.result_schema_path`.
     result_schema: str = "default"
+    #: Concurrency lock name. Empty means this lane's own id; loading fills the
+    #: default in so callers never need to special-case an unset value.
+    group: str = ""
 
-    @property
-    def group(self) -> str:
-        """The concurrency lock name for this lane.
-
-        The lock *is* the taskgroup: one task per taskgroup runs at a time.
-        Sharing one lock across several lanes is a separate feature and is not
-        expressed by this model yet.
-        """
-        return self.id
+    def __post_init__(self):
+        if not isinstance(self.group, str) or not self.group.strip():
+            self.group = self.id
 
 
 @dataclass
