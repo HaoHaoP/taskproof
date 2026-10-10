@@ -21,15 +21,12 @@ export default {
     capChip: {
       empty: '显示全部',
       all: '显示全部 {total}',
-      expanded: '显示全部 {total}（上限 {cap}）',
       capped: '显示 {cap} / 共 {total}'
     },
     capMenu: {
       title: '显示上限',
       option: '{n} 张',
-      all: '全部',
-      expand: '展开其余 {hidden} 张',
-      collapse: '收起（回到 {cap} 张）'
+      all: '全部'
     }
   },
 

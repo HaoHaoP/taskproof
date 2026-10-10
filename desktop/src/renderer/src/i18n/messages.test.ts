@@ -287,8 +287,6 @@ describe('card 70 message keys (cap chip + menu)', () => {
     expect(at(zhCN, 'board.capChip.empty')).toBe('显示全部')
     expect(at(en, 'board.capChip.all')).toBe('Show all {total}')
     expect(at(zhCN, 'board.capChip.all')).toBe('显示全部 {total}')
-    expect(at(en, 'board.capChip.expanded')).toBe('Show all {total} (cap {cap})')
-    expect(at(zhCN, 'board.capChip.expanded')).toBe('显示全部 {total}（上限 {cap}）')
     expect(at(en, 'board.capChip.capped')).toBe('Show {cap} / {total}')
     expect(at(zhCN, 'board.capChip.capped')).toBe('显示 {cap} / 共 {total}')
 
@@ -298,14 +296,13 @@ describe('card 70 message keys (cap chip + menu)', () => {
     expect(at(zhCN, 'board.capMenu.option')).toBe('{n} 张')
     expect(at(en, 'board.capMenu.all')).toBe('All')
     expect(at(zhCN, 'board.capMenu.all')).toBe('全部')
-    expect(at(en, 'board.capMenu.expand')).toBe('Show the remaining {hidden}')
-    expect(at(zhCN, 'board.capMenu.expand')).toBe('展开其余 {hidden} 张')
-    expect(at(en, 'board.capMenu.collapse')).toBe('Collapse to {cap} cards')
-    expect(at(zhCN, 'board.capMenu.collapse')).toBe('收起（回到 {cap} 张）')
   })
 
-  it('drops the old fold-bar and stepper keys from both locales', () => {
+  it('drops the old fold keys from both locales', () => {
     const removedCapKeys = [
+      'board.capChip.' + 'expanded',
+      'board.capMenu.' + 'expand',
+      'board.capMenu.collapse',
       'board.expand',
       'board.collapse',
       'board.capLabel',
