@@ -14,7 +14,7 @@ import { createPinia, setActivePinia } from 'pinia'
 vi.mock('../i18n', () => ({ setLocale: vi.fn() }))
 
 import { useSettingsStore } from './settings'
-import type { DesktopSettings } from '../../../preload/types'
+import { DEFAULT_COLUMN_CAPS, type DesktopSettings } from '../../../preload/types'
 
 const BASE: DesktopSettings = {
   theme: 'dark',
@@ -29,7 +29,8 @@ const BASE: DesktopSettings = {
   notifyDone: false,
   dockBadge: false,
   tray: false,
-  autostart: false
+  autostart: false,
+  columnCaps: { ...DEFAULT_COLUMN_CAPS }
 }
 
 interface Pending {
@@ -128,6 +129,18 @@ describe('settings persist ordering', () => {
     // And it shows on screen without waiting for the write to come back.
     expect(store.settings.notifyFail).toBe(true)
     expect(store.settings.tray).toBe(true)
+  })
+
+  it('writes a per-column display cap, keeping the other columns', async () => {
+    const store = useSettingsStore()
+    store.setColumnCap('done', 3)
+    await settle()
+    expect(pending[0].patch).toEqual({
+      columnCaps: { ...DEFAULT_COLUMN_CAPS, done: 3 }
+    })
+    // The change shows immediately, before the write answers.
+    expect(store.settings.columnCaps.done).toBe(3)
+    expect(store.settings.columnCaps.cancelled).toBe(10)
   })
 
   it('coerces a switch payload to a boolean before it hits the patch', async () => {

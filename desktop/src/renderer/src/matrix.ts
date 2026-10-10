@@ -16,11 +16,25 @@
  */
 import type { ProjectGroup, Task } from './api/client'
 import { COLUMNS, type Column } from './contract'
+import { CAP_MAX, CAP_MIN, DEFAULT_COLUMN_CAPS } from '../../preload/types'
 
-/** How many cards a windowed terminal column (done, cancelled) shows before the
- *  fold bar. v1 constant, not a setting: the fold bar exists precisely so this
- *  need not be one. */
-export const DONE_WINDOW = 10
+/** The column-window caps, one per contract column. `0` means "do not fold --
+ *  show every card"; a positive cap windows that column to its N most recent.
+ *
+ *  Every column can carry its own cap now, so this is the code default table
+ *  rather than a single constant: `done` and `cancelled` keep today's ten, and
+ *  the four live columns start unfolded (`0`), so a fresh board looks exactly
+ *  as it did before. The user's own table lives in App settings. */
+export const DEFAULT_CAPS: Record<string, number> = DEFAULT_COLUMN_CAPS
+
+/** The historical `done` window size, kept as the done/cancelled code default.
+ *  It is just `DEFAULT_CAPS.done` under a name the fold-bar tests still read. */
+export const DONE_WINDOW = DEFAULT_CAPS.done
+
+/** The address-bar key carrying the per-column unfolded set: `?open=done,...`. */
+export const OPEN_KEY = 'open'
+
+export { CAP_MAX, CAP_MIN }
 
 /** The fetch budget's floor and ceiling, in rows. */
 export const MIN_BUDGET = 200
@@ -31,7 +45,9 @@ export type RangeChoice = 'today' | '7d' | '30d' | 'all'
 export const RANGES: RangeChoice[] = ['today', '7d', '30d', 'all']
 export const DEFAULT_RANGE: RangeChoice = 'all'
 
-/** The one value `?done=` accepts; anything else (or absent) means collapsed. */
+/** The one value the legacy `?done=` key accepts. It is READ ONLY -- an old
+ *  bookmark that says "the finished columns were unfolded" is translated into
+ *  the new per-column `?open=` set and never written back. */
 export const DONE_EXPANDED = 'expanded'
 
 /** The canonical key for the hidden status columns. Absent means "none hidden". */
@@ -47,8 +63,13 @@ export interface BoardFilter {
    * (`visibleProjects`) and the cards it keeps (`filterBoard`).
    */
   projects: string[] | null
-  /** Whether the finished column has been unfolded past its window. */
-  expanded: boolean
+  /**
+   * The columns the reader has unfolded past their window, by column key. `[]`
+   * is the default (every windowed column stays folded); each terminal--or,
+   * once a cap is set, each live--column carries its own state, so expanding
+   * `done` leaves `cancelled` folded. Normalised to contract order.
+   */
+  open: string[]
   /**
    * The hidden status columns (泳道), by column key. `[]` is the default and
    * means every column is shown -- hiding is *explicit*, so a column the
@@ -63,7 +84,7 @@ export interface BoardFilter {
 export const DEFAULT_FILTER: BoardFilter = {
   range: DEFAULT_RANGE,
   projects: null,
-  expanded: false,
+  open: [],
   hidden: []
 }
 
@@ -148,12 +169,38 @@ function readHidden(query: QueryLike): string[] {
   return out
 }
 
+/**
+ * The unfolded columns, from the canonical `?open=` key. The comma is the
+ * separator, the same documented shape as `?projects=` / `?hide=`. A key the
+ * contract does not declare is dropped and duplicates collapse, so a stale URL
+ * cannot name a column this build has repurposed.
+ *
+ * The legacy `?done=expanded` key (one flag that used to unfold the finished
+ * *and* cancelled columns together) is still read as exactly that pair, so an
+ * old bookmark lands on a real board. It is never written again: `boardQuery`
+ * writes only `?open=`, and `?open=` wins when both are present.
+ */
+function readOpen(query: QueryLike): string[] {
+  const raw = readParam(query, OPEN_KEY)
+  if (raw === null) {
+    return readParam(query, 'done') === DONE_EXPANDED ? ['done', 'cancelled'] : []
+  }
+  const declared = new Set(COLUMNS.map((column) => column.key))
+  const named = new Set(
+    raw
+      .split(',')
+      .map((piece) => piece.trim())
+      .filter((key) => key.length > 0 && declared.has(key))
+  )
+  return COLUMNS.filter((column) => named.has(column.key)).map((column) => column.key)
+}
+
 export function parseBoardFilter(query: QueryLike): BoardFilter {
   const rawRange = readParam(query, 'range')
   return {
     range: isRange(rawRange) ? rawRange : DEFAULT_RANGE,
     projects: readProjects(query),
-    expanded: readParam(query, 'done') === DONE_EXPANDED,
+    open: readOpen(query),
     hidden: readHidden(query)
   }
 }
@@ -167,7 +214,14 @@ export function boardQuery(filter: BoardFilter): string {
   const params = new URLSearchParams()
   if (filter.range !== DEFAULT_RANGE) params.set('range', filter.range)
   if (filter.projects !== null) params.set('projects', filter.projects.join(','))
-  if (filter.expanded) params.set('done', DONE_EXPANDED)
+  if (filter.open.length) {
+    // Contract order and no duplicates, so the address bar reads the same no
+    // matter which order the columns were unfolded; the legacy `?done=expanded`
+    // key is never written again.
+    const open = new Set(filter.open)
+    const keys = COLUMNS.filter((column) => open.has(column.key)).map((column) => column.key)
+    if (keys.length) params.set(OPEN_KEY, keys.join(','))
+  }
   if (filter.hidden.length) {
     // Contract order and no duplicates, so the address bar reads the same no
     // matter which order the switches were flipped. Keys the contract does not
@@ -241,7 +295,7 @@ export function groupColumns(tasks: Task[], columns: Column[] = COLUMNS): Record
   return grouped
 }
 
-export interface DoneWindow {
+export interface ColumnWindow {
   /** The cards to render, already ordered. */
   visible: Task[]
   /** `total - visible.length`: the "还有 N 张" number, 0 when everything fits. */
@@ -251,14 +305,56 @@ export interface DoneWindow {
 }
 
 /**
- * Apply a terminal column's window. Not expanded, only the first `size` cards
- * survive and the rest are counted; expanded, the whole list passes through.
- * The window is applied *after* filtering, so it is "the ten most recent in the
- * current scope". Shared verbatim by the done and cancelled columns.
+ * Apply a column's window. A positive `cap` keeps only that many cards unless
+ * the column is unfolded; `cap === 0` means "do not fold" and lets every card
+ * through. The window is applied *after* filtering and sorting, so it is "the
+ * N most recent in the current scope". One function serves every column -- the
+ * done/cancelled defaults are just `DEFAULT_CAPS`, not a second code path.
  */
-export function doneWindow(cards: Task[], expanded: boolean, size = DONE_WINDOW): DoneWindow {
-  const visible = expanded ? cards : cards.slice(0, size)
+export function columnWindow(cards: Task[], expanded: boolean, cap: number): ColumnWindow {
+  const visible = expanded || cap === 0 ? cards : cards.slice(0, cap)
   return { visible, hidden: cards.length - visible.length, total: cards.length }
+}
+
+/** The fold-bar state for one column: which control (and count) its header
+ *  draws, or `null` for "no bar". Pure, so the SFC only maps it to markup. */
+export interface FoldControl {
+  mode: 'expand' | 'collapse'
+  /** The hidden-card count for `expand`; always 0 for `collapse`. */
+  n: number
+}
+
+/**
+ * The fold bar a windowed column draws. A column that is hiding cards offers
+ * "还有 N 张 · 展开"; one that is fully unfolded and can be folded again
+ * (`total > cap > 0`) offers "收起". A `cap === 0` column never folds, so it
+ * never draws a bar -- that is the whole reason "no fold" is its own value
+ * rather than a very large number.
+ */
+export function foldControlFor(window: ColumnWindow, cap: number): FoldControl | null {
+  if (window.hidden > 0) return { mode: 'expand', n: window.hidden }
+  if (cap > 0 && window.total > cap) return { mode: 'collapse', n: 0 }
+  return null
+}
+
+/** Converge a user-entered cap into the control's domain: a whole number in
+ *  `0..200` (`0` = no fold). Non-finite input reads as the floor, so the caller
+ *  can commit unconditionally without a second validation. */
+export function clampCap(value: number): number {
+  if (!Number.isFinite(value)) return CAP_MIN
+  return Math.min(CAP_MAX, Math.max(CAP_MIN, Math.trunc(value)))
+}
+
+/**
+ * Add or remove one column from the unfolded set, returning a fresh set in
+ * contract order. Kept here (not in the SFC) so "which columns are open" is a
+ * pure list operation the tests can pin directly.
+ */
+export function withColumnOpen(open: string[], key: string, unfolded: boolean): string[] {
+  const next = new Set(open)
+  if (unfolded) next.add(key)
+  else next.delete(key)
+  return COLUMNS.filter((column) => next.has(column.key)).map((column) => column.key)
 }
 
 /** Millisecond boundary for a range. `all` has no boundary. */

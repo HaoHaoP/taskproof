@@ -2,14 +2,19 @@ import { describe, expect, it } from 'vitest'
 import type { Project, ProjectGroup, Task } from './api/client'
 import { COLUMNS, type Column } from './contract'
 import {
+  CAP_MAX,
+  CAP_MIN,
+  DEFAULT_CAPS,
   DEFAULT_FILTER,
   DONE_WINDOW,
   MAX_BUDGET,
   MIN_BUDGET,
   boardQuery,
   canGrowBudget,
-  doneWindow,
+  clampCap,
+  columnWindow,
   filterBoard,
+  foldControlFor,
   gridTracks,
   groupColumns,
   hiddenTally,
@@ -20,8 +25,10 @@ import {
   parseBoardFilter,
   sortColumn,
   visibleColumns,
-  visibleProjects
+  visibleProjects,
+  withColumnOpen
 } from './matrix'
+import { COLUMN_CAP_KEYS } from '../../preload/types'
 
 /** A task with only the fields these rules read; the rest are inert. */
 function task(id: string, fields: Partial<Task> = {}): Task {
@@ -54,36 +61,77 @@ function task(id: string, fields: Partial<Task> = {}): Task {
 const NOW = Date.parse('2026-10-08T12:00:00+08:00')
 const DAY = 24 * 60 * 60 * 1000
 
-describe('finished-column window', () => {
-  const done = Array.from({ length: 11 }, (_, i) =>
+describe('column window and its fold bar', () => {
+  const rows = Array.from({ length: 25 }, (_, i) =>
     task(`d${i}`, { status: 'done', created_at: new Date(NOW - i * 1000).toISOString() })
   )
 
-  it('renders only the ten most recent by default', () => {
-    const window = doneWindow(done, false)
-    expect(window.visible).toHaveLength(DONE_WINDOW)
-    expect(window.hidden).toBe(1)
-    expect(window.total).toBe(11)
-    // the folded-out card is the oldest of the eleven
-    expect(window.visible.map((t) => t.id)).not.toContain('d10')
+  it('cap = 0 means "no fold": every card, nothing hidden', () => {
+    const window = columnWindow(rows, false, 0)
+    expect(window.visible).toHaveLength(25)
+    expect(window.hidden).toBe(0)
+    expect(window.total).toBe(25)
   })
 
-  it('unfolds to every card', () => {
-    const window = doneWindow(done, true)
-    expect(window.visible).toHaveLength(11)
+  it('cap = 3 keeps the three most recent and counts the rest', () => {
+    const window = columnWindow(rows, false, 3)
+    expect(window.visible.map((t) => t.id)).toEqual(['d0', 'd1', 'd2'])
+    expect(window.hidden).toBe(22)
+    expect(window.total).toBe(25)
+  })
+
+  it('a cap at or above the total hides nothing', () => {
+    const four = rows.slice(0, 4)
+    expect(columnWindow(four, false, 4)).toMatchObject({ hidden: 0, total: 4 })
+    expect(columnWindow(four, false, 200).visible).toHaveLength(4)
+    expect(columnWindow([], false, 10).hidden).toBe(0)
+  })
+
+  it('unfolds to every card regardless of the cap', () => {
+    const window = columnWindow(rows, true, 10)
+    expect(window.visible).toHaveLength(25)
     expect(window.hidden).toBe(0)
   })
 
-  it('shows no bar at 0 or 1 cards', () => {
-    expect(doneWindow([], false).hidden).toBe(0)
-    expect(doneWindow([done[0]], false).hidden).toBe(0)
+  it('keeps done / cancelled at today\'s ten by default', () => {
+    expect(DONE_WINDOW).toBe(10)
+    expect(DEFAULT_CAPS.done).toBe(DONE_WINDOW)
+    expect(DEFAULT_CAPS.cancelled).toBe(10)
+    expect(columnWindow(rows, false, DEFAULT_CAPS.done).hidden).toBe(15)
   })
 
-  it('counts the hidden remainder as total minus the window', () => {
-    const many = Array.from({ length: 25 }, (_, i) =>
-      task(`d${i}`, { status: 'done', created_at: new Date(NOW - i * 1000).toISOString() })
-    )
-    expect(doneWindow(many, false).hidden).toBe(15)
+  it('draws expand(15) folded, collapse unfolded, and no bar at cap 0', () => {
+    expect(foldControlFor(columnWindow(rows, false, 10), 10)).toEqual({ mode: 'expand', n: 15 })
+    expect(foldControlFor(columnWindow(rows, true, 10), 10)).toEqual({ mode: 'collapse', n: 0 })
+    // no fold is its own value: cap 0 never draws a bar
+    expect(foldControlFor(columnWindow(rows, false, 0), 0)).toBeNull()
+    // a cap the column does not exceed has nothing to fold
+    expect(foldControlFor(columnWindow(rows.slice(0, 5), false, 10), 10)).toBeNull()
+  })
+})
+
+describe('cap value + unfolded set', () => {
+  it('converges a typed cap into 0..200 (whole numbers only)', () => {
+    expect(clampCap(0)).toBe(CAP_MIN)
+    expect(clampCap(-4)).toBe(CAP_MIN)
+    expect(clampCap(3.9)).toBe(3)
+    expect(clampCap(200)).toBe(CAP_MAX)
+    expect(clampCap(999)).toBe(CAP_MAX)
+    expect(clampCap(Number.NaN)).toBe(CAP_MIN)
+  })
+
+  it('adds / removes one column and keeps contract order, deduped', () => {
+    expect(withColumnOpen([], 'done', true)).toEqual(['done'])
+    expect(withColumnOpen(['done'], 'cancelled', true)).toEqual(['done', 'cancelled'])
+    // contract order wins over insertion order
+    expect(withColumnOpen(['cancelled'], 'done', true)).toEqual(['done', 'cancelled'])
+    expect(withColumnOpen(['done', 'cancelled'], 'done', false)).toEqual(['cancelled'])
+    expect(withColumnOpen(['done'], 'done', true)).toEqual(['done'])
+  })
+
+  it('keeps COLUMN_CAP_KEYS and DEFAULT_CAPS in step with the contract', () => {
+    expect([...COLUMN_CAP_KEYS]).toEqual(COLUMNS.map((column) => column.key))
+    expect(Object.keys(DEFAULT_CAPS).sort()).toEqual([...COLUMN_CAP_KEYS].sort())
   })
 })
 
@@ -212,10 +260,10 @@ describe('canGrowBudget', () => {
 
 describe('address-bar filter', () => {
   it('reads a full query, projects comma-separated', () => {
-    expect(parseBoardFilter('range=7d&projects=core,web&done=expanded&hide=done')).toEqual({
+    expect(parseBoardFilter('range=7d&projects=core,web&open=done&hide=done')).toEqual({
       range: '7d',
       projects: ['core', 'web'],
-      expanded: true,
+      open: ['done'],
       hidden: ['done']
     })
   })
@@ -244,21 +292,70 @@ describe('address-bar filter', () => {
   it('writes only the non-default pieces, never the legacy key', () => {
     expect(boardQuery(DEFAULT_FILTER)).toBe('')
     expect(
-      boardQuery({ range: '7d', projects: ['core', 'web'], expanded: true, hidden: ['done'] })
-    ).toBe('range=7d&projects=core,web&done=expanded&hide=done')
+      boardQuery({ range: '7d', projects: ['core', 'web'], open: ['done'], hidden: ['done'] })
+    ).toBe('range=7d&projects=core,web&open=done&hide=done')
     // All-selected is the default and writes nothing.
-    expect(boardQuery({ range: 'all', projects: null, expanded: false, hidden: [] })).toBe('')
+    expect(boardQuery({ range: 'all', projects: null, open: [], hidden: [] })).toBe('')
     // None-selected is a real (non-default) narrowing, so it is written.
-    expect(boardQuery({ range: 'all', projects: [], expanded: false, hidden: [] })).toBe('projects=')
+    expect(boardQuery({ range: 'all', projects: [], open: [], hidden: [] })).toBe('projects=')
   })
 
   it('round-trips the project set', () => {
     const filter = {
       range: '30d' as const,
       projects: ['x y', 'web'],
-      expanded: true,
+      open: ['done', 'cancelled'],
       hidden: ['done']
     }
+    expect(parseBoardFilter(boardQuery(filter))).toEqual(filter)
+  })
+})
+
+describe('per-column unfold set (?open=)', () => {
+  it('reads the new key as a set and drops unknown / duplicate columns', () => {
+    expect(parseBoardFilter('open=done').open).toEqual(['done'])
+    expect(parseBoardFilter('open=done,cancelled').open).toEqual(['done', 'cancelled'])
+    expect(parseBoardFilter('open=cancelled,done').open).toEqual(['done', 'cancelled'])
+    expect(parseBoardFilter('open=done,done,nope').open).toEqual(['done'])
+    // present-but-empty is an explicit "nothing unfolded", not the legacy pair
+    expect(parseBoardFilter('open=').open).toEqual([])
+    expect(parseBoardFilter('').open).toEqual([])
+  })
+
+  it('reads the legacy ?done=expanded as unfolded done AND cancelled', () => {
+    // The old single flag governed both terminal columns together; it still
+    // lands on exactly that pair, never on a third column.
+    expect(parseBoardFilter('done=expanded').open).toEqual(['done', 'cancelled'])
+    // `?open=` wins when both are present, so a new URL is never widened by an
+    // old key it happened to carry.
+    expect(parseBoardFilter('open=blocked&done=expanded').open).toEqual(['blocked'])
+    // a value the old key never accepted still means "folded"
+    expect(parseBoardFilter('done=1').open).toEqual([])
+  })
+
+  it('writes only ?open= (contract order), never the legacy ?done=', () => {
+    expect(
+      boardQuery({
+        range: 'all',
+        projects: null,
+        open: ['cancelled', 'done'],
+        hidden: []
+      })
+    ).toBe('open=done,cancelled')
+    const written = boardQuery({
+      range: 'all',
+      projects: null,
+      open: ['cancelled', 'done'],
+      hidden: []
+    })
+    expect(written).not.toContain('done=expanded')
+    expect(written).not.toMatch(/(^|&)done=/)
+    // a default board (nothing unfolded) writes no query at all
+    expect(boardQuery(DEFAULT_FILTER)).toBe('')
+  })
+
+  it('round-trips the unfold set through the address bar', () => {
+    const filter = { range: 'all' as const, projects: null, open: ['done', 'blocked'], hidden: [] }
     expect(parseBoardFilter(boardQuery(filter))).toEqual(filter)
   })
 })
@@ -453,7 +550,7 @@ describe('visible status columns (泳道 显隐)', () => {
 
   it('writes ?hide= in contract order and leaves the default empty', () => {
     expect(
-      boardQuery({ range: 'all', projects: null, expanded: false, hidden: ['cancelled', 'done'] })
+      boardQuery({ range: 'all', projects: null, open: [], hidden: ['cancelled', 'done'] })
     ).toBe('hide=done,cancelled')
     // A default board (nothing hidden) writes no query at all.
     expect(boardQuery(DEFAULT_FILTER)).toBe('')

@@ -180,19 +180,37 @@ describe('matrix grid columns', () => {
     expect(view).toMatch(/@click="hideLane\(column\.key\)"/)
   })
 
-  it('rides each fold bar inside its own column header, not a trailing row', () => {
+  it('rides each fold bar inside its own column header, per column', () => {
     // The bar used to be a trailing grid row with a hand-written `grid-column`.
     // It now lives in the header it belongs to, so the sticky band carries it
-    // and no `grid-column` arithmetic is needed. Both terminal columns still
-    // drive the ONE `?done=expanded` toggle -- one flag, no second state.
+    // and no `grid-column` arithmetic is needed. Each column keeps its OWN
+    // unfolded state now, so the click names the column it belongs to.
     expect(view).not.toMatch(/laneColumn/)
     expect(view).not.toMatch(/gridColumn:/)
-    expect(view).toMatch(/v-if="foldFor\(column\.key\)\?\.mode === 'expand'"/)
-    expect(view).toMatch(/v-else-if="foldFor\(column\.key\)\?\.mode === 'collapse'"/)
-    expect(view).toMatch(/@click="applyFilter\(\{ expanded: true \}\)"/)
-    expect(view).toMatch(/@click="applyFilter\(\{ expanded: false \}\)"/)
+    expect(view).toMatch(/v-if="folds\[column\.key\]\?\.mode === 'expand'"/)
+    expect(view).toMatch(/v-else-if="folds\[column\.key\]\?\.mode === 'collapse'"/)
+    expect(view).toMatch(/@click\.stop="openColumn\(column\.key\)"/)
+    expect(view).toMatch(/@click\.stop="closeColumn\(column\.key\)"/)
     expect(view).toMatch(/:data-col="column\.key"/)
     expect(rule('.fold')['grid-column']).toBeUndefined()
+  })
+
+  it('puts a per-column cap control in every header', () => {
+    // The control is `−  N  ＋`; the number opens an inline editor. It lives
+    // inside the header it caps, and its own handlers stop so a click can never
+    // reach the hide switch or the board's filter.
+    expect(view).toMatch(/class="cap-ctl"/)
+    expect(view).toMatch(/@click\.stop="stepCap\(column\.key, -1\)"/)
+    expect(view).toMatch(/@click\.stop="stepCap\(column\.key, 1\)"/)
+    expect(view).toMatch(/@click\.stop="beginCap\(column\.key\)"/)
+    expect(view).toMatch(/v-if="editingCap === column\.key"/)
+    expect(view).toMatch(/@keydown\.enter\.stop\.prevent="commitCap\(column\.key\)"/)
+    expect(view).toMatch(/@blur="commitCap\(column\.key\)"/)
+    expect(view).toMatch(/t\('board\.capTitle'\)/)
+    // The control keeps pointer events (it is real), unlike the decorative
+    // label / tally -- otherwise a click would fall through to the header.
+    expect(rule('.hd .lb, .hd .rt')['pointer-events']).toBe('none')
+    expect(rule('.cap-ctl')['pointer-events']).toBeUndefined()
   })
 
   it('covers the seam under each header so nothing scrolls through it', () => {

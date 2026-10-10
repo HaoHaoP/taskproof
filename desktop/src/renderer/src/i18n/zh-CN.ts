@@ -19,7 +19,14 @@ export default {
     takeMore: '取更多',
     hideLane: '隐藏「{name}」列',
     hiddenLanes: '已隐藏 {n} 列（其中 {m} 张卡）',
-    showAllLanes: '全部显示'
+    showAllLanes: '全部显示',
+    capLabel: '上限',
+    capAll: '全',
+    capTitle: '这一列最多显示几张卡（全 = 不折）',
+    capDown: '降低这一列的上限',
+    capUp: '提高这一列的上限',
+    expandColumn: '展开「{name}」列',
+    collapseColumn: '收起「{name}」列'
   },
 
   live: { on: '实时', off: '已暂停轮询' },

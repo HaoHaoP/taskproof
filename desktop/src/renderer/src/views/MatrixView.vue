@@ -6,13 +6,13 @@
  * states, while cancellation gets a column of its own. Cards are presentational
  * and know nothing about the store.
  *
- * The board's *reasoning* -- the finished column's window, each column's
- * ordering, the range / project narrowing, and the fetch budget the range
- * needs -- lives in `matrix.ts`. This file only reads the filter off the
+ * The board's *reasoning* -- each column's window and cap, its ordering, the
+ * per-column unfold set, the range / project narrowing, and the fetch budget
+ * the range needs -- lives in `matrix.ts`. This file only reads the filter off the
  * address bar, mirrors it into the store (which owns the fetch), and wires the
  * answers to markup.
  */
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import StatusMark from '../components/StatusMark.vue'
@@ -21,13 +21,17 @@ import TaskDrawer from '../components/TaskDrawer.vue'
 import type { ProjectGroup, Task } from '../api/client'
 import { ICONS } from '../icons'
 import {
-  DONE_WINDOW,
+  CAP_MAX,
+  CAP_MIN,
+  DEFAULT_CAPS,
   HIDE_KEY,
   RANGES,
   boardQuery,
   canGrowBudget,
-  doneWindow,
+  clampCap,
+  columnWindow,
   filterBoard,
+  foldControlFor,
   gridTracks,
   groupColumns,
   hiddenTally,
@@ -35,13 +39,17 @@ import {
   parseBoardFilter,
   visibleColumns,
   visibleProjects,
+  withColumnOpen,
   type BoardFilter,
+  type ColumnWindow,
   type RangeChoice
 } from '../matrix'
-import { columnLabelKey } from '../contract'
+import { COLUMNS, columnLabelKey } from '../contract'
 import { useBoardStore } from '../stores/board'
+import { useSettingsStore } from '../stores/settings'
 
 const store = useBoardStore()
+const settings = useSettingsStore()
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
@@ -87,14 +95,31 @@ const columns = computed(() =>
 )
 
 
-/** The finished column's window. The fold bar reads `hidden`; the cell reads
- *  `visible`. */
-const done = computed(() => doneWindow(columns.value.done ?? [], filter.value.expanded))
+/** One column's display cap, from App settings with the code default as the
+ *  backstop. `0` means "do not fold". */
+function capFor(key: string): number {
+  return settings.settings.columnCaps[key] ?? DEFAULT_CAPS[key] ?? 0
+}
 
-/** The cancelled column gets the same window as the finished column -- both are
- *  terminal, both are read as a recent head, and both share the board's one
- *  fold-bar toggle (`?done=expanded`). Same pure function, not a second copy. */
-const cancelled = computed(() => doneWindow(columns.value.cancelled ?? [], filter.value.expanded))
+/** Every column's window, keyed by column. The fold bar reads `hidden`; the
+ *  cell reads `visible`. Computed once per column so the template does not
+ *  re-slice inside each `v-if`. */
+const windows = computed<Record<string, ColumnWindow>>(() => {
+  const out: Record<string, ColumnWindow> = {}
+  for (const column of COLUMNS) {
+    const expanded = filter.value.open.includes(column.key)
+    out[column.key] = columnWindow(columns.value[column.key] ?? [], expanded, capFor(column.key))
+  }
+  return out
+})
+
+/** The fold bar each column draws -- `null` when it hides nothing and has
+ *  nothing to collapse. Pure rule, mapped to markup only. */
+const folds = computed<Record<string, ReturnType<typeof foldControlFor>>>(() => {
+  const out: Record<string, ReturnType<typeof foldControlFor>> = {}
+  for (const column of COLUMNS) out[column.key] = foldControlFor(windows.value[column.key], capFor(column.key))
+  return out
+})
 
 /** How many columns are hidden and how many cards (in hand) went with them --
  *  the number the board row's hint reports. Read from the fetched, filtered
@@ -107,12 +132,12 @@ const hidden = computed(() => hiddenTally(filter.value, columns.value))
  *  there would be a promise the click cannot keep. */
 const canGrow = computed(() => canGrowBudget(store.fetchBudget))
 
-/** Header counts and cell contents, with the terminal columns already windowed. */
-const shown = computed<Record<string, Task[]>>(() => ({
-  ...columns.value,
-  done: done.value.visible,
-  cancelled: cancelled.value.visible
-}))
+/** Header counts and cell contents, with every column already windowed. */
+const shown = computed<Record<string, Task[]>>(() => {
+  const out: Record<string, Task[]> = { ...columns.value }
+  for (const column of COLUMNS) out[column.key] = windows.value[column.key].visible
+  return out
+})
 
 function countIn(columnKey: string): number {
   // The header tallies the whole scope, not the window: a folded column still
@@ -157,18 +182,55 @@ function aliasHint(group: ProjectGroup): string {
   return group.aliases.join(', ')
 }
 
-/** The fold control a terminal header draws *inside itself*, read off the one
- *  `?done=expanded` window the board has always used. `null` -- no bar, and so
- *  no reserved space -- whenever the column hides nothing and has nothing to
- *  collapse; the header's own band then closes up with no seam. */
-type FoldControl = { mode: 'expand' | 'collapse'; n: number } | null
+/** Unfold one column past its window -- `done` and `cancelled` move
+ *  independently now, so the click names the column it belongs to. */
+function openColumn(key: string): void {
+  applyFilter({ open: withColumnOpen(filter.value.open, key, true) })
+}
 
-function foldFor(key: string): FoldControl {
-  const win = key === 'done' ? done.value : key === 'cancelled' ? cancelled.value : null
-  if (!win) return null
-  if (win.hidden > 0) return { mode: 'expand', n: win.hidden }
-  if (filter.value.expanded && win.total > DONE_WINDOW) return { mode: 'collapse', n: 0 }
-  return null
+/** Fold one column back to its cap. */
+function closeColumn(key: string): void {
+  applyFilter({ open: withColumnOpen(filter.value.open, key, false) })
+}
+
+/** The header's cap control: the value the column shows as `全`/N, and the
+ *  inline editor that replaces it while the number is being typed. */
+const editingCap = ref<string | null>(null)
+const capDraft = ref<number | string>(0)
+
+function capLabel(key: string): string {
+  return capFor(key) === 0 ? t('board.capAll') : String(capFor(key))
+}
+
+function beginCap(key: string): void {
+  capDraft.value = capFor(key)
+  editingCap.value = key
+}
+
+function focusCap(el: unknown): void {
+  if (el instanceof HTMLInputElement) {
+    el.focus()
+    el.select()
+  }
+}
+
+function cancelCap(): void {
+  editingCap.value = null
+}
+
+function commitCap(key: string): void {
+  if (editingCap.value !== key) return
+  editingCap.value = null
+  const draft = capDraft.value
+  const value = typeof draft === 'number' && Number.isFinite(draft) ? clampCap(draft) : null
+  if (value === null || value === capFor(key)) return
+  settings.setColumnCap(key, value)
+}
+
+/** `-` / `+` step by one within `0..200`; the control never writes out of
+ *  range, so the main process's normaliser has nothing to reject from here. */
+function stepCap(key: string, delta: number): void {
+  settings.setColumnCap(key, clampCap(capFor(key) + delta))
 }
 
 function isExpanded(id: string): boolean {
@@ -184,7 +246,7 @@ function openTask(id: string): void {
 /** Every query key the board itself reads or writes. Anything else (today
  *  `tab`, tomorrow whatever a later feature adds) belongs to another feature
  *  and has to survive a filter change rather than be rebuilt away. */
-const BOARD_KEYS = new Set(['range', 'projects', 'project', 'done', HIDE_KEY])
+const BOARD_KEYS = new Set(['range', 'projects', 'project', 'done', 'open', HIDE_KEY])
 
 /** Rewrite the board's query, dropping defaults so a default board is `/matrix`
  *  with no query. `push` (not `replace`): the back button has to undo filter
@@ -378,30 +440,87 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
             </button>
           </span>
 
-          <!-- The terminal fold bar, *inside* the header so it rides the
-               sticky band: it sits directly under this column's label, above
-               the first card, and is part of the opaque pinned header for
-               hit-testing. Only drawn when this column hides cards (or can be
-               collapsed); absent means no bar and no gap. It drives the same
-               single `expanded` flag as before -- no second toggle. -->
-          <button
-            v-if="foldFor(column.key)?.mode === 'expand'"
-            type="button"
-            class="fold"
-            :data-col="column.key"
-            @click="applyFilter({ expanded: true })"
-          >
-            {{ t('board.expand', { n: foldFor(column.key)?.n ?? 0 }) }}
-          </button>
-          <button
-            v-else-if="foldFor(column.key)?.mode === 'collapse'"
-            type="button"
-            class="fold collapse"
-            :data-col="column.key"
-            @click="applyFilter({ expanded: false })"
-          >
-            {{ t('board.collapse') }}
-          </button>
+          <!-- The per-column control band, *inside* the header so it rides the
+               sticky band: the fold bar (left, only when this column hides
+               cards or can be folded) and this column's cap control (right,
+               always). They share one line so neither pushes the label row onto
+               a second line. -->
+          <div class="hdctl">
+            <button
+              v-if="folds[column.key]?.mode === 'expand'"
+              type="button"
+              class="fold"
+              :data-col="column.key"
+              :aria-label="t('board.expandColumn', { name: t(columnLabelKey(column.key)) })"
+              @click.stop="openColumn(column.key)"
+            >
+              {{ t('board.expand', { n: folds[column.key]?.n ?? 0 }) }}
+            </button>
+            <button
+              v-else-if="folds[column.key]?.mode === 'collapse'"
+              type="button"
+              class="fold collapse"
+              :data-col="column.key"
+              :aria-label="t('board.collapseColumn', { name: t(columnLabelKey(column.key)) })"
+              @click.stop="closeColumn(column.key)"
+            >
+              {{ t('board.collapse') }}
+            </button>
+
+            <!-- The cap control: minus / N / plus. `0` reads as 全 (no fold);
+                 the number opens an inline editor committed on enter or blur.
+                 Every handler stops, so no click here can reach the header's
+                 hide switch or the board's filter. -->
+            <span
+              class="cap-ctl"
+              :data-col="column.key"
+              :title="t('board.capTitle')"
+              @click.stop
+              @dblclick.stop
+            >
+              <button
+                type="button"
+                class="cap-step"
+                :disabled="capFor(column.key) <= CAP_MIN"
+                :aria-label="t('board.capDown')"
+                @click.stop="stepCap(column.key, -1)"
+              >
+                −
+              </button>
+              <input
+                v-if="editingCap === column.key"
+                :ref="focusCap"
+                v-model.number="capDraft"
+                class="cap-input"
+                type="number"
+                min="0"
+                max="200"
+                :aria-label="t('board.capLabel')"
+                @click.stop
+                @keydown.enter.stop.prevent="commitCap(column.key)"
+                @keydown.esc.stop.prevent="cancelCap"
+                @blur="commitCap(column.key)"
+              />
+              <button
+                v-else
+                type="button"
+                class="cap-val"
+                :aria-label="t('board.capLabel')"
+                @click.stop="beginCap(column.key)"
+              >
+                {{ capLabel(column.key) }}
+              </button>
+              <button
+                type="button"
+                class="cap-step"
+                :disabled="capFor(column.key) >= CAP_MAX"
+                :aria-label="t('board.capUp')"
+                @click.stop="stepCap(column.key, 1)"
+              >
+                ＋
+              </button>
+            </span>
+          </div>
         </div>
 
         <template v-for="group in projects" :key="group.id">
@@ -689,14 +808,23 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   color: var(--ink-4);
   opacity: 0.4;
 }
-/* The fold bars ride *inside* their own column's header, so the sticky band
-   carries them: they sit directly under that column's label and stay pinned
-   there as the grid scrolls. `flex: 1 0 100%` forces each onto its own
-   full-width line underneath the label row; a column that hides nothing draws
-   no bar at all, so it leaves no gap. Both columns drive the ONE
-   `expanded` flag -- there is no second toggle. */
-.fold {
+/* The per-column control band: the fold bar and the cap control share one
+   full-width line under the label row, so the label + count never wrap. The
+   fold bar takes the slack (`flex: 1`) and the cap control stays its own size,
+   so neither squeezes the other out. */
+.hdctl {
   flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* The fold bar rides inside its own column's header, so the sticky band carries
+   it and it stays pinned as the grid scrolls. A column that hides nothing draws
+   no bar at all, so the cap control simply rides the right edge by itself. */
+.fold {
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
   padding: 9px 10px;
   text-align: left;
@@ -706,12 +834,74 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   border: 1px dashed var(--rule);
   border-radius: var(--r-card);
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .fold:hover {
   background: var(--raise);
 }
 .fold.collapse {
   color: var(--ink-4);
+}
+/* Every column's cap control: −  N  ＋. It is a real control (unlike `.lb` /
+   `.rt`, which are decoration), so it keeps pointer events; each handler also
+   stops propagation, so a click can never reach the hide switch or the filter.
+   `margin-left: auto` parks it at the right whether or not a fold bar shares
+   the line. */
+.cap-ctl {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  color: var(--ink-3);
+  font: 11px/1 var(--mono);
+}
+.cap-ctl .cap-step,
+.cap-ctl .cap-val {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.cap-ctl .cap-val {
+  min-width: 24px;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.cap-ctl .cap-step:hover:not(:disabled),
+.cap-ctl .cap-val:hover {
+  background: var(--raise);
+  color: var(--ink);
+}
+.cap-ctl .cap-step:disabled {
+  color: var(--ink-4);
+  opacity: 0.45;
+  cursor: default;
+}
+.cap-ctl .cap-input {
+  width: 38px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--sunken);
+  color: var(--ink);
+  font: 11px/1 var(--mono);
+  text-align: center;
 }
 </style>
 
