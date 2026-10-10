@@ -42,7 +42,7 @@ pipx install git+https://github.com/HaoHaoP/taskproof
 或从同一个 Release 下载 wheel，装本地文件：
 
 ```bash
-pipx install ./taskproof-0.1.0-py3-none-any.whl
+pipx install ./taskproof-0.2.0-py3-none-any.whl
 ```
 
 或从源码可编辑安装：
@@ -213,7 +213,8 @@ REST 表面是**只读**的。所有写操作都留在 CLI 里 —— 注册项�
 控制台现在能干什么：
 
 - **列** —— 运行中 / 验收中 / 完成 / 已取消 / 待复核 / 未通过。列头可用 `?hide=` 查询参数显隐。
-- **完成列默认折叠**到最近的几张，折叠条展开其余。
+- **每一列的显示上限都归你调**，就在那一列自己的列头里（`− 10 ＋`，`全` = 不折）。默认就是你熟悉的那块板子
+  —— 完成 / 已取消折到最近十张、其余列不折；折叠条照旧展开其余，且**展开是按列各自的**。
 - 验收已过的 blocked 卡上挂**「验收已过」徽标**。
 - **写操作只在 CLI。** 控制台只是只读 API 上的查看器：派活、放行、改注册表都走
   `taskproof`，不经过 UI。
@@ -226,6 +227,11 @@ REST 表面是**只读**的。所有写操作都留在 CLI 里 —— 注册项�
 taskproof 能派活的东西全写在工作区的一个 TOML 文件里
 （`~/.taskproof/projects.toml`），分两层：**项目**（仓与默认路径）与一条或多条
 **任务组**（道，各自带验收命令与锁）。
+
+一条道还可以声明**自己的工作区**（`workspace = "worktree"`）：仓旁边的一棵 git worktree，
+这张道第一次真发车时惰性创建、之后一直复用；依赖目录从主树软链进来（`link = [...]`），
+不用重装任何东西。`taskproof workspaces` 列出它们，`taskproof workspace-rm <道>` 先打印证据再删；
+`--worktree` 仍是一次性手段。字段见 `docs/REGISTRY.md`。
 
 ```toml
 [[project]]
