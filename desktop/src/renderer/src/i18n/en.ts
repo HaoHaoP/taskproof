@@ -32,7 +32,6 @@ export default {
   live: { on: 'live', off: 'polling paused' },
 
   status: {
-    queued: 'Queued',
     running: 'Running',
     verifying: 'Verifying',
     done: 'Done',
@@ -53,13 +52,12 @@ export default {
 
   card: { attempt: 'try', files: 'files', acceptancePassed: 'Acceptance passed' },
 
-  /* The console's four actions plus the dispatch form and the queue. They live
+  /* The console's four actions plus the dispatch form. They live
      flat under `task.*` (singular) so the card menu, the store's failure copy
      and the dialogs all read one namespace -- `tasks` (plural) is the table. */
   task: {
     new: 'New task',
     menu: 'Actions',
-    advance: 'Dispatch now',
     accept: 'Accept',
     stop: 'Stop',
     delete: 'Delete',
@@ -106,11 +104,6 @@ export default {
       body: 'Deletes the task record and its event stream. This cannot be undone.',
       confirm: 'Delete'
     },
-    queue: {
-      order: 'Order',
-      wave: 'same wave',
-      waveHint: 'Same order = same wave'
-    },
     error: {
       concurrency: 'Refused for now: {detail}',
       state: "This does not apply to the task's current state: {detail}",
@@ -120,8 +113,8 @@ export default {
       network: 'Cannot reach the local service: {detail}'
     },
     notice: {
-      group: "This project's lane is busy — the card stays queued. Retry later.",
-      cap: 'Global concurrency is full — the card stays queued. Retry later.',
+      group: "This project's lane is busy — retry later.",
+      cap: 'Global concurrency is full — retry later.',
       stale: 'This card is no longer waiting for review; the board has been refreshed.'
     }
   },

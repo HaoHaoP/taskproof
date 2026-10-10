@@ -29,7 +29,7 @@ describe('notPassingCount', () => {
 
   it('reads 0 when there is nothing to pass or the summary is absent', () => {
     expect(notPassingCount({})).toBe(0)
-    expect(notPassingCount({ done: 5, running: 3, queued: 1 })).toBe(0)
+    expect(notPassingCount({ done: 5, running: 3 })).toBe(0)
     expect(notPassingCount(null)).toBe(0)
     expect(notPassingCount(undefined)).toBe(0)
   })

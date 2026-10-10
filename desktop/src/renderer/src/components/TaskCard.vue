@@ -7,21 +7,17 @@
  * verification exit code and nothing else -- `✓ 0` or `✗ N` -- and a task that
  * was never verified gets no stamp at all, because there is no verdict to show.
  *
- * The console adds two affordances to the same card:
- *  - an actions menu whose items follow the status (see `menuFor`), and
- *  - for a queued card, its `queue_seq` as an editable number and a "same
- *    wave" chip. The chip carries no number -- the editable seq is the card's
- *    one and only number -- and its colour is keyed off that same `queue_seq`,
- *    so two cards with the same number visibly share a wave.
+ * The console adds one affordance to the same card: an actions menu whose
+ * items follow the status (see `menuFor`).
  *
  * The card is a div with `role="button"` rather than a real <button>, because a
- * menu and a number input cannot legally nest inside one.
+ * menu cannot legally nest inside one.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import StatusMark from './StatusMark.vue'
 import type { Task } from '../api/client'
-import { menuFor, waveSlot, type TaskAction } from '../taskmenu'
+import { menuFor, type TaskAction } from '../taskmenu'
 import { acceptancePassed } from '../card'
 import { duration } from '../format'
 
@@ -29,7 +25,6 @@ const props = defineProps<{ task: Task; expanded?: boolean }>()
 const emit = defineEmits<{
   open: [id: string]
   action: [action: TaskAction]
-  reorder: [seq: number]
 }>()
 
 const { t } = useI18n()
@@ -42,17 +37,11 @@ const stamp = computed(() => {
 })
 
 const menu = computed(() => menuFor(props.task.status))
-const queued = computed(() => props.task.status === 'queued')
 
 /** The "acceptance passed" badge: shown on a blocked card whose acceptance went
  *  green (see `acceptancePassed`). It answers "the result is fine, only the
  *  boundary was crossed" without ever claiming a pass that was not earned. */
 const passBadge = computed(() => acceptancePassed(props.task))
-
-/** The wave chip's palette slot, keyed off the card's own `queue_seq` (see
- *  `waveSlot`). Same seq, same colour; the colour does not depend on which
- *  cards happen to be visible. The chip renders a word, never a number. */
-const waveClass = computed(() => `w${waveSlot(props.task.queue_seq)}`)
 </script>
 
 <template>
@@ -107,24 +96,6 @@ const waveClass = computed(() => `w${waveSlot(props.task.queue_seq)}`)
       <span>{{ t('card.attempt') }} {{ task.attempt ?? 0 }}</span>
       <span>{{ duration(task.started_at, task.finished_at) }}</span>
       <span>{{ t('card.files') }} {{ task.files_changed_live ?? task.files_changed ?? 0 }}</span>
-    </span>
-
-    <!-- The queue's order: a "same wave" chip whose colour reads as the wave,
-         and the one number -- the seq itself -- editable in place. Only a
-         queued row has a place. -->
-    <span v-if="queued" class="qbar" @click.stop>
-      <span class="wave" :class="waveClass" :title="t('task.queue.waveHint')">
-        {{ t('task.queue.wave') }}
-      </span>
-      <span class="qlab">{{ t('task.queue.order') }}</span>
-      <el-input-number
-        class="qseq"
-        size="small"
-        controls-position="right"
-        :min="0"
-        :model-value="task.queue_seq ?? 0"
-        @change="(v: number | undefined) => v != null && emit('reorder', v)"
-      />
     </span>
   </div>
 </template>
@@ -241,7 +212,6 @@ const waveClass = computed(() => `w${waveSlot(props.task.queue_seq)}`)
   overflow: hidden;
   color: var(--ink);
 }
-.tp-card[data-status='queued'] .line-2,
 .tp-card[data-status='done'] .line-2 {
   color: var(--ink-2);
 }
@@ -252,39 +222,6 @@ const waveClass = computed(() => `w${waveSlot(props.task.queue_seq)}`)
   margin-top: 7px;
   font: 9.5px/1 var(--mono);
   color: var(--ink-4);
-}
-/* The queue strip: wave chip, the label, and the editable number. */
-.qbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 7px;
-  padding-top: 7px;
-  border-top: 1px dashed var(--rule);
-}
-.qbar .qlab {
-  font: 9.5px/1 var(--sans);
-  color: var(--ink-4);
-}
-.qbar .wave {
-  flex: none;
-  font: 600 9.5px/1 var(--sans);
-  padding: 3px 7px;
-  border-radius: var(--r-pill);
-  color: var(--wv-ink);
-  background: var(--wv-bg);
-}
-/* A fixed palette: same index, same colour -- the whole point of the chip.
-   Numbers stay legible on both themes (the ink is the darker system hue). */
-.wave.w0 { --wv-ink: #0a84ff; --wv-bg: rgba(10, 132, 255, 0.16); }
-.wave.w1 { --wv-ink: #30d158; --wv-bg: rgba(48, 209, 88, 0.16); }
-.wave.w2 { --wv-ink: #bf5af2; --wv-bg: rgba(191, 90, 242, 0.16); }
-.wave.w3 { --wv-ink: #ff9f0a; --wv-bg: rgba(255, 159, 10, 0.16); }
-.wave.w4 { --wv-ink: #ff375f; --wv-bg: rgba(255, 55, 95, 0.16); }
-.wave.w5 { --wv-ink: #5e5ce6; --wv-bg: rgba(94, 92, 230, 0.16); }
-.qseq {
-  width: 92px;
-  margin-left: auto;
 }
 @media (prefers-reduced-motion: reduce) {
   .chev {

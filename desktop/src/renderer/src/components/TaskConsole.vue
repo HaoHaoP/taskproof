@@ -8,9 +8,8 @@
  * app's sheet look (`SHEET_TRANSITION` + `.sheet`, like the project editors).
  *
  * Every successful write re-reads the board rather than stitching the row in
- * locally. A refused spawn (429) is the one write that changes nothing, so the
- * store parks it as a notice -- the notice is rendered by the matrix, where the
- * queued card still sits.
+ * locally. A write that changes nothing -- a card already released elsewhere --
+ * is shown as a transient notice instead, rendered by the matrix.
  */
 import { useI18n } from 'vue-i18n'
 import { SHEET_TRANSITION } from './sheetTransition'

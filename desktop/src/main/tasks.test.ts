@@ -97,20 +97,6 @@ describe('classifyTaskFailure — the control-plane contract', () => {
 })
 
 describe('createTasksClient — verbs, paths, and the token', () => {
-  it('fires one queued card with POST …/advance', async () => {
-    const { fetch, calls } = recorder(() => json(200, { task: { id: 't1' } }))
-    const client = createTasksClient({ baseUrl: BASE, token: 'tok', fetch })
-
-    const result = await client.advance('t1')
-
-    expect(result.ok).toBe(true)
-    expect(calls).toHaveLength(1)
-    expect(calls[0].method).toBe('POST')
-    expect(calls[0].url).toBe(`${BASE}/api/tasks/t1/advance`)
-    expect(calls[0].body).toBeNull()
-    expect(calls[0].token).toBe('tok')
-  })
-
   it('creates a task with POST /api/tasks and the full payload', async () => {
     const { fetch, calls } = recorder(() => json(201, { task: { id: 't9' } }))
     const client = createTasksClient({ baseUrl: BASE, token: 'tok', fetch })
@@ -169,23 +155,12 @@ describe('createTasksClient — verbs, paths, and the token', () => {
     expect(calls[0].url).toBe(`${BASE}/api/tasks/t1`)
   })
 
-  it('patches only queue_seq with PATCH …', async () => {
-    const { fetch, calls } = recorder(() => json(200, { task: { id: 't1' } }))
-    const client = createTasksClient({ baseUrl: BASE, token: 'tok', fetch })
-
-    await client.patchQueueSeq('t1', 4)
-    expect(calls[0].method).toBe('PATCH')
-    expect(calls[0].url).toBe(`${BASE}/api/tasks/t1`)
-    expect(calls[0].body).toEqual({ queue_seq: 4 })
-    expect(calls[0].token).toBe('tok')
-  })
-
   it('URL-encodes the id so an odd id cannot escape the path', async () => {
     const { fetch, calls } = recorder(() => json(200, { task: { id: 'a/b' } }))
     const client = createTasksClient({ baseUrl: BASE, token: 'tok', fetch })
 
-    await client.advance('a/b')
-    expect(calls[0].url).toBe(`${BASE}/api/tasks/a%2Fb/advance`)
+    await client.accept('a/b')
+    expect(calls[0].url).toBe(`${BASE}/api/tasks/a%2Fb/accept`)
   })
 
   it('folds a failed response into the typed result (429 example)', async () => {
@@ -194,7 +169,7 @@ describe('createTasksClient — verbs, paths, and the token', () => {
     )
     const client = createTasksClient({ baseUrl: BASE, token: 'tok', fetch })
 
-    const result = await client.advance('t1')
+    const result = await client.accept('t1')
     expect(result.ok).toBe(false)
     const error = (result as { ok: false; error: TaskWriteError }).error
     expect(error.kind).toBe('concurrency')
@@ -208,7 +183,7 @@ describe('createTasksClient — verbs, paths, and the token', () => {
     }) as unknown as typeof fetch
     const client = createTasksClient({ baseUrl: BASE, token: 'tok', fetch })
 
-    const result = await client.advance('t1')
+    const result = await client.accept('t1')
     expect(result.ok).toBe(false)
     expect((result as { ok: false; error: TaskWriteError }).error.kind).toBe('network')
   })

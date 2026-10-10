@@ -25,7 +25,7 @@ describe('acceptancePassed — the badge never lies', () => {
   })
 
   it('stays hidden on every non-blocked card, even with a green exit', () => {
-    for (const status of ['queued', 'running', 'verifying', 'done', 'failed', 'timeout', 'cancelled']) {
+    for (const status of ['running', 'verifying', 'done', 'failed', 'timeout', 'cancelled']) {
       expect(acceptancePassed({ status, verify_exit: 0 })).toBe(false)
     }
   })

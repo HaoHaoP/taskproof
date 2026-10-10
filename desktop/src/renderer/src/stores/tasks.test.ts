@@ -2,13 +2,10 @@
  * The console write store, pinned branch by branch.
  *
  * The rules the endpoints taught, and that a DOM-less test can still hold:
- *  - a refused spawn (429) is a *notice*, never an error: the card is still in
- *    the queue, so the store must not set `error` and must return false,
+ *  - a refused spawn (429) is a *notice*, never an error: the card was not
+ *    admitted, so the store must not set `error` and must return false,
  *  - delete is terminal-only: opening the confirm for a live card is a no-op
  *    and confirming it sends no request at all,
- *  - `patchQueueSeq` sends `{queue_seq}` and nothing else,
- *  - the two exits of the form are `start: true` (fire now) and `start: false`
- *    (park as queued),
  *  - the copy is read through the real i18n bundle, so a missing key fails here.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -38,7 +35,7 @@ function install(tasks: Record<string, unknown>, projects: Project[] = []): void
 }
 
 function task(overrides: Partial<Task> = {}): Task {
-  return { id: 't1', project: 'app', status: 'queued', ...overrides } as Task
+  return { id: 't1', project: 'app', status: 'running', ...overrides } as Task
 }
 
 const PROJECT: Project = {
@@ -152,74 +149,6 @@ describe('tasks store — the dispatch form', () => {
   })
 })
 
-describe('tasks store — advance (dispatch now)', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-  })
-  afterEach(() => vi.restoreAllMocks())
-
-  it('returns true and clears any notice on a successful advance', async () => {
-    const advance = vi.fn(async (_id: string) => ok({ task: { id: 't1' } }))
-    install({ advance })
-
-    const store = useTasksStore()
-    expect(await store.advance(task())).toBe(true)
-    expect(advance).toHaveBeenCalledWith('t1')
-    expect(store.notice).toBeNull()
-    expect(store.error).toBeNull()
-  })
-
-  it('turns a 429 into a retry notice, never an error', async () => {
-    const advance = vi.fn(async (_id: string) =>
-      fail({
-        kind: 'concurrency',
-        status: 429,
-        reason: 'group',
-        detail: "group 'app' is busy",
-        message: 'concurrency refused'
-      })
-    )
-    install({ advance })
-
-    const store = useTasksStore()
-    const result = await store.advance(task())
-
-    expect(result).toBe(false)
-    // Not a failure: the card is still queued, so the store shows a notice.
-    expect(store.error).toBeNull()
-    expect(store.notice).toBe(copy('task.notice.group'))
-  })
-
-  it('picks the cap copy when the global limit is the one that refused', async () => {
-    const advance = vi.fn(async (_id: string) =>
-      fail({
-        kind: 'concurrency',
-        status: 429,
-        reason: 'cap',
-        detail: 'cap 4 reached',
-        message: 'concurrency refused'
-      })
-    )
-    install({ advance })
-
-    const store = useTasksStore()
-    await store.advance(task())
-    expect(store.notice).toBe(copy('task.notice.cap'))
-  })
-
-  it('surfaces a hard failure (unknown id) as an error, not a notice', async () => {
-    const advance = vi.fn(async (_id: string) =>
-      fail({ kind: 'notfound', status: 404, message: 'no such task' })
-    )
-    install({ advance })
-
-    const store = useTasksStore()
-    await store.advance(task())
-    expect(store.notice).toBeNull()
-    expect(store.error).toBe(copy('task.error.notfound', 'no such task'))
-  })
-})
-
 describe('tasks store — stop', () => {
   beforeEach(() => setActivePinia(createPinia()))
   afterEach(() => vi.restoreAllMocks())
@@ -249,7 +178,7 @@ describe('tasks store — accept (release a blocked card)', () => {
     install({ accept })
 
     const store = useTasksStore()
-    for (const status of ['queued', 'running', 'verifying', 'done', 'failed', 'timeout', 'cancelled']) {
+    for (const status of ['running', 'verifying', 'done', 'failed', 'timeout', 'cancelled']) {
       store.openAccept(task({ status }))
       expect(store.acceptOpen).toBe(false)
     }
@@ -326,7 +255,7 @@ describe('tasks store — delete is terminal-only', () => {
     install({ remove })
 
     const store = useTasksStore()
-    for (const status of ['queued', 'running', 'verifying']) {
+    for (const status of ['running', 'verifying']) {
       store.openDelete(task({ status }))
       expect(store.deleteOpen).toBe(false)
     }
@@ -349,33 +278,5 @@ describe('tasks store — delete is terminal-only', () => {
   it('agrees with the exported terminal gate', () => {
     expect(isDeletable({ status: 'cancelled' })).toBe(true)
     expect(isDeletable({ status: 'running' })).toBe(false)
-  })
-})
-
-describe('tasks store — queue_seq edit', () => {
-  beforeEach(() => setActivePinia(createPinia()))
-  afterEach(() => vi.restoreAllMocks())
-
-  it('sends exactly {queue_seq} for the new order', async () => {
-    const patchQueueSeq = vi.fn(async (_id: string, _seq: number | null) =>
-      ok({ task: { id: 't1' } })
-    )
-    install({ patchQueueSeq })
-
-    const store = useTasksStore()
-    expect(await store.patchQueueSeq(task(), 7)).toBe(true)
-    expect(patchQueueSeq).toHaveBeenCalledWith('t1', 7)
-    expect(store.error).toBeNull()
-  })
-
-  it('surfaces a refused patch (a card that is no longer queued)', async () => {
-    const patchQueueSeq = vi.fn(async (_id: string, _seq: number | null) =>
-      fail({ kind: 'state', status: 409, message: 'only queued tasks can be reordered' })
-    )
-    install({ patchQueueSeq })
-
-    const store = useTasksStore()
-    expect(await store.patchQueueSeq(task({ status: 'running' }), 2)).toBe(false)
-    expect(store.error).toBe(copy('task.error.state', 'only queued tasks can be reordered'))
   })
 })

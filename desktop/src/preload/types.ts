@@ -175,18 +175,16 @@ export interface TaskRow {
   id: string
   project: string
   status: string
-  /** The explicit queue order; null when the server never assigned one. */
-  queue_seq: number | null
   [field: string]: unknown
 }
 
 /**
  * How a task write failed, mirroring the control-plane HTTP contract:
  *  - `concurrency` 429 -- the spawn was refused (group busy, or the cap is
- *    full). Nothing changed: a queued row stays queued, so the right move is
- *    "retry later", not "failed". `reason` says which limit bit.
+ *    full). Nothing changed, so the right move is "retry later", not "failed".
+ *    `reason` says which limit bit.
  *  - `state`       409 -- the row is in the wrong state for the action
- *    (cancel a terminal task, remove a live one, advance a non-queued one).
+ *    (cancel a terminal task, remove a live one).
  *  - `invalid`     400 -- a field was rejected
  *  - `forbidden`   403 -- the token was missing or wrong
  *  - `notfound`    404 -- no such task id
@@ -213,8 +211,8 @@ export type TaskResult<T> = { ok: true; value: T } | { ok: false; error: TaskWri
 /**
  * The body of `POST /api/tasks`. Four fields, matching the console's form:
  * project / brief / adapter / timeout. `start` names the two exits -- true fires
- * now, false parks the row as `queued`. Protection paths and worktree are
- * registry concerns and are deliberately not here.
+ * now, false saves it for later. Protection paths and worktree are registry
+ * concerns and are deliberately not here.
  */
 export interface TaskCreatePayload {
   project: string
@@ -222,7 +220,7 @@ export interface TaskCreatePayload {
   adapter: string
   /** Hard cap for the run, in seconds. */
   timeout: number
-  /** false parks the row as `queued` (the "save for later" exit). */
+  /** false saves it for later (the "save for later" exit). */
   start: boolean
 }
 
@@ -234,8 +232,6 @@ export interface TaskCreatePayload {
  */
 export interface TasksApi {
   create(payload: TaskCreatePayload): Promise<TaskResult<{ task: TaskRow }>>
-  /** Fire ONE queued card now, out of its wave (`POST …/advance`). */
-  advance(id: string): Promise<TaskResult<{ task: TaskRow }>>
   /** Stop a task (`POST …/cancel`); it lands in the cancelled column. */
   cancel(id: string): Promise<TaskResult<{ task: TaskRow }>>
   /**
@@ -246,8 +242,6 @@ export interface TasksApi {
   accept(id: string): Promise<TaskResult<{ task: TaskRow }>>
   /** Delete a terminal task's row and events (`DELETE …`). */
   remove(id: string): Promise<TaskResult<{ removed: string }>>
-  /** Edit a queued card's order (`PATCH …`); the only editable field. */
-  patchQueueSeq(id: string, queueSeq: number | null): Promise<TaskResult<{ task: TaskRow }>>
 }
 /** One adapter's verdict from `taskproof doctor`: installed, or why not. */
 export interface AdapterStatus {
@@ -379,8 +373,8 @@ export interface TpApi {
    */
   projects: ProjectsApi
   /**
-   * Task control. The console's four actions plus the queue-order edit. Same
-   * discipline as `projects`: named methods, typed results, no token, no verbs.
+   * Task control: create / stop / accept / delete. Same discipline as
+   * `projects`: named methods, typed results, no token, no verbs.
    */
   tasks: TasksApi
   /** Present only with `TP_DESKTOP_DIAG`; see `DiagApi`. */

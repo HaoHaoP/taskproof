@@ -39,7 +39,6 @@ export interface StatusMeta {
 
 /** Presentation. The contract owns the vocabulary; this owns how it looks. */
 export const STATUS_META: Record<string, StatusMeta> = {
-  queued: { id: 'queued', glyph: '○', tone: 'queued' },
   running: { id: 'running', glyph: '●', tone: 'running' },
   verifying: { id: 'verifying', glyph: '◉', tone: 'verifying' },
   done: { id: 'done', glyph: '✓', tone: 'done' },
@@ -77,7 +76,6 @@ export const ABNORMAL: string[] = ['failed', 'timeout']
  * state, including any status a future contract adds that no column claims.
  */
 export const COLUMNS: Column[] = [
-  { key: 'queued', members: ['queued'] },
   { key: 'running', members: ['running'] },
   { key: 'verifying', members: ['verifying'] },
   { key: 'done', members: ['done'] },
@@ -90,7 +88,7 @@ export const LAST_COLUMN: Column = COLUMNS[COLUMNS.length - 1]
 
 /**
  * i18n key for a column's header. Most columns reuse the status word
- * (`status.<key>`, e.g. `status.queued` -> 排队). The `blocked` lane is the one
+ * (`status.<key>`, e.g. `status.running` -> 进行中). The `blocked` lane is the one
  * exception: its header names the operator's job -- a human has to look and
  * either accept or clear the card -- not the status word itself, which stays
  * 阻塞 / Blocked. Two purposes, two keys; they are deliberately not shared.

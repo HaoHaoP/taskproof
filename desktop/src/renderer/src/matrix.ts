@@ -197,49 +197,19 @@ function newestFirst(a: number | null, b: number | null): number {
   return b - a
 }
 
-/** Ascending by time; a null key likewise sinks to the bottom. */
-function oldestFirst(a: number | null, b: number | null): number {
-  if (a === null && b === null) return 0
-  if (a === null) return 1
-  if (b === null) return -1
-  return a - b
-}
-
 /** A terminal card's sort key: `finished_at`, falling back to `created_at`. */
 export function finishedKey(task: Task): string | null {
   return task.finished_at ?? task.created_at
 }
 
 /**
- * Order the queue. Since card 22 the queue order is the explicit `queue_seq`,
- * not creation time: the operator edits it, and equal numbers are one wave.
- * Rows without a seq sink below the numbered ones, then tie on creation time so
- * an untouched queue still reads oldest-first.
- */
-function queueOrder(a: Task, b: Task): number {
-  const sa = a.queue_seq
-  const sb = b.queue_seq
-  if (sa === null || sa === undefined) {
-    if (sb === null || sb === undefined) return oldestFirst(stamp(a.created_at), stamp(b.created_at))
-    return 1
-  }
-  if (sb === null || sb === undefined) return -1
-  if (sa !== sb) return sa - sb
-  return oldestFirst(stamp(a.created_at), stamp(b.created_at))
-}
-
-/**
- * Order one column's tasks. Queued is the only column where order is meaning --
- * the head of the queue is the next task, and the order is the editable
- * `queue_seq`. Every other column runs newest first; the two terminal columns
- * (done and cancelled) measure "newest" by their finish time, because that is
- * the head their window shows.
+ * Order one column's tasks. Everything runs newest first by creation time; the
+ * two terminal columns (done and cancelled) measure "newest" by their finish
+ * time instead, because that is the head their window shows.
  */
 export function sortColumn(key: string, tasks: Task[]): Task[] {
   const copy = [...tasks]
-  if (key === 'queued') {
-    copy.sort(queueOrder)
-  } else if (key === 'done' || key === 'cancelled') {
+  if (key === 'done' || key === 'cancelled') {
     copy.sort((a, b) => newestFirst(stamp(finishedKey(a)), stamp(finishedKey(b))))
   } else {
     copy.sort((a, b) => newestFirst(stamp(a.created_at), stamp(b.created_at)))

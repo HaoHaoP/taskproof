@@ -12,10 +12,9 @@ import {
 
 describe('the status contract', () => {
   it('covers every status the generated contract declares', () => {
-    // 8 lifecycle states in Python; if the contract gains one, this fails until
+    // 7 lifecycle states in Python; if the contract gains one, this fails until
     // the presentation catches up.
     expect(STATUS_IDS).toEqual([
-      'queued',
       'running',
       'verifying',
       'done',
@@ -48,20 +47,18 @@ describe('the status contract', () => {
     expect(ABNORMAL).not.toContain('blocked')
     // and nothing else hides in there
     expect(ABNORMAL).not.toContain('done')
-    expect(ABNORMAL).not.toContain('queued')
     expect(ABNORMAL).not.toContain('running')
     expect(ABNORMAL).not.toContain('verifying')
   })
 
-  it('has seven columns, with cancellation and blocked each split out', () => {
+  it('has six columns, with cancellation and blocked each split out', () => {
     // The board's column count and order are load-bearing: `.grid` hands the
     // same count to `grid-template-columns`, so a mismatch silently interleaves
     // every lane. Two terminal states are waiting rooms and get their own
     // column: cancellation (the operator stopped it) and blocked (a boundary
     // breach parked for a human to release). `abnormal` stays last.
-    expect(COLUMNS).toHaveLength(7)
+    expect(COLUMNS).toHaveLength(6)
     expect(COLUMNS.map((column) => column.key)).toEqual([
-      'queued',
       'running',
       'verifying',
       'done',
@@ -80,12 +77,17 @@ describe('the status contract', () => {
     expect(COLUMNS[COLUMNS.length - 1].key).toBe('abnormal')
   })
 
+  it('has exactly six columns — the queue column is gone (D4)', () => {
+    // TP-card58: D4 dropped the queue column, so the matrix is 6 columns, not 7.
+    expect(COLUMNS.length).toBe(6)
+  })
+
   it('labels the blocked lane with its own key, and the rest with the status word', () => {
     // The lane header names the operator's job ("Needs review"), not the status
     // word ("Blocked") -- two purposes, two keys. Every other column reuses the
     // status word.
     expect(columnLabelKey('blocked')).toBe('column.blocked')
-    expect(columnLabelKey('queued')).toBe('status.queued')
+    expect(columnLabelKey('running')).toBe('status.running')
     expect(columnLabelKey('abnormal')).toBe('status.abnormal')
   })
 })

@@ -37,9 +37,9 @@ export function emptyDraft(project = ''): TaskDraft {
 /**
  * The latest numeric `timeout` any event carried, or null.
  *
- * A queued row's `queued` event is where the timeout actually persists (the
- * `tasks` table has no such column), so this is how "run again" recovers the
- * original value rather than inventing the default.
+ * The `queued` event is where the timeout actually persists (the `tasks` table
+ * has no such column), so this is how "run again" recovers the original value
+ * rather than inventing the default.
  */
 export function timeoutFromEvents(events: readonly TaskEvent[]): number | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {

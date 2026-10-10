@@ -8,10 +8,10 @@
  * result.
  *
  * The one branch that is not a plain success/failure is `429`: a refused spawn.
- * It is not "the task failed" -- a queued row is left *exactly* as it was, so
- * the caller is handed a `concurrency` failure carrying the server's `reason`
- * (`group` vs `cap`) and told to retry later. Conflating it with a hard error
- * would make the UI drop or grey a card that is still sitting in the queue.
+ * It is not "the task failed" -- nothing changed, so the caller is handed a
+ * `concurrency` failure carrying the server's `reason` (`group` vs `cap`) and
+ * told to retry later. Conflating it with a hard error would make the UI treat a
+ * "retry later" refusal as a permanent one.
  *
  * Only the standard fetch is used, and it is injectable so every branch
  * (success / 409 / 400 / 404 / 429 / network) can be pinned by a unit test.
@@ -25,11 +25,9 @@ import type {
 
 export interface TasksClient {
   create(payload: TaskCreatePayload): Promise<TaskResult<{ task: TaskRow }>>
-  advance(id: string): Promise<TaskResult<{ task: TaskRow }>>
   cancel(id: string): Promise<TaskResult<{ task: TaskRow }>>
   accept(id: string): Promise<TaskResult<{ task: TaskRow }>>
   remove(id: string): Promise<TaskResult<{ removed: string }>>
-  patchQueueSeq(id: string, queueSeq: number | null): Promise<TaskResult<{ task: TaskRow }>>
 }
 
 export interface TasksClientOptions {
@@ -130,11 +128,8 @@ export function createTasksClient(options: TasksClientOptions): TasksClient {
 
   return {
     create: (payload) => request<{ task: TaskRow }>('/api/tasks', 'POST', payload),
-    advance: (id) => request<{ task: TaskRow }>(`/api/tasks/${segment(id)}/advance`, 'POST'),
     cancel: (id) => request<{ task: TaskRow }>(`/api/tasks/${segment(id)}/cancel`, 'POST'),
     accept: (id) => request<{ task: TaskRow }>(`/api/tasks/${segment(id)}/accept`, 'POST'),
-    remove: (id) => request<{ removed: string }>(`/api/tasks/${segment(id)}`, 'DELETE'),
-    patchQueueSeq: (id, queueSeq) =>
-      request<{ task: TaskRow }>(`/api/tasks/${segment(id)}`, 'PATCH', { queue_seq: queueSeq })
+    remove: (id) => request<{ removed: string }>(`/api/tasks/${segment(id)}`, 'DELETE')
   }
 }

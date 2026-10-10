@@ -26,7 +26,7 @@ function task(id: string, fields: Partial<Task> = {}): Task {
   return {
     id,
     project: 'p',
-    status: 'queued',
+    status: 'running',
     brief: '',
     adapter: null,
     model: null,
@@ -34,7 +34,6 @@ function task(id: string, fields: Partial<Task> = {}): Task {
     group_name: null,
     pid: null,
     pgid: null,
-    queue_seq: null,
     workdir: null,
     reasoning: null,
     result_path: null,
@@ -110,33 +109,7 @@ describe('column ordering', () => {
     expect(sortColumn('cancelled', rows).map((t) => t.id)).toEqual(['recent', 'unfinished', 'old'])
   })
 
-  it('orders queued oldest-first', () => {
-    const queued = [
-      task('late', { status: 'queued', created_at: '2026-10-08T11:00:00+08:00' }),
-      task('early', { status: 'queued', created_at: '2026-10-08T09:00:00+08:00' }),
-      task('mid', { status: 'queued', created_at: '2026-10-08T10:00:00+08:00' })
-    ]
-    expect(sortColumn('queued', queued).map((t) => t.id)).toEqual(['early', 'mid', 'late'])
-  })
-
-  it('orders the queue by queue_seq, not creation, and sinks unnumbered rows', () => {
-    // Since card 22 the explicit seq is the order: an edited card moves, and
-    // equal seqs are one wave. Rows with no seq fall to the bottom.
-    const queued = [
-      task('first', { status: 'queued', queue_seq: 1, created_at: '2026-10-08T11:00:00+08:00' }),
-      task('third', { status: 'queued', queue_seq: 3, created_at: '2026-10-08T09:00:00+08:00' }),
-      task('second', { status: 'queued', queue_seq: 2, created_at: '2026-10-08T10:00:00+08:00' }),
-      task('nosie', { status: 'queued', queue_seq: null, created_at: '2026-10-08T08:00:00+08:00' })
-    ]
-    expect(sortColumn('queued', queued).map((t) => t.id)).toEqual([
-      'first',
-      'second',
-      'third',
-      'nosie'
-    ])
-  })
-
-  it('orders every other column newest-first by created_at', () => {
+  it('orders the remaining columns newest-first by created_at', () => {
     for (const status of ['running', 'verifying', 'failed']) {
       const rows = [
         task('a', { status, created_at: '2026-10-08T09:00:00+08:00' }),
@@ -364,10 +337,10 @@ describe('grouping', () => {
     const grouped = groupColumns([
       task('f1', { status: 'failed', created_at: '2026-10-08T09:00:00+08:00' }),
       task('t1', { status: 'timeout', created_at: '2026-10-08T11:00:00+08:00' }),
-      task('q1', { status: 'queued', created_at: '2026-10-08T10:00:00+08:00' })
+      task('r1', { status: 'running', created_at: '2026-10-08T10:00:00+08:00' })
     ])
     expect(grouped.abnormal.map((t) => t.id)).toEqual(['t1', 'f1'])
-    expect(grouped.queued.map((t) => t.id)).toEqual(['q1'])
+    expect(grouped.running.map((t) => t.id)).toEqual(['r1'])
     expect(grouped.done).toEqual([])
   })
 })
@@ -380,7 +353,7 @@ describe('visible status columns (泳道 显隐)', () => {
   it('drops exactly the hidden keys, keeping contract order', () => {
     // Toggled in one order, rendered in contract order -- the header row never
     // reshuffles just because a column was hidden before another.
-    const filter = { ...DEFAULT_FILTER, hidden: ['done', 'queued'] }
+    const filter = { ...DEFAULT_FILTER, hidden: ['done'] }
     expect(visibleColumns(filter).map((c) => c.key)).toEqual([
       'running',
       'verifying',
@@ -410,7 +383,7 @@ describe('visible status columns (泳道 显隐)', () => {
 
   it('counts hidden columns and the cards in hand inside them', () => {
     const groups = groupColumns([
-      task('q', { status: 'queued' }),
+      task('r', { status: 'running' }),
       task('d1', { status: 'done' }),
       task('d2', { status: 'done' }),
       task('f', { status: 'failed' })
@@ -442,7 +415,7 @@ describe('a wider contract does not cross the lanes', () => {
   // membership against an injected list, so the invariant is checked without a
   // browser (the real-window numbers live in the delivery notes).
   const seven: Column[] = [
-    { key: 'queued', members: ['queued'] },
+    { key: 'parked', members: ['parked'] },
     { key: 'running', members: ['running'] },
     { key: 'verifying', members: ['verifying'] },
     { key: 'blocked', members: ['blocked'] },
@@ -451,7 +424,7 @@ describe('a wider contract does not cross the lanes', () => {
     { key: 'abnormal', members: ['failed', 'timeout'] }
   ]
   const eight: Column[] = [
-    { key: 'queued', members: ['queued'] },
+    { key: 'shelved', members: ['shelved'] },
     { key: 'running', members: ['running'] },
     { key: 'verifying', members: ['verifying'] },
     { key: 'blocked', members: ['blocked'] },
@@ -484,7 +457,7 @@ describe('a wider contract does not cross the lanes', () => {
   it('hiding one of eight leaves the other seven in order, no track for it', () => {
     const filter = { ...DEFAULT_FILTER, hidden: ['blocked'] }
     const keys = visibleColumns(filter, eight).map((column) => column.key)
-    expect(keys).toEqual(['queued', 'running', 'verifying', 'parked', 'done', 'cancelled', 'abnormal'])
+    expect(keys).toEqual(['shelved', 'running', 'verifying', 'parked', 'done', 'cancelled', 'abnormal'])
     expect(gridTracks(keys.length)).toBe('var(--lane) repeat(7, minmax(var(--col), 1fr))')
     // membership is unchanged by hiding: each card is still in its own column.
     const grouped = groupColumns(onePerColumn(eight), eight)

@@ -143,24 +143,15 @@ function openTask(id: string): void {
   void router.push({ name: 'matrix', params: { taskId: id }, query: route.query })
 }
 
-/** The card menu's actions. Advance / rerun go straight to the store; stop,
- *  accept and delete raise their confirmation sheets first (a write that landed
- *  re-reads the board). `accept` is blocked-only and cannot be undone, so it
- *  goes through the same confirm step as stop / delete. */
+/** The card menu's actions. Rerun goes straight to the store; stop, accept and
+ *  delete raise their confirmation sheets first (a write that landed re-reads
+ *  the board). `accept` is blocked-only and cannot be undone, so it goes through
+ *  the same confirm step as stop / delete. */
 function onAction(task: Task, action: TaskAction): void {
-  if (action === 'advance') void advance(task)
-  else if (action === 'stop') tasks.openStop(task)
+  if (action === 'stop') tasks.openStop(task)
   else if (action === 'accept') tasks.openAccept(task)
   else if (action === 'delete') tasks.openDelete(task)
   else if (action === 'rerun') void tasks.openRerun(task)
-}
-
-async function advance(task: Task): Promise<void> {
-  if (await tasks.advance(task)) await store.refresh()
-}
-
-async function reorder(task: Task, seq: number): Promise<void> {
-  if (await tasks.patchQueueSeq(task, seq)) await store.refresh()
 }
 
 /** Every query key the board itself reads or writes. Anything else (today
@@ -328,8 +319,8 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
       </div>
     </div>
 
-    <!-- A refused spawn (429) changes nothing: the card stays queued at its
-         number. Say so, and let it be dismissed -- never show it as a failure. -->
+    <!-- A refused spawn (429) changes nothing. Say so, and let it be dismissed
+         -- never show it as a failure. -->
     <div v-if="tasks.notice" class="notice">
       <span>{{ tasks.notice }}</span>
       <button type="button" class="nx" @click="tasks.dismissNotice()">
@@ -415,7 +406,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
               :expanded="isExpanded(task.id)"
               @open="openTask"
               @action="(action: TaskAction) => onAction(task, action)"
-              @reorder="(seq: number) => reorder(task, seq)"
             />
             <div v-if="!tasksIn(project.id, column.key).length" class="dash">—</div>
           </div>

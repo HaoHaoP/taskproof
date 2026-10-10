@@ -38,8 +38,6 @@
   --bar: 44px;
 
   /* Apple system colours, per status */
-  --c-queued: #8e8e93;
-  --w-queued: rgba(142, 142, 147, 0.1);
   --c-running: #0a84ff;
   --w-running: rgba(10, 132, 255, 0.13);
   --c-verifying: #bf5af2;
@@ -87,8 +85,6 @@ html[data-theme='light'] {
   --rule-2: rgba(0, 0, 0, 0.06);
   --accent: #007aff;
 
-  --c-queued: #8e8e93;
-  --w-queued: rgba(142, 142, 147, 0.12);
   --c-running: #007aff;
   --w-running: rgba(0, 122, 255, 0.1);
   --c-verifying: #af52de;
@@ -122,10 +118,6 @@ html[data-theme='light'] {
 [data-status] {
   --c: var(--c-unknown);
   --w: var(--w-unknown);
-}
-[data-status='queued'] {
-  --c: var(--c-queued);
-  --w: var(--w-queued);
 }
 [data-status='running'] {
   --c: var(--c-running);

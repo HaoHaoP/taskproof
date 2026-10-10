@@ -307,7 +307,7 @@ export const useBoardStore = defineStore('board', () => {
    * Read one task + its event stream without opening the drawer.
    *
    * The console needs the events to seed a "run again" form (the timeout lives
-   * only in the queued event), and it must not navigate the reader to the
+   * only in the `queued` event), and it must not navigate the reader to the
    * drawer as a side effect. Returns null on any failure -- the caller shows a
    * plain "could not read the original" rather than a half-filled form.
    */

@@ -1,15 +1,12 @@
 /**
- * The console's write surface: new / stop / delete / run-again + queue order.
+ * The console's write surface: new / stop / delete / run-again.
  *
  * Everything the card menu and the dialogs do lives here, so the components
  * stay declarative and the reasoning -- which failure is a "retry later" and
  * which is a real error, what the confirmation step renders, what a "run again"
  * prefill contains -- is testable without a DOM.
  *
- * Two rules the tests protect:
- *  - a refusal (429) is NOT a failure: the card is still in the queue, so it is
- *    reported as a transient notice and the row is left alone; it must never be
- *    shown as failed or made to disappear,
+ * The rules the tests protect:
  *  - a dangerous action always goes through a confirmation, and a successful
  *    write ends by asking the caller to re-read the board -- nothing is stitched
  *    together locally.
@@ -64,12 +61,6 @@ export const useTasksStore = defineStore('tasks', () => {
         detail: failure.detail || failure.message
       })
     )
-  }
-
-  /** The "retry later" copy a refused spawn earns, chosen by the limit bit. */
-  function noticeFor(failure: TaskWriteError): string {
-    const key = failure.reason === 'cap' ? 'task.notice.cap' : 'task.notice.group'
-    return String(i18n.global.t(key, { detail: failure.detail || failure.message }))
   }
 
   function requireApi(): NonNullable<Window['tp']>['tasks'] | null {
@@ -149,7 +140,7 @@ export const useTasksStore = defineStore('tasks', () => {
     composeOpen.value = true
   }
 
-  /** Dispatch. `start` is the two exits: true fires now, false parks queued. */
+  /** Dispatch. `start` is the two exits: true fires now, false saves it for later. */
   async function submit(start: boolean): Promise<boolean> {
     const api = requireApi()
     busy.value = true
@@ -168,38 +159,14 @@ export const useTasksStore = defineStore('tasks', () => {
       }
       const result = await api.create(payload)
       if (!result.ok) {
-        // A refused immediate spawn created nothing, so there is no row to keep
-        // in the queue -- this is a real error, and the copy carries the reason
-        // (the concurrency one says "retry later").
+        // A refused immediate spawn created nothing, so there is no row to
+        // keep -- this is a real error, and the copy carries the reason (the
+        // concurrency one says "retry later").
         error.value = copyFor(result.error)
         return false
       }
       closeAll()
       return true
-    } finally {
-      busy.value = false
-    }
-  }
-
-  /** Fire one queued card now (`POST …/advance`). A 429 stays a notice: the row
-   *  keeps its place and its seq. */
-  async function advance(task: Task): Promise<boolean> {
-    const api = requireApi()
-    busy.value = true
-    resetTransient()
-    try {
-      if (!api) {
-        error.value = copyFor(unavailable())
-        return false
-      }
-      const result = await api.advance(task.id)
-      if (result.ok) return true
-      if (result.error.kind === 'concurrency') {
-        notice.value = noticeFor(result.error)
-        return false
-      }
-      error.value = copyFor(result.error)
-      return false
     } finally {
       busy.value = false
     }
@@ -335,26 +302,6 @@ export const useTasksStore = defineStore('tasks', () => {
     }
   }
 
-  /** Edit a queued card's order: `PATCH …` with `{queue_seq}` only. */
-  async function patchQueueSeq(task: Task, queueSeq: number | null): Promise<boolean> {
-    const api = requireApi()
-    resetTransient()
-    try {
-      if (!api) {
-        error.value = copyFor(unavailable())
-        return false
-      }
-      const result = await api.patchQueueSeq(task.id, queueSeq)
-      if (!result.ok) {
-        error.value = copyFor(result.error)
-        return false
-      }
-      return true
-    } finally {
-      // no busy flag: the number input should not lock the whole board
-    }
-  }
-
   return {
     composeOpen,
     summaryOpen,
@@ -376,7 +323,6 @@ export const useTasksStore = defineStore('tasks', () => {
     toSummary,
     backToCompose,
     submit,
-    advance,
     openStop,
     closeStop,
     confirmStop,
@@ -386,7 +332,6 @@ export const useTasksStore = defineStore('tasks', () => {
     openDelete,
     closeDelete,
     confirmDelete,
-    patchQueueSeq,
     dismissNotice,
     copyFor
   }
