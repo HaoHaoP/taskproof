@@ -44,16 +44,28 @@ import json
 import os
 import re
 import secrets
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .. import __version__, concurrency, dispatch, registry, storage
+from .. import __version__, concurrency, dispatch, registry, storage, verify
 from ..errors import ConcurrencyError, RegistryError, UsageError
 
 #: Loopback only. Do not make this configurable to a routable address.
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
 _DEFAULT_LIMIT = 20
+
+#: `GET /api/tasks/<id>/log` — with no `offset`, return the file's last
+#: LOG_TAIL_BYTES. There is deliberately no "page backwards" affordance: the
+#: window is the tail, and later requests resume forward from `next`.
+LOG_TAIL_BYTES = 65536
+#: Hard cap on the bytes any single log response may carry, tail or incremental.
+LOG_CHUNK_BYTES = 262144
+#: Floor between live `git status` probes for one task, in seconds.
+LIVE_FILES_MIN_INTERVAL = 3.0
+#: Short bound (seconds) on each live probe; a slow repo yields ``null``.
+LIVE_PROBE_TIMEOUT = 5
 
 _CREATE_FIELDS = {
     "path",
@@ -168,6 +180,172 @@ def _concurrency_payload(exc):
     return payload
 
 
+#: Statuses whose worktree we probe for `files_changed_live`. Every other row
+#: reports ``None`` -- the final `files_changed` is written once at step ⑥.
+_LIVE_STATUSES = ("running", "verifying")
+
+#: Process-wide `{task_id: (monotonic, value)}` cache for the live probe.
+#:
+#: It must live at module scope, not on the handler: ``ThreadingHTTPServer``
+#: builds a fresh handler instance per request, so an instance attribute would
+#: never be hit and every poll would re-shell out to `git`.
+_LIVE_FILES_CACHE = {}
+
+
+def _utf8_lead_length(byte):
+    """Expected total length of the UTF-8 character starting at ``byte``."""
+    if byte < 0x80:
+        return 1
+    if byte >= 0xF0:
+        return 4
+    if byte >= 0xE0:
+        return 3
+    if byte >= 0xC0:
+        return 2
+    return 1
+
+
+def _utf8_prefix_length(raw):
+    """Largest prefix length of ``raw`` that ends on a UTF-8 character boundary.
+
+    The caller picked the slice; if its final bytes open a multi-byte character
+    that the slice cuts in half, drop them and let the caller resume at that
+    character's first byte. Decoding only a boundary-aligned prefix keeps the
+    resume point loss-free: the next read starts exactly where the dropped bytes
+    began.
+    """
+    back = 1
+    while back <= 3 and back <= len(raw):
+        byte = raw[-back]
+        if byte & 0xC0 != 0x80:
+            # ``byte`` is a lead (or ASCII) byte at distance ``back`` from the end.
+            needed = _utf8_lead_length(byte)
+            if needed <= back:
+                return len(raw)  # its character completes inside the slice
+            return len(raw) - back  # cut: drop from this character's first byte
+        back += 1
+    return len(raw)
+
+
+def _log_leading_partial(raw):
+    """Count leading continuation bytes: a character whose start lies before ``raw``.
+
+    Only used for a tail slice, whose window start we chose. Skipping them lets
+    the response begin on a character boundary instead of a replacement glyph.
+    """
+    skipped = 0
+    while skipped < 3 and skipped < len(raw) and raw[skipped] & 0xC0 == 0x80:
+        skipped += 1
+    return skipped
+
+
+def _empty_log(task_id, size=0, offset=0):
+    return {
+        "task_id": task_id,
+        "offset": offset,
+        "next": offset,
+        "text": "",
+        "eof": True,
+        "size": size,
+        "omitted": 0,
+    }
+
+
+def _read_log(log_path, task_id, offset):
+    """Read one log window. ``offset is None`` requests the tail.
+
+    Contract (Card B depends on these exact names): a 200 body is
+    ``{task_id, offset, next, text, eof, size, omitted}`` -- ``offset`` is where
+    the returned bytes start, ``next`` where the client resumes, and ``omitted``
+    the bytes before the window the client does not have (0 for an incremental
+    request). A missing log file is a normal empty tail, never an error.
+    """
+    try:
+        size = os.stat(log_path).st_size
+    except OSError:
+        return _empty_log(task_id)
+
+    if offset is None:
+        start = max(0, size - LOG_TAIL_BYTES)
+        omitted = start
+        tail = True
+    else:
+        if offset > size:
+            # File was truncated/rotated under us: nothing to show, resume at EOF.
+            return _empty_log(task_id, size=size, offset=size)
+        start = offset
+        omitted = 0
+        tail = False
+
+    end = min(size, start + LOG_CHUNK_BYTES)
+    try:
+        with open(log_path, "rb") as handle:
+            handle.seek(start)
+            raw = handle.read(end - start)
+    except OSError:
+        return _empty_log(task_id)
+
+    if tail:
+        skipped = _log_leading_partial(raw)
+        if skipped:
+            start += skipped
+            omitted += skipped
+            raw = raw[skipped:]
+
+    kept = _utf8_prefix_length(raw)
+    raw = raw[:kept]
+    next_offset = start + len(raw)
+    return {
+        "task_id": task_id,
+        "offset": start,
+        "next": next_offset,
+        "text": raw.decode("utf-8", errors="replace"),
+        "eof": next_offset >= size,
+        "size": size,
+        "omitted": omitted,
+    }
+
+
+def _live_files_changed(row):
+    """`files_changed_live` for one row: an int while running/verifying, else None.
+
+    Same yardstick as the final `files_changed` (`git status --porcelain` line
+    count), probed through `verify.detect_changes` with a short timeout. The
+    result is cached per task for `LIVE_FILES_MIN_INTERVAL` seconds -- a cache
+    hit returns the previous value without shelling out again. Any probe failure
+    (not a repo, no git, timeout) is `None`, never an exception: this must never
+    500 or stall a list request.
+    """
+    if row.get("status") not in _LIVE_STATUSES:
+        return None
+    workdir = row.get("workdir")
+    if not workdir:
+        return None
+    task_id = row.get("id")
+    now = time.monotonic()
+    cached = _LIVE_FILES_CACHE.get(task_id)
+    if cached is not None and now - cached[0] < LIVE_FILES_MIN_INTERVAL:
+        return cached[1]
+    try:
+        value = verify.detect_changes(workdir, timeout=LIVE_PROBE_TIMEOUT)
+    except Exception:
+        value = None
+    _LIVE_FILES_CACHE[task_id] = (now, value)
+    return value
+
+
+def _with_live_files(row):
+    """Copy ``row`` and add the derived ``files_changed_live`` field."""
+    row = dict(row)
+    row["files_changed_live"] = _live_files_changed(row)
+    return row
+
+
+def _with_live_files_many(rows):
+    """One shared helper for both the list and the detail endpoint."""
+    return [_with_live_files(row) for row in rows]
+
+
 class _Handler(BaseHTTPRequestHandler):
     """One request handler per server; ``workspace`` is set per instance class."""
 
@@ -253,6 +431,13 @@ class _Handler(BaseHTTPRequestHandler):
             rest = path[len(prefix):]
             if rest.endswith("/events"):
                 return self._events(rest[: -len("/events")])
+            # `GET /api/tasks/<id>/log` is a read-only log window: no offset ->
+            # the tail (last LOG_TAIL_BYTES); with an offset -> forward from it,
+            # capped at LOG_CHUNK_BYTES per response. There is intentionally NO
+            # "page backwards" affordance -- the client owns what it has read and
+            # resumes from the `next` byte offset.
+            if rest.endswith("/log"):
+                return self._log(rest[: -len("/log")], parse_qs(parsed.query))
             if "/" in rest:
                 return 404, {"error": "not found", "path": parsed.path}
             return self._detail(rest)
@@ -637,7 +822,7 @@ class _Handler(BaseHTTPRequestHandler):
                 project=_first(query, "project"),
                 limit=limit,
             )
-            tasks = [dict(row) for row in rows]
+            tasks = _with_live_files_many(rows)
         finally:
             conn.close()
         return 200, {"tasks": tasks, "count": len(tasks)}
@@ -646,7 +831,36 @@ class _Handler(BaseHTTPRequestHandler):
         detail = dispatch.task_detail(self.workspace, task_id)
         if detail.get("task") is None:
             return 404, {"error": "no such task", "task_id": task_id}
+        # Same helper as `_tasks`, so the card and the drawer cannot disagree.
+        detail["task"] = _with_live_files(detail["task"])
         return 200, detail
+
+    def _log(self, task_id, query):
+        """`GET /api/tasks/<id>/log` -- tail by default, forward with `offset`."""
+        task_id = unquote(task_id)
+        # Log paths are only ever `workspace/logs/<id>.log`; reject any id that
+        # could steer that join (path separators or ``..``) before touching disk.
+        if not task_id or "/" in task_id or "\\" in task_id or ".." in task_id:
+            return 404, {"error": "not found", "path": self.path}
+
+        # A missing task is a 404; a missing *log file* on a real task is a
+        # normal empty tail (queued, or a task that never produced output).
+        detail = dispatch.task_detail(self.workspace, task_id)
+        if detail.get("task") is None:
+            return 404, {"error": "no such task", "task_id": task_id}
+
+        raw_offset = _first(query, "offset")
+        offset = None
+        if raw_offset is not None:
+            try:
+                offset = int(raw_offset)
+            except (TypeError, ValueError):
+                return 400, {"error": "offset must be an integer", "offset": raw_offset}
+            if offset < 0:
+                return 400, {"error": "offset must be >= 0", "offset": raw_offset}
+
+        log_path = os.path.join(self.workspace, "logs", task_id + ".log")
+        return 200, _read_log(log_path, task_id, offset)
 
     def _events(self, task_id):
         detail = dispatch.task_detail(self.workspace, task_id)

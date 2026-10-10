@@ -149,8 +149,14 @@ def run_acceptance(
     )
 
 
-def _git_porcelain(workdir: str) -> Optional[str]:
-    """Read-only `git status --porcelain`; None when workdir is not a repo."""
+def _git_porcelain(workdir: str, timeout=None) -> Optional[str]:
+    """Read-only `git status --porcelain`; None when workdir is not a repo.
+
+    ``timeout`` bounds the subprocess (seconds); ``None`` keeps the original
+    unbounded semantics, so every existing caller is unaffected. A timeout
+    raises ``subprocess.TimeoutExpired`` (a ``SubprocessError``) and surfaces as
+    ``None`` exactly like the other probe failures.
+    """
     try:
         proc = subprocess.run(
             ["git", "status", "--porcelain"],
@@ -158,6 +164,7 @@ def _git_porcelain(workdir: str) -> Optional[str]:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
+            timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -166,13 +173,17 @@ def _git_porcelain(workdir: str) -> Optional[str]:
     return proc.stdout
 
 
-def detect_changes(workdir: str) -> Optional[int]:
+def detect_changes(workdir: str, timeout=None) -> Optional[int]:
     """Count changed files in the worktree (git only; None when not a repo).
 
     Read-only: `git status --porcelain` and nothing else. taskproof never runs
     a git write command.
+
+    ``timeout`` is an optional short probe bound (seconds) used by the live API;
+    ``None`` (the default, and every pre-existing caller) preserves the original
+    no-timeout behaviour.
     """
-    porcelain = _git_porcelain(workdir)
+    porcelain = _git_porcelain(workdir, timeout=timeout)
     if porcelain is None:
         return None
     return len([line for line in porcelain.splitlines() if line.strip()])
