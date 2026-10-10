@@ -222,6 +222,9 @@ def _json_text(value) -> str:
 def _event_kind(name) -> str:
     return {
         "started": "开始",
+        # `queued` is history: the state was removed, but old ledgers still carry
+        # these events and they must render in the drawer instead of raw English.
+        "queued": "入队",
         "verifying": "验收启动",
         "result_schema": "结构化契约",
         "adapter": "适配器",

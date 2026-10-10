@@ -157,10 +157,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="write a standalone static snapshot to FILE (no browser, does not block)")
     p.add_argument("--project", help="render only this project id")
 
-    p = sub.add_parser("api", help="serve the local REST API (consumed by the desktop frontend)")
+    p = sub.add_parser("api", help="serve the local read-only REST API (consumed by the desktop frontend)")
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
-    p.add_argument("--allow-write", action="store_true",
-                   help="enable token-protected registry writes")
 
     p = sub.add_parser(
         "config",
@@ -849,7 +847,7 @@ def cmd_board(args):
 def cmd_api(args):
     from .api import server
 
-    return server.serve(args.workspace, args.port, allow_write=args.allow_write)
+    return server.serve(args.workspace, args.port)
 
 
 def _check_workspace(workspace) -> dict:

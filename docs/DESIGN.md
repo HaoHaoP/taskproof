@@ -321,7 +321,7 @@ taskproof rerun <task-id>               start a fresh, ledger-linked copy of a t
 taskproof cancel <task-id>              stop a task (SIGTERM -> SIGKILL its own tree)
 taskproof rm <task-id>                  delete a terminal task's record, events and kept worktree
 taskproof board [--open | --serve PORT | --out FILE]
-taskproof api --port N [--allow-write]  local REST (consumed by the stage 2 frontend)
+taskproof api --port N                  local read-only REST (consumed by the stage 2 frontend)
 taskproof doctor                        environment self-check
 taskproof gc                            archive and rotate
 ```
@@ -352,15 +352,12 @@ process and contributor onboarding are designed for two artifacts.
 
 The static dashboard is **frozen**: it keeps working as a `file://` snapshot and
 is not developed further. Stage 2 builds a separate Electron application in
-`desktop/` that consumes the same loopback REST API. That API stays read-only by
-default; only an explicit `--allow-write` opens a session-token-gated write
-surface (project create / edit / delete, plus task control: dispatch / accept /
-cancel / remove) on top of it. `accept` is written
-both ways — `POST /api/tasks/<id>/accept` (optional body `{"note": "…"}`, required
-to clear a `failed` card) and `taskproof accept <id> [--note "…"]`; `rerun` is
-CLI-only on purpose (the v1 "run it again" affordance is a prefilled form, not a
-write the board needs to own). The Python package gains only the small changes
-described below; everything else is additive.
+`desktop/` that consumes the same loopback REST API. That API is **read-only**:
+every mutation — project create / edit / delete, plus task control: dispatch /
+accept / cancel / remove — lives in the CLI, and the REST surface only serves
+reads. `rerun` is CLI-only too (the v1 "run it again" affordance is a prefilled
+form, not a write the board needs to own). The Python package gains only the
+small changes described below; everything else is additive.
 
 **Stack.** TypeScript, Vue 3 (`<script setup>`), electron-vite
 (main / preload / renderer), Pinia, vue-router (hash mode — production loads
@@ -369,15 +366,12 @@ for v1; no packaged installer yet.
 
 **Process model.** Electron owns the server: it spawns `taskproof api --port 0`,
 reads the bound port from the child's stdout, and terminates the child on exit.
-The Python-side changes are these: today `api` defaults to 8787 and blocks
-without printing the port, and it has no write surface.
+The Python-side change is that `api` prints the bound port on one flushed line
+(`--port 0` picks an ephemeral one) and serves read-only.
 
 ```
 taskproof api --port 0     bind an ephemeral port, print one flushed line with
                            the actual port, then serve (read-only)
-taskproof api --port 0 --allow-write
-                           also print a second line with a session-only token
-                           and enable token-gated registry writes
 ```
 
 **Matrix column model.** Columns express *which stage of the pipeline a task has
@@ -405,9 +399,9 @@ being rendered at app level.
 
 **Cross-process boundary.** Preload exposes a small, named API (`window.tp`:
 settings / service / projects / shell) — not a generic
-`invoke(channel, payload)`. Writes to the registry go through the main process,
-so the **local write token never reaches the renderer**; the main process also
-performs the compare-before-save (mtime/hash) that detects external edits.
+`invoke(channel, payload)`. The renderer never writes; registry edits belong to
+the CLI and the main process, which performs the compare-before-save
+(mtime/hash) that detects external edits.
 
 **Settings.** A single `settings.json` in Electron's `userData`, held by the
 main process as the source of truth and exposed to the renderer over IPC.

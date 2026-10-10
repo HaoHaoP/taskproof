@@ -132,67 +132,31 @@ result_schema 指定的文件不存在
 
 运行期状态从不落在这里。任务、事件与判定在 SQLite 存储里；审计流是 JSONL。
 
-## 写协议
+## REST 表面
 
-本地 API **默认只读**。只有显式带上开关启动时，写面才存在：
+本地 API 是**只读**的。所有写操作都留在 CLI 里（`taskproof register`、
+`taskproof config`、`run`、`accept`、`cancel`、`rm`）；服务端不暴露任何写
+端点，也不生成会话令牌。打到旧写路径的写请求就是一个平白的 `404`。
 
-```
-taskproof api --allow-write
-```
+前端读取的端点：
 
-带上开关后，进程会为本次会话生成一个随机令牌，并在端口行之后多刷一行到
-stdout：
+| 端点 | 返回 |
+|---|---|
+| `GET /api/health` | `{"ok", "version", "concurrency"}` |
+| `GET /api/summary` | `{"summary", "concurrency"}` |
+| `GET /api/registry` | `{"path", "hash", "mtime"}`；`hash` 是原始字节的 sha256（十六进制小写） |
+| `GET /api/projects` | `{"projects": [ … ]}` —— 每条是注册表项目加上它的任务计数 |
+| `GET /api/tasks` | `{"tasks": [ … ], "count"}`；过滤 `?status=`、`?project=`、`?limit=` |
+| `GET /api/tasks/<id>` | 单个任务详情连同它的事件 |
+| `GET /api/tasks/<id>/events` | `{"task_id", "events"}` |
+| `GET /api/tasks/<id>/log` | 一段日志窗口（默认尾部，或用 `?offset=` 向前续读） |
 
-```
-taskproof api listening on http://127.0.0.1:<port>
-taskproof api token <token>
-```
+## 注册表写入
 
-令牌由 `secrets.token_urlsafe(32)` 生成，只活在进程内存里：不写文件、不进
-`argv` / 环境变量、不进日志，也绝不出现在任何 HTTP 响应里。stdout 管道是唯一
-通道 —— 只有父进程（桌面应用）能读它；而在 macOS 上，命令行参数与环境变量会被
-同一用户的其它进程从 `ps` 里看到。不加 `--allow-write` 就不生成令牌，所有写动词
-仍然返回 `405`。
-
-每个写请求都必须带上令牌：
-
-```
-X-Taskproof-Token: <token>
-```
-
-| 端点 | 请求体 | 成功 |
-|---|---|---|
-| `GET /api/registry` | — | `200` `{"path", "hash", "mtime"}`；`hash` 是原始字节的 sha256（十六进制小写） |
-| `POST /api/projects/probe` | `{"path"}` | `200` 一份草稿；**不写任何文件** |
-| `POST /api/projects` | `{"path", "expected_hash", "id"?, "group"?, "aliases"?, "verify"?, "verify_kind"?, "forbidden_paths"?}` | `201 {"project": {…}}` |
-| `PATCH /api/projects/<id>` | `{"expected_hash", …要改的字段}` | `200 {"project": {…}}` |
-| `DELETE /api/projects/<id>` | `{"expected_hash"}` | `200 {"removed": "<id>"}` |
-
-`PATCH` 可改 `aliases`、`group`、`verify`、`verify_kind`、`forbidden_paths`
-与 `result_schema`。项目一旦登记，`id` 与 `path` 就不可变 —— id 是
-`tasks.project` 存的值，path 变了等于换了项目 —— 试图改它们会被拒为 `400`。
-
-状态码：
-
-```
-400  字段非法（包含试图改 id 或 path）
-403  缺令牌 / 令牌不对
-404  没有这个 project id
-409  磁盘上的注册表在 expected_hash 读出后变了（见下）
-405  未启用写面时的写动词（没加 --allow-write）
-```
-
-### 冲突
-
-注册表是人可编辑的，所以写入绝不静默覆盖。每次写之前，先把请求里的
-`expected_hash` 与磁盘当下的 sha256 比对。不一致就拒绝为 `409`，并把当前
-文件原样交回，让客户端自己决定怎么办：
-
-```json
-{"error": "conflict", "hash": "<当前>", "content": "<文件文本>", "projects": [ … ]}
-```
-
-冲突时什么都不写。重新载入文件，还是用新的 hash 重试，由调用方取舍。
+`projects.toml` 由 CLI 编辑，绝不经过 API。`taskproof config` 调用
+`registry.set_default`；`taskproof register` 追加一个块。底层注册表写入函数
+（`append_project` / `update_project` / `delete_project`）在 `expected_hash`
+对不上时抛 `RegistryConflictError`，而不是悄悄覆盖手改过的文件。
 
 ### 外科式改写
 

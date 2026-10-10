@@ -150,74 +150,33 @@ project, but hand-editing is fine — the file is read on every run.
 Runtime state never lands here. Tasks, events and verdicts live in the SQLite
 store; the audit stream is JSONL.
 
-## Write protocol
+## REST surface
 
-The local API is **read-only by default**. The write surface exists only when
-the server is started explicitly with the flag:
+The local API is **read-only**. Every mutation lives in the CLI
+(`taskproof register`, `taskproof config`, `run`, `accept`, `cancel`, `rm`);
+the server exposes no write endpoint and mints no session token. A write-shaped
+request to a path that used to be a write endpoint is a plain `404`.
 
-```
-taskproof api --allow-write
-```
+The endpoints the frontend reads:
 
-With the flag the process generates a random token for this session and prints
-one extra line to stdout, right after the port line:
+| Endpoint | Returns |
+|---|---|
+| `GET /api/health` | `{"ok", "version", "concurrency"}` |
+| `GET /api/summary` | `{"summary", "concurrency"}` |
+| `GET /api/registry` | `{"path", "hash", "mtime"}`; `hash` is the lowercase SHA-256 of the raw bytes |
+| `GET /api/projects` | `{"projects": [ … ]}` — each a registry project plus its task tallies |
+| `GET /api/tasks` | `{"tasks": [ … ], "count"}`; filters `?status=`, `?project=`, `?limit=` |
+| `GET /api/tasks/<id>` | one task detail with its events |
+| `GET /api/tasks/<id>/events` | `{"task_id", "events"}` |
+| `GET /api/tasks/<id>/log` | a log window (tail, or forward from `?offset=`) |
 
-```
-taskproof api listening on http://127.0.0.1:<port>
-taskproof api token <token>
-```
+## Registry writes
 
-The token is generated with `secrets.token_urlsafe(32)`, lives only in the
-process's memory, and is never written to a file, never placed in `argv` or the
-environment, never logged, and never returned in an HTTP response. The stdout
-pipe is the only channel: the parent process (the desktop app) is its only
-reader, whereas arguments and environment variables are visible to other
-processes under the same macOS account via `ps`. Without `--allow-write` no
-token is generated and every write verb keeps returning `405`.
-
-Every write request must present the token:
-
-```
-X-Taskproof-Token: <token>
-```
-
-| Endpoint | Body | Success |
-|---|---|---|
-| `GET /api/registry` | — | `200` `{"path", "hash", "mtime"}`; `hash` is the lowercase SHA-256 of the raw bytes |
-| `POST /api/projects/probe` | `{"path"}` | `200` a draft entry; **writes nothing** |
-| `POST /api/projects` | `{"path", "expected_hash", "id"?, "group"?, "aliases"?, "verify"?, "verify_kind"?, "forbidden_paths"?}` | `201 {"project": {…}}` |
-| `PATCH /api/projects/<id>` | `{"expected_hash", …fields}` | `200 {"project": {…}}` |
-| `DELETE /api/projects/<id>` | `{"expected_hash"}` | `200 {"removed": "<id>"}` |
-
-`PATCH` may change `aliases`, `group`, `verify`, `verify_kind`,
-`forbidden_paths` and `result_schema`. `id` and `path` are immutable once a
-project is registered — the id is the value `tasks.project` stores, and a
-changed path is effectively a different project — so asking to change either is
-rejected with `400`.
-
-Status codes:
-
-```
-400  a field is invalid (this includes an attempt to change id or path)
-403  the token is missing or wrong
-404  no project with that id
-409  the registry changed on disk since expected_hash was read (see below)
-405  a write verb while writes are disabled (no --allow-write)
-```
-
-### Conflicts
-
-The registry is human-editable, so a write never silently overwrites. Every
-write first compares the request's `expected_hash` with the file's current
-SHA-256. If they disagree the write is refused with `409` and the current file
-is handed back so the client can choose what to do:
-
-```json
-{"error": "conflict", "hash": "<current>", "content": "<file text>", "projects": [ … ]}
-```
-
-Nothing is written on a conflict. It is the caller's decision to reload the file
-or retry against the fresh hash.
+`projects.toml` is edited by the CLI, never the API. `taskproof config` calls
+`registry.set_default`; `taskproof register` appends a new block. Under the
+hood the registry's writers (`append_project` / `update_project` /
+`delete_project`) refuse a stale `expected_hash` with `RegistryConflictError`
+rather than silently overwriting a hand-edited file.
 
 ### Surgical rewrite
 

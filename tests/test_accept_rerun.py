@@ -14,13 +14,9 @@ import os
 import subprocess
 import sys
 import tempfile
-import threading
 import unittest
-import urllib.error
-import urllib.request
 
 from taskproof import cli, dispatch, ledger, storage
-from taskproof.api import server
 from taskproof.errors import VerifyError
 from taskproof.models import (
     STATUS_BLOCKED,
@@ -31,7 +27,6 @@ from taskproof.models import (
     STATUS_TIMEOUT,
 )
 
-_SENTINEL = object()
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 #: A run that touches the protected ``protected/`` tree, harmless elsewhere.
@@ -465,155 +460,6 @@ class VerifyRegressionTest(_Base):
         self.assertEqual(row["status"], STATUS_FAILED)  # untouched
         self.assertEqual(row["verify_exit"], 0)         # verify_* updated
         self.assertEqual(row["verify_cmd"], "exit 0")
-
-
-# ---------------------------------------------------------------------------
-# ④ HTTP accept
-# ---------------------------------------------------------------------------
-
-
-class HttpAcceptTest(_Base):
-    token = "fixed-session-token-0123456789"
-
-    def setUp(self):
-        super().setUp()
-        self.httpd = server.make_server(
-            self.ws, port=0, allow_write=True, token=self.token
-        )
-        self.port = self.httpd.server_address[1]
-        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
-        self.thread.start()
-
-    def tearDown(self):
-        self.httpd.shutdown()
-        self.httpd.server_close()
-        self.thread.join(timeout=5)
-        super().tearDown()
-
-    def _request(self, path, *, method="GET", body=None, token=_SENTINEL):
-        data = None
-        headers = {}
-        if body is not None:
-            data = json.dumps(body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        if token is _SENTINEL:
-            token = self.token
-        if token is not None:
-            headers["X-Taskproof-Token"] = token
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{self.port}{path}",
-            data=data, headers=headers, method=method,
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=15) as response:
-                return response.status, json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            try:
-                return exc.code, json.loads(exc.read().decode("utf-8"))
-            finally:
-                exc.close()
-
-    def test_accept_with_token_flips_the_card(self):
-        task_id = self.breach(verify="exit 0")
-        status, payload = self._request(f"/api/tasks/{task_id}/accept", method="POST")
-        self.assertEqual(status, 200, payload)
-        self.assertEqual(payload["task"]["status"], STATUS_DONE)
-        self.assertEqual(self.row(task_id)["status"], STATUS_DONE)
-        # The API records itself as the actor, not the CLI.
-        self.assertEqual(
-            self.latest_event(task_id, "accepted")["payload"]["by"], "api"
-        )
-
-    def test_unknown_id_is_404(self):
-        status, payload = self._request("/api/tasks/t-nope/accept", method="POST")
-        self.assertEqual(status, 404, payload)
-        self.assertIn("error", payload)
-
-    def test_non_blocked_is_409(self):
-        task_id = self.breach(verify="exit 0")
-        self.assertEqual(
-            self._request(f"/api/tasks/{task_id}/accept", method="POST")[0], 200
-        )
-        status, payload = self._request(f"/api/tasks/{task_id}/accept", method="POST")
-        self.assertEqual(status, 409, payload)
-        self.assertIn("only a blocked or failed task", payload["error"])
-
-    def test_failed_without_note_is_400(self):
-        task_id = self.red(verify="exit 1")
-        status, payload = self._request(
-            f"/api/tasks/{task_id}/accept", method="POST"
-        )
-        self.assertEqual(status, 400, payload)
-        self.assertIn("人工收尾必须留说明", payload["error"])
-        # Nothing moved.
-        self.assertEqual(self.row(task_id)["status"], STATUS_FAILED)
-        self.assertIsNone(self.latest_event(task_id, "accepted"))
-
-    def test_failed_with_note_flips_the_card_like_the_cli(self):
-        task_id = self.red(verify="exit 1")
-        before = self.row(task_id)
-        status, payload = self._request(
-            f"/api/tasks/{task_id}/accept",
-            method="POST",
-            body={"note": "假红：机器繁忙导致超时；成果已复核"},
-        )
-        self.assertEqual(status, 200, payload)
-        self.assertEqual(payload["task"]["status"], STATUS_DONE)
-        after = self.row(task_id)
-        self.assertEqual(after["status"], STATUS_DONE)
-        self.assertEqual(after["verify_exit"], before["verify_exit"])
-        self.assertEqual(after["finished_at"], before["finished_at"])
-        event = self.latest_event(task_id, "accepted")["payload"]
-        self.assertEqual(event["by"], "api")
-        self.assertEqual(event["from"], "failed")
-        self.assertEqual(event["to"], "done")
-        self.assertEqual(event["note"], "假红：机器繁忙导致超时；成果已复核")
-
-    def test_unsupported_body_field_is_400(self):
-        task_id = self.red(verify="exit 1")
-        status, payload = self._request(
-            f"/api/tasks/{task_id}/accept", method="POST", body={"why": "x"}
-        )
-        self.assertEqual(status, 400, payload)
-        self.assertEqual(self.row(task_id)["status"], STATUS_FAILED)
-
-    def test_missing_token_is_403(self):
-        task_id = self.breach(verify="exit 0")
-        status, _payload = self._request(
-            f"/api/tasks/{task_id}/accept", method="POST", token=None
-        )
-        self.assertEqual(status, 403)
-        self.assertEqual(self.row(task_id)["status"], STATUS_BLOCKED)
-
-
-class HttpAcceptReadOnlyTest(_Base):
-    def setUp(self):
-        super().setUp()
-        self.httpd = server.make_server(self.ws, port=0, allow_write=False)
-        self.port = self.httpd.server_address[1]
-        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
-        self.thread.start()
-
-    def tearDown(self):
-        self.httpd.shutdown()
-        self.httpd.server_close()
-        self.thread.join(timeout=5)
-        super().tearDown()
-
-    def test_read_only_service_is_405(self):
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{self.port}/api/tasks/t-x/accept",
-            data=b"",
-            headers={"X-Taskproof-Token": "anything"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=15) as response:
-                status = response.status
-        except urllib.error.HTTPError as exc:
-            status = exc.code
-            exc.close()
-        self.assertEqual(status, 405)
 
 
 # ---------------------------------------------------------------------------

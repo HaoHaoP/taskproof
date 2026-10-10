@@ -7,15 +7,15 @@ The desktop renderer is never same-origin with this API:
   string ``null``.
 
 So the browser refuses to hand the renderer ``/api/health`` unless the response
-carries ``Access-Control-Allow-Origin`` *for the caller's own origin*, and it
-refuses every ``content-type: application/json`` write (POST/PATCH/DELETE)
-unless ``OPTIONS`` answers the preflight with matching ``Allow-Methods`` /
-``Allow-Headers``. ``urllib`` never enforced the same-origin policy, so the old
-suite stayed green while the app could read nothing; these assertions talk HTTP
-directly and pin down the headers the browser actually checks.
+carries ``Access-Control-Allow-Origin`` *for the caller's own origin*, and the
+only routed verb is a simple ``GET``. There is no write surface and no session
+token: ``OPTIONS`` still answers the preflight, but it advertises ``GET`` only.
+``urllib`` never enforced the same-origin policy, so the old suite stayed green
+while the app could read nothing; these assertions talk HTTP directly and pin
+down the headers the browser actually checks.
 
 A real server is bound to an ephemeral loopback port; nothing reaches the
-network. Writes (case f) run against a ``/tmp`` one-shot workspace only.
+network.
 """
 
 import http.client
@@ -40,10 +40,13 @@ def _request(port, method, path, headers=None):
         conn.close()
 
 
-class _ServerCase(unittest.TestCase):
-    allow_write = False
-    token = None
+def _make(ws):
+    from taskproof.api import server
 
+    return server.make_server(ws, port=0)
+
+
+class _ServerCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory()
@@ -60,7 +63,7 @@ class _ServerCase(unittest.TestCase):
                 'verify = "exit 0"\n'
                 'verify_kind = "check"\n'
             )
-        cls.httpd = _make(cls.ws, cls.allow_write, cls.token)
+        cls.httpd = _make(cls.ws)
         cls.port = cls.httpd.server_address[1]
         cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
         cls.thread.start()
@@ -71,12 +74,6 @@ class _ServerCase(unittest.TestCase):
         cls.httpd.server_close()
         cls.thread.join(timeout=5)
         cls._tmp.cleanup()
-
-
-def _make(ws, allow_write, token):
-    from taskproof.api import server
-
-    return server.make_server(ws, port=0, allow_write=allow_write, token=token)
 
 
 class PreflightContractTest(_ServerCase):
@@ -114,15 +111,15 @@ class PreflightContractTest(_ServerCase):
 
 
 class PreflightOptionTest(_ServerCase):
-    """d, e — OPTIONS answers the write preflight, echoing the origin only."""
+    """d, e — OPTIONS advertises GET only, echoing the origin only."""
 
     _PREFLIGHT = {
         "Origin": "http://localhost:5173",
-        "Access-Control-Request-Method": "POST",
-        "Access-Control-Request-Headers": "content-type,x-taskproof-token",
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "content-type",
     }
 
-    def test_d_allowed_origin_gets_a_full_preflight(self):
+    def test_d_allowed_origin_gets_a_get_only_preflight(self):
         status, headers, _ = _request(
             self.port, "OPTIONS", "/api/projects", dict(self._PREFLIGHT)
         )
@@ -131,15 +128,16 @@ class PreflightOptionTest(_ServerCase):
             headers.get("access-control-allow-origin"), "http://localhost:5173"
         )
         self.assertEqual(headers.get("vary"), "Origin")
+        raw_methods = headers.get("access-control-allow-methods", "")
         methods = {
-            token.strip().upper()
-            for token in headers.get("access-control-allow-methods", "").split(",")
+            token.strip().upper() for token in raw_methods.split(",")
         }
+        self.assertEqual(methods, {"GET"})
+        # The write verbs must be gone from the advertised capability list.
         for verb in ("POST", "PATCH", "DELETE"):
-            self.assertIn(verb, methods)
+            self.assertNotIn(verb, methods)
         allowed = headers.get("access-control-allow-headers", "").lower()
         self.assertIn("content-type", allowed)
-        self.assertIn("x-taskproof-token", allowed)
         self.assertTrue(headers.get("access-control-max-age"))
 
     def test_e_foreign_origin_preflight_has_no_acao(self):
@@ -152,13 +150,14 @@ class PreflightOptionTest(_ServerCase):
         self.assertNotIn("access-control-allow-origin", headers)
 
 
-class CorsWriteGateRegressionTest(_ServerCase):
-    """f — CORS must not loosen the write gate (no token, or no --allow-write)."""
+class CorsReadOnlyRegressionTest(_ServerCase):
+    """f — CORS does not resurrect a write path: there is simply no route.
 
-    allow_write = True
-    token = "fixed-session-token-0123456789"
+    With the write surface gone the old endpoints are unrouted, so a write verb
+    from an allowed origin is a plain 404 -- never a 403 (no gate) or 405.
+    """
 
-    def test_f_missing_token_still_forbidden(self):
+    def test_f_write_verb_is_404_even_with_cors_origin(self):
         status, headers, body = _request(
             self.port,
             "POST",
@@ -169,29 +168,10 @@ class CorsWriteGateRegressionTest(_ServerCase):
                 "Content-Length": "2",
             },
         )
-        self.assertEqual(status, 403, body)
+        self.assertEqual(status, 404, body)
         self.assertEqual(
             headers.get("access-control-allow-origin"), "http://localhost:5173"
         )
-
-
-class CorsReadOnlyGateRegressionTest(_ServerCase):
-    """f — without --allow-write every write verb is still 405, CORS or not."""
-
-    allow_write = False
-
-    def test_f_write_verb_is_405_without_allow_write(self):
-        status, _, body = _request(
-            self.port,
-            "POST",
-            "/api/projects",
-            {
-                "Origin": "http://localhost:5173",
-                "Content-Type": "application/json",
-                "Content-Length": "2",
-            },
-        )
-        self.assertEqual(status, 405, body)
 
 
 if __name__ == "__main__":

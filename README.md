@@ -252,13 +252,10 @@ itself — `taskproof api --port 0` — reads the bound port from the child's st
 and terminates the child on exit. Data comes from that loopback, **read-only**
 REST API; nothing leaves `127.0.0.1`.
 
-Writes are the one opt-in surface. `taskproof api --port 0 --allow-write` mints a
-**session-only token**, printed once to stdout and held in the process's memory —
-never written to a file, argv, the environment, or a response, and never handed
-to the renderer (the write path stays in the Electron main process). Every write
-carries the `expected_hash` it read; if the file changed on disk the write is
-refused with **409** and the current content is handed back, so a hand-edited
-`projects.toml` is never silently overwritten.
+The REST surface is **read-only**. Every mutation lives in the CLI — registering
+a project, editing its registry entry, dispatching, cancelling, accepting and
+removing. The API itself only serves reads: it mints no session token and exposes
+no write endpoint, so a write-shaped request to an old path is a plain **404**.
 
 What the console does today:
 
@@ -267,9 +264,8 @@ What the console does today:
 - The **finished columns fold** to the most recent cards, with a bar to reveal
   the rest.
 - A **"acceptance passed"** badge on a blocked card whose acceptance went green.
-- An **Accept** button to release a blocked card; the write goes through the
-  session token held in the Electron main process, and a **409** ("no longer
-  waiting for review") refreshes the board instead of erroring.
+- **Writes are CLI-only.** The console is a viewer over the read-only API:
+  dispatch, accept and registry edits all go through `taskproof`, never the UI.
 - A settings page that shows the **effective cap and where it came from**, plus
   the resolved launcher (bundled runtime / `taskproof` on PATH / a custom
   command).

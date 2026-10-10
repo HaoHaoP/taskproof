@@ -157,10 +157,24 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertIn("error", body)
 
-    def test_non_get_is_405(self):
+    def test_write_verbs_are_404_not_405(self):
+        # The write surface is gone, so a write verb is no longer a
+        # "method not allowed": the verb/path pair is simply unrouted.
         for method in ("POST", "PUT", "DELETE"):
             status, body = self._request("/api/tasks", method=method)
-            self.assertEqual(status, 405, method)
+            self.assertEqual(status, 404, method)
+            self.assertIn("error", body)
+
+    def test_old_write_paths_are_404(self):
+        # Two of the write endpoints that used to exist are gone outright:
+        # no route matches, so they answer 404. Never 403 -- there is no gate
+        # left to forbid anything.
+        for method, path in (
+            ("POST", "/api/projects"),
+            ("POST", "/api/tasks/t-1/cancel"),
+        ):
+            status, body = self._request(path, method=method)
+            self.assertEqual(status, 404, (method, path))
             self.assertIn("error", body)
 
 

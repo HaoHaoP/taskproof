@@ -275,7 +275,7 @@ taskproof rerun <task-id>               从终态卡起一张新卡，并在账�
 taskproof cancel <task-id>              停任务（对自己那棵进程树 SIGTERM→SIGKILL）
 taskproof rm <task-id>                  删除终态任务的记录、事件与保留的 worktree
 taskproof board [--open | --serve PORT | --out FILE]
-taskproof api --port N [--allow-write]  本地 REST（stage 2 前端消费）
+taskproof api --port N                  本地只读 REST（stage 2 前端消费）
 taskproof doctor                        环境自检
 taskproof gc                            归档与轮转
 ```
@@ -302,9 +302,11 @@ stage 2  Vue 3 + Vite 前端 → Electron 薄壳（不内嵌 Python 运行时）
 ### stage 2：桌面应用
 
 静态看板**冻结**：它继续作为 `file://` 快照可用，但不再往下开发。stage 2 在
-`desktop/` 里另做一款 Electron 应用，消费同一个回环 REST API。该 API 默认
-只读；只有显式加上 `--allow-write`，才会在其上开出一个由「仅本次会话」令牌
-保护的写面（项目增 / 改 / 删，以及任务控制：派发 / 立刻发车 / 放行 / 停止 / 删除 / 改序号）。放行两处都写 —— `POST /api/tasks/<id>/accept`（可选 body `{"note": "…"}`，收 `failed` 卡必填）与 `taskproof accept <id> [--note "…"]`；`rerun` 刻意只给 CLI（v1 的「再跑一次」是预填表单，不是看板需要拥有的写口）。Python 侧只增加下面这几处小改动，其余全是加法。
+`desktop/` 里另做一款 Electron 应用，消费同一个回环 REST API。该 API 是
+**只读**的：项目增 / 改 / 删，以及任务控制（派发 / 放行 / 停止 / 删除）等全部
+写操作都只走 CLI，REST 表面只提供读。`rerun` 也刻意只给 CLI（v1 的「再跑一次」
+是预填表单，不是看板需要拥有的写口）。Python 侧只增加下面这几处小改动，其余
+全是加法。
 
 **技术选型。** TypeScript、Vue 3（`<script setup>`）、electron-vite
 （main / preload / renderer）、Pinia、vue-router（hash 模式 —— 生产走
@@ -312,13 +314,11 @@ stage 2  Vue 3 + Vite 前端 → Electron 薄壳（不内嵌 Python 运行时）
 运行，暂不出安装包。
 
 **进程模型。** Electron 持有服务：它拉起 `taskproof api --port 0`，从子进程
-stdout 读出实际端口，退出时杀掉子进程。Python 侧的改动就这些 —— 目前 `api`
-默认 8787、阻塞且不打印端口，也没有写面：
+stdout 读出实际端口，退出时杀掉子进程。Python 侧的改动是：`api` 刷出一行实际
+端口（`--port 0` 取临时端口），并以只读模式服务：
 
 ```
 taskproof api --port 0     绑定临时端口，刷出一行实际端口，然后开始服务（只读）
-taskproof api --port 0 --allow-write
-                           再刷出第二行「仅本次会话」的令牌，并开启令牌保护的注册表写入
 ```
 
 **矩阵列模型。** 列表示*任务走到了流水线的哪一步*；任务没通过的原因属于卡片
@@ -340,8 +340,8 @@ props 进、events 出，不碰 store、不发请求。任务抽屉属于路由�
 
 **跨进程边界。** preload 只暴露一组具名 API（`window.tp`：settings /
 service / projects / shell），不暴露通用的 `invoke(channel, payload)`。
-写注册表走主进程，**本地写令牌永不到达渲染层**；保存前的比对（mtime/hash）
-也在主进程完成，用于发现外部编辑。
+渲染层永不写入；注册表编辑属于 CLI 与主进程，保存前的比对（mtime/hash）
+在主进程完成，用于发现外部编辑。
 
 **设置。** Electron `userData` 下单一 `settings.json`，以主进程为事实源，经
 IPC 暴露给渲染层。主进程项（端口、taskproof 路径、工作区、启动、托盘、通知、

@@ -240,6 +240,16 @@ class BoardTest(unittest.TestCase):
         self.assertNotIn("http://", doc)
         self.assertNotIn("https://", doc)
 
+    def test_queued_event_keeps_its_history_label(self):
+        # `queued` is history, not a status: card 57 removed the state from the
+        # lifecycle, but old ledgers still carry these events and they must
+        # render as "入队" in the drawer instead of the raw English name.
+        self.assertEqual(render._event_kind("queued"), "入队")
+        self._insert("t-queued", brief="a")
+        self._insert_event("t-queued", "queued", {"position": 1})
+        doc = render.render_board(self.ws)
+        self.assertIn("入队", doc)
+
 
 if __name__ == "__main__":
     unittest.main()
