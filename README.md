@@ -263,9 +263,7 @@ refused with **409** and the current content is handed back, so a hand-edited
 What the console does today:
 
 - **Columns** — running / verifying / done / cancelled / needs review / not
-  passing. The console still lays out a now-always-empty `queued` column; the
-  next desktop card removes it. A column header can be hidden with the `?hide=`
-  query parameter.
+  passing. A column header can be hidden with the `?hide=` query parameter.
 - The **finished columns fold** to the most recent cards, with a bar to reveal
   the rest.
 - A **"acceptance passed"** badge on a blocked card whose acceptance went green.
