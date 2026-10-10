@@ -5,10 +5,12 @@ only**; the static board stays as a frozen `file://` snapshot, and the read-only
 loopback REST API is unchanged. The console is itself read-only: it polls the
 local API and renders the board, but every project registration and task
 dispatch lives in the CLI -- there is no write path here, and the app carries no
-API token. The matrix narrows its finished column to the
-ten most recent cards by default (a fold bar reveals the rest) and the whole
-board can be filtered by project and by time range, both held in the address
-bar's query string.
+API token. The matrix windows every column to a cap the operator sets in that
+column's own header (`- 10 +`, `All` for no fold); the defaults keep the finished
+columns at ten with a fold bar revealing the rest, and the live columns unfolded.
+The whole board can be filtered by project and by time range, both held in the
+address bar's query string. A tray icon, a Dock badge (the not-passing count) and
+launch-at-login are all switchable in settings.
 
 ## Run it
 
@@ -84,7 +86,8 @@ out.
   (`taskproof register`, `taskproof run`, ...). The desktop console is a
   read-only board: it never writes `projects.toml`, never carries an API token,
   and offers no write entry point.
-- **Packaging.** `electron-builder` is a dependency and `npm run pack` exists,
-  but v1 is dev-run only.
-- **Tray, notifications, dock badge, autostart.** The settings page has no
-  switch for these yet.
+- **Packaging.** `npm run dist:mac` / `dist:win` / `dist:linux` build the
+  installers (`electron-builder`), each carrying the Python runtime that
+  `scripts/fetch-runtime.mjs` pins by version and sha256. Nothing is signed or
+  notarised, and macOS is arm64 only. A local machine can only build the macOS
+  package; the other two come from CI's native runners.
