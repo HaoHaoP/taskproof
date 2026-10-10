@@ -248,3 +248,35 @@ describe('the two locales declare the same keys (card 64)', () => {
     expect(at(zhCN, 'rail.lanes')).toBe('条道')
   })
 })
+
+/**
+ * Card 65 made the projects overview draw one row per project and move the
+ * "concurrency group" column onto the lane rows it expands to. The page must
+ * say that, not the old "one row per lane" claim, and the acceptance-command
+ * column (the lane's verify string) must be distinct from the probe verdict
+ * column. Both locales are pinned so the two cannot drift apart.
+ */
+describe('card 65 message keys (projects = a row per project)', () => {
+  it('tells the truth about one-row-per-project in both locales', () => {
+    expect(at(en, 'projects.sub')).toContain('expand')
+    expect(at(en, 'projects.sub')).toContain('lanes')
+    expect(at(zhCN, 'projects.sub')).toContain('展开')
+    expect(at(zhCN, 'projects.sub')).toContain('道')
+  })
+
+  it('splits the acceptance command from the probe verdict, in both locales', () => {
+    expect(at(en, 'projects.col.verify')).toBe('Acceptance')
+    expect(at(zhCN, 'projects.col.verify')).toBe('验收命令')
+    expect(at(en, 'projects.col.probe')).toBe('Probe')
+    expect(at(zhCN, 'projects.col.probe')).toBe('探针')
+  })
+
+  it('names the lane and its lock columns, in both locales', () => {
+    expect(at(en, 'projects.col.lane')).toBe('Lane')
+    expect(at(zhCN, 'projects.col.lane')).toBe('道')
+    expect(at(en, 'projects.col.lanes')).toBe('Lanes')
+    expect(at(zhCN, 'projects.col.lanes')).toBe('道数')
+    expect(at(en, 'projects.col.group')).toBe('Group')
+    expect(at(zhCN, 'projects.col.group')).toBe('并发组')
+  })
+})

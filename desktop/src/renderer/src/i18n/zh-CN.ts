@@ -52,16 +52,19 @@ export default {
 
   projects: {
     title: '项目总览',
-    sub: '每个项目一行。数字与矩阵同源（同一个聚合查询）。',
+    sub: '每个项目一行，展开是它的道。数字与矩阵同源（同一个聚合查询）。',
     col: {
       id: '项目',
+      lane: '道',
       group: '并发组',
       path: '路径',
+      lanes: '道数',
+      verify: '验收命令',
       tasks: '任务',
       flying: '处理中',
       failed: '未通过',
       last: '最近活动',
-      probe: '验收命令'
+      probe: '探针'
     }
   },
 

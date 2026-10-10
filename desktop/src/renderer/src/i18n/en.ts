@@ -60,16 +60,19 @@ export default {
 
   projects: {
     title: 'Projects',
-    sub: 'One row per project. Numbers come from the same aggregate query as the matrix.',
+    sub: 'One row per project; expand a row to see its lanes. Numbers come from the same aggregate query as the matrix.',
     col: {
       id: 'Project',
+      lane: 'Lane',
       group: 'Group',
       path: 'Path',
+      lanes: 'Lanes',
+      verify: 'Acceptance',
       tasks: 'Tasks',
       flying: 'In flight',
       failed: 'Not passing',
       last: 'Last activity',
-      probe: 'Acceptance'
+      probe: 'Probe'
     }
   },
 
