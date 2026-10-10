@@ -56,9 +56,8 @@ class RegistryLoadTest(unittest.TestCase):
         self.assertIsNone(docs.verify)
         self.assertEqual(docs.verify_kind, "none")
 
-    def test_lock_is_the_taskgroup_id(self):
-        # The concurrency lock IS the lane: `group` is a derived alias for the
-        # taskgroup id, not a hand-written (and shareable) key any more.
+    def test_lock_defaults_to_taskgroup_id(self):
+        # The lock defaults to the lane id when `group` is not written.
         path = self.write(
             """
             [[taskgroup]]
@@ -225,6 +224,26 @@ class TwoLayerTest(unittest.TestCase):
         self.assertEqual(reg.require("solo").project, "solo")
         self.assertIsNone(reg.require("solo").verify)
 
+    def test_taskgroup_group_can_share_a_lock(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "one"
+            path = "/tmp/one"
+            group = "shared"
+
+            [[taskgroup]]
+            id = "two"
+            path = "/tmp/two"
+            group = "shared"
+            """
+        )
+        reg = registry.load(path)
+        one = reg.require("one")
+        two = reg.require("two")
+        self.assertEqual(one.group, "shared")
+        self.assertEqual(two.group, "shared")
+
     def test_legacy_project_with_lane_field_is_project_plus_lane(self):
         # The zero-migration rule: a `[[project]]` carrying any lane field is
         # read as a project AND a same-named lane, so `require(<project id>)`
@@ -246,14 +265,14 @@ class TwoLayerTest(unittest.TestCase):
         lane = reg.require("legacy")
         self.assertEqual(lane.verify, "exit 0")
         self.assertEqual(lane.verify_kind, "check")
-        # The lock is the lane id; the legacy `group` value is not a lane key.
-        self.assertEqual(lane.group, "legacy")
+        # The legacy lock name rides through the compatibility path unchanged.
+        self.assertEqual(lane.group, "shared-lock")
         # Aliases ride on the project and still resolve.
         self.assertEqual(reg.require("old").id, "legacy")
 
-    def test_legacy_shared_group_still_all_parse(self):
-        # Two legacy entries used to share one lock via `group`. They still
-        # parse (as two independent lanes) — only the lock sharing is gone.
+    def test_legacy_shared_group_survives_require(self):
+        # Regression pin: after load(), resolving both old entries by require()
+        # must still leave them on the same lock.
         path = self.write(
             """
             [[project]]
@@ -271,8 +290,11 @@ class TwoLayerTest(unittest.TestCase):
         )
         reg = registry.load(path)
         self.assertEqual({t.id for t in reg.taskgroups}, {"one", "two"})
-        self.assertEqual(reg.require("one").group, "one")
-        self.assertEqual(reg.require("two").group, "two")
+        one = reg.require("one")
+        two = reg.require("two")
+        self.assertEqual(one.group, "shared")
+        self.assertEqual(two.group, "shared")
+        self.assertEqual(one.group, two.group)
 
     def test_taskgroup_referencing_unknown_project_is_rejected(self):
         path = self.write(
@@ -367,12 +389,11 @@ class LegacyPinTest(unittest.TestCase):
         # Each block stands up its own project + a same-named lane.
         self.assertEqual(len(reg.projects), 22)
         self.assertEqual(len(reg.taskgroups), 22)
-        for entry_id, _repo, _group, _suffix, _alias in self.ROWS:
+        for entry_id, _repo, group, _suffix, _alias in self.ROWS:
             lane = reg.require(entry_id)
             self.assertEqual(lane.id, entry_id)
             self.assertEqual(lane.project, entry_id)
-            # The lock is the lane id -- the legacy `group` value is ignored.
-            self.assertEqual(lane.group, entry_id)
+            self.assertEqual(lane.group, group)
             self.assertEqual(lane.verify, "exit 0")
 
     def test_shared_legacy_group_still_parses(self):
@@ -381,7 +402,7 @@ class LegacyPinTest(unittest.TestCase):
         shared = [t for t in reg.taskgroups if t.id.startswith("my-app")]
         self.assertEqual(len(shared), 7)
         for lane in shared:
-            self.assertEqual(lane.group, lane.id)
+            self.assertEqual(lane.group, "my-app-lock")
 
     def test_legacy_alias_rides_the_project(self):
         reg = registry.load(self.path)

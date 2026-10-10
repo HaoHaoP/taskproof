@@ -7,8 +7,9 @@
 #   [[project]]    a repository / filter unit: id, path (default), aliases.
 #   [[taskgroup]]  one lane ("道") tasks are dispatched onto: id, owning
 #                  project, path (defaults to the project path), aliases and the
-#                  acceptance command. The concurrency lock IS the taskgroup, so
-#                  one task per lane runs at a time.
+#                  acceptance command. The lock defaults to the taskgroup id, so
+#                  one task per lane runs at a time; lanes may share a `group`
+#                  when they need to serialize.
 #
 # A legacy `[[project]]` block that carries verify / verify_kind /
 # forbidden_paths / result_schema is still read as a same-named project *plus* a

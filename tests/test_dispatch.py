@@ -23,7 +23,7 @@ import threading
 import time
 import unittest
 
-from taskproof import concurrency, storage
+from taskproof import concurrency, registry, storage
 from taskproof.adapters import get
 from taskproof.dispatch import (
     TaskStateError,
@@ -812,11 +812,13 @@ class BadAdapterTest(DispatchBase):
 class ConcurrencyGateTest(DispatchBase):
     def test_same_group_claim_blocks_dispatch(self):
         self.write_registry(verify="exit 0", group="g")
+        lane = registry.load(
+            registry.workspace_registry_path(self.ws)
+        ).require("proj")
+        self.assertEqual(lane.group, "g")
         conn = self.open_conn()
         try:
-            # The lock is the taskgroup id ("proj"); the legacy `group` key is
-            # not a lane knob any more.
-            scopes = concurrency.acquire(conn, "t-other", "proj", cap=3, ttl=60)
+            scopes = concurrency.acquire(conn, "t-other", lane.group, cap=3, ttl=60)
             with self.assertRaises(ConcurrencyError):
                 dispatch(self.ws, "proj", "x", adapter="custom:sh -c 'echo hello'")
         finally:
@@ -825,6 +827,52 @@ class ConcurrencyGateTest(DispatchBase):
 
         # The refused dispatch never even wrote a task row.
         self.assertIsNone(self.latest_task_id())
+
+    def test_two_lanes_sharing_group_are_mutually_exclusive(self):
+        body = "\n".join(
+            [
+                "[defaults]",
+                "concurrency = 3",
+                "timeout = 60",
+                "",
+                "[[project]]",
+                'id = "proj"',
+                f"path = {_q(self.proj)}",
+                "",
+                "[[taskgroup]]",
+                'id = "one"',
+                'project = "proj"',
+                'group = "shared"',
+                'verify = "exit 0"',
+                'verify_kind = "check"',
+                "",
+                "[[taskgroup]]",
+                'id = "two"',
+                'project = "proj"',
+                'group = "shared"',
+                'verify = "exit 0"',
+                'verify_kind = "check"',
+                "",
+            ]
+        )
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write(body)
+
+        reg = registry.load(registry.workspace_registry_path(self.ws))
+        one = reg.require("one")
+        two = reg.require("two")
+        self.assertEqual(one.group, "shared")
+        self.assertEqual(two.group, "shared")
+
+        conn = self.open_conn()
+        try:
+            scopes = concurrency.acquire(conn, "t-one", one.group, cap=3, ttl=60)
+            with self.assertRaises(ConcurrencyError) as ctx:
+                concurrency.acquire(conn, "t-two", two.group, cap=3, ttl=60)
+            self.assertIn("group 'shared' is busy", str(ctx.exception))
+        finally:
+            concurrency.release(conn, scopes)
+            conn.close()
 
 
 class RunAdapterTimeoutTest(unittest.TestCase):

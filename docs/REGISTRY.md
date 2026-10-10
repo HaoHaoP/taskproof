@@ -22,9 +22,10 @@ An entry is one of two things:
   the acceptance command and the result contract.
 
 A project groups the history of everything done in one repository; a taskgroup
-is the unit a run targets. The **concurrency lock is the taskgroup itself**, so
-one task per lane runs at a time. Splitting the lock across lanes is a separate
-feature and is not expressed by this format.
+is the unit a run targets. A taskgroup's `group` is its **concurrency lock
+name**; it defaults to the taskgroup `id`, so one task per lane runs at a time.
+Two lanes may set the same `group` to serialize with each other, including
+across projects and registry entries.
 
 ## Structure
 
@@ -43,6 +44,7 @@ aliases = ["app"]
 [[taskgroup]]
 id     = "my-app"
 project = "my-app"
+# group = "my-app"      # optional; this is the default
 verify = "npm run build"
 verify_kind = "build"
 ```
@@ -77,16 +79,18 @@ verify  = "npm test"
 | `id` | yes | — | Unique. Duplicate ids are a hard error. |
 | `path` | yes | — | Must be **absolute**. The default path for its lanes. |
 | `aliases` | no | `[]` | Alternative names accepted wherever an id is accepted. |
+| `group` | no | the block `id` | Only meaningful on a compatibility lane block (one that also carries a lane field). The implicit lane's lock name is preserved from the old file. |
 | `verify` / `verify_kind` / `forbidden_paths` / `result_schema` | no | — | Not project fields. Any of them on a `[[project]]` block switches on the compatibility rule below. |
 
 ## `[[taskgroup]]` fields
 
 | Field | Required | Default | Notes |
 |---|---|---|---|
-| `id` | yes | — | Unique. Every command may refer to a lane by it; it is also the lock. |
+| `id` | yes | — | Unique. Every command may refer to a lane by it; the lock defaults to it. |
 | `project` | no | the taskgroup `id` | Owning project. Omitted ⟺ the lane stands up a same-named project. |
 | `path` | no | the project `path` | Must be **absolute**. Overrides the project default. |
 | `aliases` | no | `[]` | Alternative names accepted wherever the id is accepted. |
+| `group` | no | the taskgroup `id` | Concurrency lock name. Lanes with the same value serialize, including across projects or registry entries. |
 | `verify` | no | — | The acceptance command, run by taskproof **after** the agent exits. |
 | `verify_kind` | no | `"none"` | `check` / `build` / `none`. Anything else is a hard error. |
 | `forbidden_paths` | no | `[]` | Prefix-matched paths the agent must not touch. Each entry may carry a `file:` / `git:` / `presence:` type; untyped entries are `file`. |
@@ -108,9 +112,10 @@ a same-named lane, and `taskproof run <old id> "…"` still resolves. A
 `[[project]]` block *without* any lane field is a bare filter-only project (0
 lanes) and is not dispatchable until a lane hangs off it.
 
-The old `group` key is honoured only as a name: the lock is now the taskgroup
-id, so two blocks that shared a `group` become two independent lanes. Shared
-locks are out of scope for this format.
+The old `group` key is carried through to the implicit lane. If it is missing
+or empty, the lane's `group` is its id. Two old blocks that shared a `group`
+therefore still share one lock; use a distinct `group` on either block to make
+them independent.
 
 ## Resolution order
 
@@ -132,9 +137,11 @@ ambiguous and refused, naming the candidates.
 
 ## Semantics worth spelling out
 
-**A lane's lock is its id.** One task per taskgroup runs at a time; different
-taskgroups run in parallel up to `concurrency`. Give lanes their own ids; a
-`group` key in an older file no longer joins two lanes into one lock.
+**A lane's lock is its `group`, which defaults to its id.** One task per lock
+runs at a time; different locks run in parallel up to `concurrency`. Two lanes
+may deliberately share a `group`; this is useful when they point at the same
+checkout or another shared resource. A `group` key on a legacy `[[project]]`
+block is preserved for the same reason.
 
 **A missing `verify` is SKIPPED, never "passed".** With no acceptance command,
 `verify_kind` is forced to `none` and verification is recorded as skipped. This
