@@ -262,9 +262,10 @@ What the console does today:
 - **Columns** — running / verifying / done / cancelled / needs review / not
   passing. A column header can be hidden with the `?hide=` query parameter.
 - **Every column's display cap is yours to set**, in the column's own header
-  (`- 10 +`, `All` for no fold). The defaults are the board you already know --
-  done and cancelled fold to the ten most recent, the live columns stay
-  unfolded -- the fold bar still reveals the rest, and expanding is per column.
+  (`- 10 +`, five choices: 5 / 10 / 20 / 50 / All). The defaults are the board
+  you already know -- done and cancelled fold to the ten most recent, the live
+  columns stay unfolded. To show a whole column, choose **All**; there is no
+  separate expand switch.
 - A **"acceptance passed"** badge on a blocked card whose acceptance went green.
 - **Writes are CLI-only.** The console is a viewer over the read-only API:
   dispatch, accept and registry edits all go through `taskproof`, never the UI.

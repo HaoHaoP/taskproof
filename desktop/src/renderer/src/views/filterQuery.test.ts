@@ -40,9 +40,9 @@ describe('opening / closing a detail keeps the filter (card 54)', () => {
 })
 
 describe('applyFilter keeps query keys it does not own (card 54)', () => {
-  it('names the board-owned keys, so `tab` is provably not among them', () => {
+  it('names the board-owned keys, so `tab` and retired unfold keys are not among them', () => {
     expect(matrix).toContain(
-      "const BOARD_KEYS = new Set(['range', 'projects', 'project', 'done', 'open', HIDE_KEY])"
+      "const BOARD_KEYS = new Set(['range', 'projects', 'project', HIDE_KEY])"
     )
   })
 

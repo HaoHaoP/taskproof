@@ -7,10 +7,9 @@
  * and know nothing about the store.
  *
  * The board's *reasoning* -- each column's window and cap, its ordering, the
- * per-column unfold set, the range / project narrowing, and the fetch budget
- * the range needs -- lives in `matrix.ts`. This file only reads the filter off the
- * address bar, mirrors it into the store (which owns the fetch), and wires the
- * answers to markup.
+ * range / project narrowing, and the fetch budget the range needs -- lives in
+ * `matrix.ts`. This file only reads the filter off the address bar, mirrors it
+ * into the store (which owns the fetch), and wires the answers to markup.
  */
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -37,7 +36,6 @@ import {
   parseBoardFilter,
   visibleColumns,
   visibleProjects,
-  withColumnOpen,
   type BoardFilter,
   type CapMenu,
   type ColumnWindow,
@@ -107,8 +105,7 @@ function capFor(key: string): number {
 const windows = computed<Record<string, ColumnWindow>>(() => {
   const out: Record<string, ColumnWindow> = {}
   for (const column of COLUMNS) {
-    const expanded = filter.value.open.includes(column.key)
-    out[column.key] = columnWindow(columns.value[column.key] ?? [], expanded, capFor(column.key))
+    out[column.key] = columnWindow(columns.value[column.key] ?? [], capFor(column.key))
   }
   return out
 })
@@ -119,22 +116,17 @@ const capChips = computed<Record<string, MatrixLabel>>(() => {
   for (const column of COLUMNS) {
     out[column.key] = capChipLabel(
       windows.value[column.key],
-      capFor(column.key),
-      filter.value.open.includes(column.key)
+      capFor(column.key)
     )
   }
   return out
 })
 
-/** The fixed choices and state-dependent action each column's menu draws. */
+/** The fixed choices each column's menu draws. */
 const capMenus = computed<Record<string, CapMenu>>(() => {
   const out: Record<string, CapMenu> = {}
   for (const column of COLUMNS) {
-    out[column.key] = capMenuFor(
-      windows.value[column.key],
-      capFor(column.key),
-      filter.value.open.includes(column.key)
-    )
+    out[column.key] = capMenuFor(capFor(column.key))
   }
   return out
 })
@@ -194,29 +186,8 @@ function aliasHint(group: ProjectGroup): string {
   return group.aliases.join(', ')
 }
 
-/** Unfold one column past its window -- `done` and `cancelled` move
- *  independently now, so the click names the column it belongs to. */
-function openColumn(key: string): void {
-  applyFilter({ open: withColumnOpen(filter.value.open, key, true) })
-}
-
-/** Fold one column back to its cap. */
-function closeColumn(key: string): void {
-  applyFilter({ open: withColumnOpen(filter.value.open, key, false) })
-}
-
-/** One dropdown command: a fixed cap value, or the current column's fold /
- *  unfold action. The menu never offers an action its pure decision did not
- *  produce, so this handler cannot repeat that state logic. */
+/** One dropdown command: a fixed cap value. */
 function onCapCommand(key: string, command: unknown): void {
-  if (command === 'expand') {
-    openColumn(key)
-    return
-  }
-  if (command === 'collapse') {
-    closeColumn(key)
-    return
-  }
   if (typeof command === 'number') settings.setColumnCap(key, command)
 }
 
@@ -233,7 +204,7 @@ function openTask(id: string): void {
 /** Every query key the board itself reads or writes. Anything else (today
  *  `tab`, tomorrow whatever a later feature adds) belongs to another feature
  *  and has to survive a filter change rather than be rebuilt away. */
-const BOARD_KEYS = new Set(['range', 'projects', 'project', 'done', 'open', HIDE_KEY])
+const BOARD_KEYS = new Set(['range', 'projects', 'project', HIDE_KEY])
 
 /** Rewrite the board's query, dropping defaults so a default board is `/matrix`
  *  with no query. `push` (not `replace`): the back button has to undo filter
@@ -429,8 +400,8 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
           <!-- The per-column control band, *inside* the header so it rides the
                sticky band. The chip is the whole second line: its text states
                what the column is showing, and the dropdown holds the fixed cap
-               choices plus any current fold / unfold action. It is a real
-               control, so both the chip and its commands stop propagation. -->
+               choices. It is a real control, so both the chip and its commands
+               stop propagation. -->
           <div class="hdctl">
             <el-dropdown
               class="cap-dd"
@@ -468,15 +439,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
                     </span>
                     <span v-if="option.checked" class="cap-check" aria-hidden="true">✓</span>
                   </el-dropdown-item>
-                  <el-dropdown-item
-                    v-for="action in capMenus[column.key].actions"
-                    :key="action.kind"
-                    divided
-                    :command="action.kind"
-                    :class="`cap-action cap-action-${action.kind}`"
-                  >
-                    {{ t(action.label.key, action.label.params) }}
-                  </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -507,7 +469,7 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
               :key="task.id"
               :task="task"
               :expanded="isExpanded(task.id)"
-              @open="openTask"
+              v-on="{ open: openTask }"
             />
             <div v-if="!tasksIn(group.id, column.key).length" class="dash">—</div>
           </div>
@@ -835,9 +797,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   color: var(--ink-4);
   font-size: 10.5px;
   cursor: default;
-}
-.cap-menu-popper .el-dropdown-menu__item.cap-action {
-  color: var(--accent);
 }
 .cap-menu-popper .cap-check {
   flex: none;

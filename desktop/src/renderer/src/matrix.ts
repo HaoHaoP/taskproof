@@ -28,11 +28,8 @@ import { CAP_MAX, CAP_MIN, DEFAULT_COLUMN_CAPS } from '../../preload/types'
 export const DEFAULT_CAPS: Record<string, number> = DEFAULT_COLUMN_CAPS
 
 /** The historical `done` window size, kept as the done/cancelled code default.
- *  It is just `DEFAULT_CAPS.done` under a name the fold-bar tests still read. */
+ *  It is just `DEFAULT_CAPS.done` under a name the window tests still read. */
 export const DONE_WINDOW = DEFAULT_CAPS.done
-
-/** The address-bar key carrying the per-column unfolded set: `?open=done,...`. */
-export const OPEN_KEY = 'open'
 
 export { CAP_MAX, CAP_MIN }
 
@@ -44,11 +41,6 @@ export type RangeChoice = 'today' | '7d' | '30d' | 'all'
 
 export const RANGES: RangeChoice[] = ['today', '7d', '30d', 'all']
 export const DEFAULT_RANGE: RangeChoice = 'all'
-
-/** The one value the legacy `?done=` key accepts. It is READ ONLY -- an old
- *  bookmark that says "the finished columns were unfolded" is translated into
- *  the new per-column `?open=` set and never written back. */
-export const DONE_EXPANDED = 'expanded'
 
 /** The canonical key for the hidden status columns. Absent means "none hidden". */
 export const HIDE_KEY = 'hide'
@@ -64,13 +56,6 @@ export interface BoardFilter {
    */
   projects: string[] | null
   /**
-   * The columns the reader has unfolded past their window, by column key. `[]`
-   * is the default (every windowed column stays folded); each terminal--or,
-   * once a cap is set, each live--column carries its own state, so expanding
-   * `done` leaves `cancelled` folded. Normalised to contract order.
-   */
-  open: string[]
-  /**
    * The hidden status columns (泳道), by column key. `[]` is the default and
    * means every column is shown -- hiding is *explicit*, so a column the
    * contract grows in a later release starts visible rather than disappearing
@@ -84,7 +69,6 @@ export interface BoardFilter {
 export const DEFAULT_FILTER: BoardFilter = {
   range: DEFAULT_RANGE,
   projects: null,
-  open: [],
   hidden: []
 }
 
@@ -169,38 +153,11 @@ function readHidden(query: QueryLike): string[] {
   return out
 }
 
-/**
- * The unfolded columns, from the canonical `?open=` key. The comma is the
- * separator, the same documented shape as `?projects=` / `?hide=`. A key the
- * contract does not declare is dropped and duplicates collapse, so a stale URL
- * cannot name a column this build has repurposed.
- *
- * The legacy `?done=expanded` key (one flag that used to unfold the finished
- * *and* cancelled columns together) is still read as exactly that pair, so an
- * old bookmark lands on a real board. It is never written again: `boardQuery`
- * writes only `?open=`, and `?open=` wins when both are present.
- */
-function readOpen(query: QueryLike): string[] {
-  const raw = readParam(query, OPEN_KEY)
-  if (raw === null) {
-    return readParam(query, 'done') === DONE_EXPANDED ? ['done', 'cancelled'] : []
-  }
-  const declared = new Set(COLUMNS.map((column) => column.key))
-  const named = new Set(
-    raw
-      .split(',')
-      .map((piece) => piece.trim())
-      .filter((key) => key.length > 0 && declared.has(key))
-  )
-  return COLUMNS.filter((column) => named.has(column.key)).map((column) => column.key)
-}
-
 export function parseBoardFilter(query: QueryLike): BoardFilter {
   const rawRange = readParam(query, 'range')
   return {
     range: isRange(rawRange) ? rawRange : DEFAULT_RANGE,
     projects: readProjects(query),
-    open: readOpen(query),
     hidden: readHidden(query)
   }
 }
@@ -214,14 +171,6 @@ export function boardQuery(filter: BoardFilter): string {
   const params = new URLSearchParams()
   if (filter.range !== DEFAULT_RANGE) params.set('range', filter.range)
   if (filter.projects !== null) params.set('projects', filter.projects.join(','))
-  if (filter.open.length) {
-    // Contract order and no duplicates, so the address bar reads the same no
-    // matter which order the columns were unfolded; the legacy `?done=expanded`
-    // key is never written again.
-    const open = new Set(filter.open)
-    const keys = COLUMNS.filter((column) => open.has(column.key)).map((column) => column.key)
-    if (keys.length) params.set(OPEN_KEY, keys.join(','))
-  }
   if (filter.hidden.length) {
     // Contract order and no duplicates, so the address bar reads the same no
     // matter which order the switches were flipped. Keys the contract does not
@@ -305,14 +254,14 @@ export interface ColumnWindow {
 }
 
 /**
- * Apply a column's window. A positive `cap` keeps only that many cards unless
- * the column is unfolded; `cap === 0` means "do not fold" and lets every card
- * through. The window is applied *after* filtering and sorting, so it is "the
- * N most recent in the current scope". One function serves every column -- the
- * done/cancelled defaults are just `DEFAULT_CAPS`, not a second code path.
+ * Apply a column's window. A positive `cap` keeps only that many cards;
+ * `cap === 0` means "do not fold" and lets every card through. The window is
+ * applied *after* filtering and sorting, so it is "the N most recent in the
+ * current scope". One function serves every column -- the done/cancelled
+ * defaults are just `DEFAULT_CAPS`, not a second code path.
  */
-export function columnWindow(cards: Task[], expanded: boolean, cap: number): ColumnWindow {
-  const visible = expanded || cap === 0 ? cards : cards.slice(0, cap)
+export function columnWindow(cards: Task[], cap: number): ColumnWindow {
+  const visible = cap === 0 ? cards : cards.slice(0, cap)
   return { visible, hidden: cards.length - visible.length, total: cards.length }
 }
 
@@ -323,19 +272,15 @@ export interface MatrixLabel {
 }
 
 /**
- * The chip's one-line summary of the current column window. The five branches
- * are deliberately ordered: an empty column never claims a count; `cap === 0`
- * and a cap that is not exceeded both mean every card is already visible; an
- * unfolded cap keeps the limit in the sentence so "show all" cannot be mistaken
- * for having removed that limit.
+ * The chip's one-line summary of the current column window. The branches are
+ * deliberately ordered: an empty column never claims a count; `cap === 0` and a
+ * cap that is not exceeded both mean every card is already visible; otherwise
+ * the chip reports the cap and the total.
  */
-export function capChipLabel(window: ColumnWindow, cap: number, expanded: boolean): MatrixLabel {
+export function capChipLabel(window: ColumnWindow, cap: number): MatrixLabel {
   if (window.total === 0) return { key: 'board.capChip.empty', params: {} }
   if (cap === 0 || window.total <= cap) {
     return { key: 'board.capChip.all', params: { total: window.total } }
-  }
-  if (expanded) {
-    return { key: 'board.capChip.expanded', params: { total: window.total, cap } }
   }
   return { key: 'board.capChip.capped', params: { cap, total: window.total } }
 }
@@ -349,44 +294,19 @@ export interface CapMenuOption {
   checked: boolean
 }
 
-export interface CapMenuAction {
-  kind: 'expand' | 'collapse'
-  label: MatrixLabel
-}
-
 export interface CapMenu {
   options: CapMenuOption[]
-  /** Zero or one state-dependent fold / unfold action. */
-  actions: CapMenuAction[]
 }
 
-/**
- * The fixed cap choices plus the one state-dependent action the chip's dropdown
- * may offer. This is pure so the menu cannot invent a collapse action for a
- * column already at its cap, or an expand action when nothing is hidden.
- */
-export function capMenuFor(window: ColumnWindow, cap: number, expanded: boolean): CapMenu {
+/** The fixed cap choices, with the current one marked. */
+export function capMenuFor(cap: number): CapMenu {
   const options = CAP_CHOICES.map((value): CapMenuOption => {
     const label: MatrixLabel = value === 0
       ? { key: 'board.capMenu.all', params: {} }
       : { key: 'board.capMenu.option', params: { n: value } }
     return { value, label, checked: value === cap }
   })
-
-  const actions: CapMenuAction[] = []
-  if (window.hidden > 0) {
-    actions.push({
-      kind: 'expand',
-      label: { key: 'board.capMenu.expand', params: { hidden: window.hidden } }
-    })
-  } else if (expanded && cap > 0 && window.total > cap) {
-    actions.push({
-      kind: 'collapse',
-      label: { key: 'board.capMenu.collapse', params: { cap } }
-    })
-  }
-
-  return { options, actions }
+  return { options }
 }
 
 /** Converge a user-entered cap into the control's domain: a whole number in
@@ -395,18 +315,6 @@ export function capMenuFor(window: ColumnWindow, cap: number, expanded: boolean)
 export function clampCap(value: number): number {
   if (!Number.isFinite(value)) return CAP_MIN
   return Math.min(CAP_MAX, Math.max(CAP_MIN, Math.trunc(value)))
-}
-
-/**
- * Add or remove one column from the unfolded set, returning a fresh set in
- * contract order. Kept here (not in the SFC) so "which columns are open" is a
- * pure list operation the tests can pin directly.
- */
-export function withColumnOpen(open: string[], key: string, unfolded: boolean): string[] {
-  const next = new Set(open)
-  if (unfolded) next.add(key)
-  else next.delete(key)
-  return COLUMNS.filter((column) => next.has(column.key)).map((column) => column.key)
 }
 
 /** Millisecond boundary for a range. `all` has no boundary. */

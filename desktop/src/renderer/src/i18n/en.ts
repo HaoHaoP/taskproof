@@ -28,15 +28,12 @@ export default {
     capChip: {
       empty: 'Show all',
       all: 'Show all {total}',
-      expanded: 'Show all {total} (cap {cap})',
       capped: 'Show {cap} / {total}'
     },
     capMenu: {
       title: 'Display cap',
       option: '{n} cards',
-      all: 'All',
-      expand: 'Show the remaining {hidden}',
-      collapse: 'Collapse to {cap} cards'
+      all: 'All'
     }
   },
 
