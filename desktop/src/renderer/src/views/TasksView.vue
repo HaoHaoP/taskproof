@@ -9,16 +9,19 @@ import { useI18n } from 'vue-i18n'
 import TaskDrawer from '../components/TaskDrawer.vue'
 import { duration } from '../format'
 import { useBoardStore } from '../stores/board'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 const store = useBoardStore()
 const router = useRouter()
+const route = useRoute()
 const { t } = useI18n()
 
 const rows = computed(() => store.tasks)
 
 function open(id: string): void {
-  void router.push(`/tasks/${id}`)
+  // Keep the filter / tab query intact: a bare path drops everything the
+  // address bar was carrying, which is how opening a row used to lose the filter.
+  void router.push({ name: 'tasks', params: { taskId: id }, query: route.query })
 }
 </script>
 

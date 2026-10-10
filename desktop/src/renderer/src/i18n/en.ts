@@ -318,7 +318,28 @@ export default {
     now: 'now',
     noClaim: '(no result from the worker)',
     noTask: 'No such task',
-    verdict: 'Verdict'
+    verdict: 'Verdict',
+    tab: { overview: 'Overview', log: 'Log' }
+  },
+
+  /* The log panel: live tail, local search and its notices. The scope is
+     stated in loaded bytes -- never a hard-coded 64KB -- and a truncation is
+     announced rather than dropping the head of the log in silence. */
+  log: {
+    empty: 'No output yet',
+    omitted: '{n} omitted before this point',
+    search: {
+      placeholder: 'Search loaded content',
+      scope: 'Search scope: {n} loaded',
+      none: 'No matches',
+      prev: 'Previous match',
+      next: 'Next match'
+    },
+    jumpBottom: 'Back to bottom ({n} new lines)',
+    copy: 'Copy',
+    copied: 'Copied',
+    refresh: 'Refresh',
+    truncated: 'Only the last {n} lines are kept (earlier lines dropped)'
   },
 
   ev: {

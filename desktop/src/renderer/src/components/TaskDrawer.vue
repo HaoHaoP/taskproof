@@ -12,13 +12,22 @@
  * printing an empty verdict box for a task that was never verified would
  * invent a judgement that was never made.
  */
-import { computed, nextTick, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import StatusMark from './StatusMark.vue'
 import { ABNORMAL } from '../contract'
 import { duration, eventSummary, isBadEvent, shortTime } from '../format'
-import { useBoardStore } from '../stores/board'
+import {
+  byteLength,
+  countMatches,
+  formatBytes,
+  highlightSegments,
+  matchLineIndexes,
+  shouldStickBottom,
+  stripAnsi
+} from '../logview'
+import { LOG_MAX_LINES, useBoardStore } from '../stores/board'
 
 const store = useBoardStore()
 const route = useRoute()
@@ -28,6 +37,12 @@ const { t, te } = useI18n()
 const open = computed(() => typeof route.params.taskId === 'string' && route.params.taskId !== '')
 const task = computed(() => store.detail?.task ?? null)
 const events = computed(() => store.detail?.events ?? [])
+
+/** Which drawer tab is showing. Only an exact `?tab=log` selects the log;
+ *  anything else -- absent, or a stale hand-edited value -- is the default
+ *  overview. The address bar is the one source of truth, so the tab is
+ *  deep-linkable and survives a reload. */
+const tab = computed<'overview' | 'log'>(() => (route.query.tab === 'log' ? 'log' : 'overview'))
 
 /** The task is still moving, so the last timeline dot pulses. */
 const liveTask = computed(() => {
@@ -59,7 +74,19 @@ const ended = computed(() => (task.value?.finished_at ? shortTime(task.value.fin
 
 function close(): void {
   const name = typeof route.name === 'string' ? route.name : 'matrix'
-  void router.push({ name })
+  // Leave the query (the board's filter, and the tab) in the address bar; the
+  // missing `params.taskId` is what actually closes the drawer.
+  void router.push({ name, query: route.query })
+}
+
+/** Switch tabs in place: same task, same filter, only `?tab=` changes. */
+function go(nextTab: 'overview' | 'log'): void {
+  const name = typeof route.name === 'string' ? route.name : 'matrix'
+  const id = typeof route.params.taskId === 'string' ? route.params.taskId : ''
+  const query = { ...route.query }
+  if (nextTab === 'log') query.tab = 'log'
+  else delete query.tab
+  void router.push({ name, params: { taskId: id }, query })
 }
 
 function onVisible(value: boolean): void {
@@ -72,6 +99,153 @@ function onVisible(value: boolean): void {
  * to know it passed -- so it renders only for the failure-like states.
  */
 const showClaim = computed(() => ABNORMAL.includes(task.value?.status ?? ''))
+
+/* ------------------------------------------------------------------ *
+ * The log tab. The store owns the fetch and the tail; everything below
+ * is presentation reasoning pulled out of the template so it can hold
+ * still: stripping ANSI for display, the local search, and the "follow
+ * the tail until the reader scrolls up" rule.
+ * ------------------------------------------------------------------ */
+
+/** Loaded text with ANSI removed, for display and search. stripAnsi never
+ *  touches newlines, so a line index here matches the raw text's line. */
+const logDisplay = computed(() => stripAnsi(store.logText))
+/** Blank text means "no output", not one empty line. */
+const logLines = computed(() => (logDisplay.value === '' ? [] : logDisplay.value.split('\n')))
+
+/** The search is local to what is loaded -- no paging upward -- so its
+ *  counter and highlight never claim to cover bytes we never fetched. */
+const query = ref('')
+const matchCount = computed(() => countMatches(logDisplay.value, query.value))
+const hitLines = computed(() => matchLineIndexes(logDisplay.value, query.value))
+const currentHit = ref(0)
+const hitPosition = computed(() => (matchCount.value ? currentHit.value + 1 : 0))
+/** Case-insensitivity lives in logview's matcher (a debugging convenience);
+ *  changing the query resets the cursor to the first hit. */
+watch(query, () => (currentHit.value = 0))
+
+const logEl = ref<HTMLElement | null>(null)
+/** Whether new lines should keep dragging the viewport down. Starts true so
+ *  the first page lands at the bottom. */
+const stuck = ref(true)
+/** How many lines arrived while the reader was scrolled up -- the count the
+ *  "back to bottom" button offers. */
+const newLines = ref(0)
+
+function onLogScroll(): void {
+  const el = logEl.value
+  if (!el) return
+  if (shouldStickBottom(el.scrollTop, el.scrollHeight, el.clientHeight)) {
+    stuck.value = true
+    newLines.value = 0
+  } else {
+    stuck.value = false
+  }
+}
+
+function scrollToBottom(): void {
+  const el = logEl.value
+  if (el) el.scrollTop = el.scrollHeight
+}
+
+/** Follow the tail only while the reader is already at (within 24px of) the
+ *  bottom. Once they scroll up, hold their position and count the arrivals --
+ *  yanking the viewport back down would fight the reader. */
+watch(
+  () => logDisplay.value,
+  async (now, before) => {
+    if (before === undefined || now === before) return
+    const beforeLines = before === '' ? 0 : before.split('\n').length
+    const afterLines = logLines.value.length
+    await nextTick()
+    if (stuck.value) scrollToBottom()
+    else if (afterLines > beforeLines) newLines.value += afterLines - beforeLines
+  }
+)
+
+/** A different task's log starts pinned to the bottom, with a clean search. */
+watch(
+  () => store.logTaskId,
+  () => {
+    stuck.value = true
+    newLines.value = 0
+    query.value = ''
+    void nextTick(scrollToBottom)
+  }
+)
+
+function jumpBottom(): void {
+  stuck.value = true
+  newLines.value = 0
+  scrollToBottom()
+  void nextTick(scrollToBottom)
+}
+
+/** Does this line hold the occurrence "next"/"prev" is standing on? */
+function isCurrentHitLine(index: number): boolean {
+  return hitLines.value[currentHit.value] === index
+}
+
+function scrollHitIntoView(): void {
+  const el = logEl.value
+  const line = hitLines.value[currentHit.value]
+  if (!el || line == null) return
+  const target = el.querySelector<HTMLElement>(`[data-line="${line}"]`)
+  if (!target) return
+  const delta = target.getBoundingClientRect().top - el.getBoundingClientRect().top
+  el.scrollTop += delta - el.clientHeight / 2 + target.clientHeight / 2
+}
+
+function goToHit(index: number): void {
+  const total = hitLines.value.length
+  if (!total) return
+  currentHit.value = ((index % total) + total) % total
+  void nextTick(scrollHitIntoView)
+}
+
+function nextHit(): void {
+  goToHit(currentHit.value + 1)
+}
+
+function prevHit(): void {
+  goToHit(currentHit.value - 1)
+}
+
+function onQuery(value: string): void {
+  query.value = value
+}
+
+/** Copy the *raw* text -- ANSI and all -- because that is what the process
+ *  actually wrote, and a reader pasting it elsewhere wants those bytes. */
+const copied = ref(false)
+let copiedTimer: ReturnType<typeof setTimeout> | undefined
+async function copyLog(): Promise<void> {
+  if (!navigator.clipboard) return
+  try {
+    await navigator.clipboard.writeText(store.logText)
+    copied.value = true
+    if (copiedTimer) clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => (copied.value = false), 1200)
+  } catch {
+    // A refused clipboard read leaves the button alone rather than claiming a
+    // copy that did not happen.
+  }
+}
+
+/** The tail runs only while the log tab is open and the drawer has a task. */
+watch(
+  [open, tab, () => route.params.taskId],
+  ([isOpen, whichTab, id]) => {
+    if (isOpen && whichTab === 'log' && typeof id === 'string' && id) store.startLog(id)
+    else store.stopLog()
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  store.stopLog()
+  if (copiedTimer) clearTimeout(copiedTimer)
+})
 
 /**
  * The drawer is modal, so focus must move into it on open and come back to
@@ -128,7 +302,36 @@ watch(
         <button class="x" type="button" :aria-label="t('drawer.close')" @click="close">✕</button>
       </div>
 
-      <div class="dbody">
+      <!-- Selected state lives in `?tab=`; the default board has no `tab` key.
+           Real buttons, so Tab reaches both and Enter / Space switch (the
+           explicit handlers keep the behaviour even where a native click is
+           swallowed). -->
+      <div class="dtabs" role="tablist">
+        <button
+          role="tab"
+          type="button"
+          :aria-selected="tab === 'overview'"
+          :class="{ on: tab === 'overview' }"
+          @click="go('overview')"
+          @keydown.enter.prevent="go('overview')"
+          @keydown.space.prevent="go('overview')"
+        >
+          {{ t('drawer.tab.overview') }}
+        </button>
+        <button
+          role="tab"
+          type="button"
+          :aria-selected="tab === 'log'"
+          :class="{ on: tab === 'log' }"
+          @click="go('log')"
+          @keydown.enter.prevent="go('log')"
+          @keydown.space.prevent="go('log')"
+        >
+          {{ t('drawer.tab.log') }}
+        </button>
+      </div>
+
+      <div v-show="tab === 'overview'" class="dbody">
         <section class="sec">
           <h4>{{ t('drawer.brief') }}</h4>
           <pre class="full">{{ task.brief }}</pre>
@@ -194,7 +397,7 @@ watch(
                 {{ verifyText }}
               </dd>
               <dt>{{ t('ev.files') }}</dt>
-              <dd>{{ task.files_changed ?? 0 }}</dd>
+              <dd>{{ task.files_changed_live ?? task.files_changed ?? 0 }}</dd>
               <dt>{{ t('ev.adapter') }}</dt>
               <dd>{{ task.adapter ?? '—' }}{{ task.model ? ` · ${task.model}` : '' }}</dd>
               <dt>{{ t('ev.group') }}</dt>
@@ -202,6 +405,89 @@ watch(
             </dl>
           </div>
         </div>
+      </div>
+
+      <!-- The log tab. The store owns the tail; this only renders it. Search
+           is local to the loaded bytes, the display is ANSI-stripped while the
+           copy button keeps the raw text, and a read failure shows one line
+           without clearing what is already here. -->
+      <div v-show="tab === 'log'" class="logpanel">
+        <div class="logbar">
+          <input
+            class="logq"
+            type="search"
+            :value="query"
+            :placeholder="t('log.search.placeholder')"
+            :aria-label="t('log.search.placeholder')"
+            @input="onQuery(($event.target as HTMLInputElement).value)"
+          />
+          <span class="logcount">{{ hitPosition }} / {{ matchCount }}</span>
+          <button
+            type="button"
+            class="lognav"
+            :aria-label="t('log.search.prev')"
+            :disabled="!matchCount"
+            @click="prevHit"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            class="lognav"
+            :aria-label="t('log.search.next')"
+            :disabled="!matchCount"
+            @click="nextHit"
+          >
+            ↓
+          </button>
+          <button type="button" class="logact" @click="copyLog">
+            {{ copied ? t('log.copied') : t('log.copy') }}
+          </button>
+          <button type="button" class="logact" @click="store.refreshLog()">
+            {{ t('log.refresh') }}
+          </button>
+        </div>
+
+        <p class="logscope">
+          {{ t('log.search.scope', { n: formatBytes(byteLength(store.logText)) }) }}
+          <span v-if="query && !matchCount" class="lognone">{{ t('log.search.none') }}</span>
+        </p>
+
+        <!-- The fixed notices. `omitted` is the file's head the first read
+             never fetched; `truncated` is our own 5000-line trim; the error
+             line sits above whatever text did load, never in place of it. -->
+        <p v-if="store.logOmitted > 0" class="lognote">
+          {{ t('log.omitted', { n: formatBytes(store.logOmitted) }) }}
+        </p>
+        <p v-if="store.logTruncated" class="lognote">
+          {{ t('log.truncated', { n: LOG_MAX_LINES }) }}
+        </p>
+        <p v-if="store.logError" class="logerr">{{ store.logError }}</p>
+
+        <div ref="logEl" class="logscroll" @scroll="onLogScroll">
+          <p v-if="!logLines.length && !store.logError" class="logempty">
+            {{ t('log.empty') }}
+          </p>
+          <!-- Index keys are stable for an append-only tail: existing rows are
+               patched in place and only the new ones are created. -->
+          <div
+            v-for="(line, index) in logLines"
+            :key="index"
+            class="logline"
+            :data-line="index"
+            :class="{ cur: isCurrentHitLine(index) }"
+          >
+            <span
+              v-for="(seg, si) in highlightSegments(line, query)"
+              :key="si"
+              :class="{ hit: seg.hit }"
+            >{{ seg.text }}</span>
+          </div>
+        </div>
+
+        <button v-if="!stuck" type="button" class="logjump" @click="jumpBottom">
+          {{ t('log.jumpBottom', { n: newLines }) }}
+        </button>
       </div>
     </template>
     <p v-else class="none">{{ t('drawer.noTask') }}</p>
@@ -456,6 +742,154 @@ watch(
   font: 10px/1.5 var(--mono);
   color: var(--ink-4);
   overflow-wrap: anywhere;
+}
+/* Tabs: two real buttons; the selected one carries a rule under it. */
+.dtabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--rule-2);
+  flex: none;
+}
+.dtabs button {
+  font: 600 12px/1 var(--sans);
+  color: var(--ink-4);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 11px 10px 9px;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+.dtabs button:hover {
+  color: var(--ink-2);
+}
+.dtabs button.on {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+/* The log panel fills the drawer body: a fixed toolbar and notices above a
+   scrolling tail, with the jump button floating at its lower right. */
+.logpanel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.logbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--rule-2);
+  flex: none;
+}
+.logq {
+  flex: 1;
+  min-width: 0;
+  font: 11.5px/1.4 var(--mono);
+  color: var(--ink);
+  background: var(--sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  padding: 5px 8px;
+}
+.logq:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.logcount {
+  font: 11px/1 var(--mono);
+  color: var(--ink-3);
+  white-space: nowrap;
+  min-width: 44px;
+  text-align: center;
+}
+.lognav,
+.logact {
+  font: 11.5px/1 var(--mono);
+  color: var(--ink-2);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.lognav:hover:not(:disabled),
+.logact:hover {
+  background: var(--raise);
+}
+.lognav:disabled {
+  color: var(--ink-4);
+  opacity: 0.5;
+  cursor: default;
+}
+.logscope {
+  margin: 0;
+  padding: 6px 12px;
+  font: 10.5px/1.4 var(--mono);
+  color: var(--ink-4);
+  border-bottom: 1px solid var(--rule-2);
+  flex: none;
+}
+.lognone {
+  color: var(--c-failed);
+  margin-left: 6px;
+}
+.lognote,
+.logerr {
+  margin: 0;
+  padding: 6px 12px;
+  font: 10.5px/1.5 var(--mono);
+  flex: none;
+}
+.lognote {
+  color: var(--ink-3);
+  background: var(--sunken);
+  border-bottom: 1px solid var(--rule-2);
+}
+.logerr {
+  color: var(--c-failed);
+  border-bottom: 1px solid var(--rule-2);
+}
+.logscroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 12px;
+  font: 10.5px/1.55 var(--mono);
+  color: var(--ink-2);
+  background: var(--bg);
+}
+.logline {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.logline.cur {
+  background: var(--w-running);
+  border-radius: 3px;
+}
+.logline .hit {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 2px;
+}
+.logempty {
+  margin: 0;
+  color: var(--ink-4);
+}
+.logjump {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  font: 11.5px/1 var(--sans);
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--r-pill);
+  padding: 7px 12px;
+  cursor: pointer;
+  box-shadow: 0 6px 16px -6px rgba(0, 0, 0, 0.5);
 }
 .none {
   padding: 16px;

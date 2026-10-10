@@ -27,6 +27,8 @@ export interface Task {
   verify_cmd: string | null
   verify_exit: number | null
   files_changed: number | null
+  /** Live diff count while a task is running/verifying; null otherwise. */
+  files_changed_live: number | null
   created_at: string | null
   started_at: string | null
   finished_at: string | null
@@ -38,6 +40,19 @@ export interface TaskEvent {
   ts: string
   event: string
   payload: Record<string, unknown> | null
+}
+
+/** One page of a task's log file. `offset` is where this page starts,
+ *  `next` is the cursor for the following page, and `omitted` is how many
+ *  bytes before `offset` the first (tail) read left behind. */
+export interface TaskLog {
+  task_id: string
+  offset: number
+  next: number
+  text: string
+  eof: boolean
+  size: number
+  omitted: number
 }
 
 export interface Project {
@@ -80,6 +95,7 @@ export interface BoardClient {
   tasks(params?: { limit?: number; status?: string; project?: string }): Promise<Task[]>
   task(id: string): Promise<{ task: Task; events: TaskEvent[] }>
   events(id: string): Promise<TaskEvent[]>
+  log(id: string, offset?: number | null): Promise<TaskLog>
 }
 
 export function createClient(baseUrl: string): BoardClient {
@@ -114,6 +130,10 @@ export function createClient(baseUrl: string): BoardClient {
       return { task: body.task, events: body.events ?? [] }
     },
     events: async (id) =>
-      (await get<{ events: TaskEvent[] }>(`/api/tasks/${encodeURIComponent(id)}/events`)).events
+      (await get<{ events: TaskEvent[] }>(`/api/tasks/${encodeURIComponent(id)}/events`)).events,
+    log: async (id, offset) => {
+      const suffix = offset == null ? '' : `?offset=${offset}`
+      return get<TaskLog>(`/api/tasks/${encodeURIComponent(id)}/log${suffix}`)
+    }
   }
 }

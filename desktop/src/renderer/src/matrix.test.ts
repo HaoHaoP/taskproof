@@ -42,6 +42,7 @@ function task(id: string, fields: Partial<Task> = {}): Task {
     verify_cmd: null,
     verify_exit: null,
     files_changed: null,
+    files_changed_live: null,
     created_at: null,
     started_at: null,
     finished_at: null,

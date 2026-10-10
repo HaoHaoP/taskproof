@@ -17,6 +17,7 @@ import {
   type TaskEvent
 } from '../api/client'
 import { columnFor, unknownStatuses } from '../contract'
+import { capToLastLines } from '../logview'
 import {
   DEFAULT_RANGE,
   MAX_BUDGET,
@@ -28,6 +29,12 @@ import type { PollChoice, ServiceStatus } from '../../../preload/types'
 
 const DEFAULT_PORT = 8787
 const POLL_MS = 2000
+/** The log tab tails its file once a second -- faster than the board pump,
+ *  because a reader watching a running task expects the tail to keep up. */
+const LOG_POLL_MS = 1000
+/** Once the loaded log passes this many lines only the tail survives, with a
+ *  notice -- never a silent drop. */
+export const LOG_MAX_LINES = 5000
 /** The adaptive fetch never loops more than this many times per refresh. */
 const MAX_GROW_STEPS = 8
 
@@ -68,6 +75,22 @@ export const useBoardStore = defineStore('board', () => {
     null
   )
 
+  /**
+   * The log tab's own state. `logText` keeps the *raw* bytes (ANSI and all) --
+   * the panel strips them for display and the copy button hands the raw text
+   * over. The rest is the continuation cursor and the notices the panel shows.
+   */
+  const logTaskId = ref<string | null>(null)
+  const logText = ref('')
+  const logNext = ref<number | null>(null)
+  const logEof = ref(false)
+  const logSize = ref(0)
+  const logOmitted = ref(0)
+  const logTruncated = ref(false)
+  const logError = ref<string | null>(null)
+  /** Whether the log tab is actually open; the pump runs only then. */
+  const logActive = ref(false)
+
   /** Polling is a setting rather than a constant, because the mast reports
    *  its state: an indicator that cannot be off is decoration. */
   const poll = ref<PollChoice>('2s')
@@ -75,6 +98,7 @@ export const useBoardStore = defineStore('board', () => {
 
   let client: BoardClient | null = null
   let timer: ReturnType<typeof setInterval> | undefined
+  let logTimer: ReturnType<typeof setInterval> | undefined
   let unsubscribe: (() => void) | undefined
 
   /** Status words the API reported that this build does not know about. */
@@ -196,6 +220,89 @@ export const useBoardStore = defineStore('board', () => {
     detail.value = null
   }
 
+  function stopLogTimer(): void {
+    if (logTimer) clearInterval(logTimer)
+    logTimer = undefined
+  }
+
+  /**
+   * Read one page of the open task's log.
+   *
+   * The first page (no cursor) is the file's tail and carries `omitted`; every
+   * later page continues from `next` and its text is appended. A page that
+   * arrives after the cursor moved on -- a manual refresh racing the timer, or
+   * a task switch -- is dropped: appending it would splice the wrong bytes in.
+   * A failure is recorded as a readable line and never clears what is loaded.
+   */
+  async function readLog(): Promise<void> {
+    const id = logTaskId.value
+    if (!id) return
+    if (!client) {
+      try {
+        await connect()
+      } catch (cause) {
+        logError.value = cause instanceof Error ? cause.message : String(cause)
+        return
+      }
+    }
+    const cursor = logNext.value
+    try {
+      const page = await client!.log(id, cursor)
+      if (logTaskId.value !== id || logNext.value !== cursor) return
+      if (cursor == null) logOmitted.value = page.omitted
+      if (page.text) logText.value += page.text
+      logNext.value = page.next
+      logEof.value = page.eof
+      logSize.value = page.size
+      const capped = capToLastLines(logText.value, LOG_MAX_LINES)
+      if (capped.truncated) {
+        logText.value = capped.text
+        logTruncated.value = true
+      }
+      logError.value = null
+    } catch (cause) {
+      if (logTaskId.value !== id || logNext.value !== cursor) return
+      logError.value = cause instanceof Error ? cause.message : String(cause)
+    }
+  }
+
+  /**
+   * Open the log tab on `id`: load its tail first (with the `omitted` count),
+   * then tail it once a second -- but only while the global pump is on. With
+   * polling off the first page still loads; the rest waits for the manual
+   * refresh button, because an off switch that still polled would be a lie.
+   */
+  function startLog(id: string): void {
+    if (logTaskId.value !== id) {
+      logTaskId.value = id
+      logText.value = ''
+      logNext.value = null
+      logEof.value = false
+      logSize.value = 0
+      logOmitted.value = 0
+      logTruncated.value = false
+      logError.value = null
+    }
+    logActive.value = true
+    stopLogTimer()
+    void readLog()
+    if (poll.value !== 'off') {
+      logTimer = setInterval(() => void readLog(), LOG_POLL_MS)
+    }
+  }
+
+  /** The log tab closed / switched back to overview: stop the tail. The text
+   *  and cursor stay, so returning to the tab resumes where it left off. */
+  function stopLog(): void {
+    logActive.value = false
+    stopLogTimer()
+  }
+
+  /** The manual refresh: one more page on demand, whether or not the pump runs. */
+  function refreshLog(): void {
+    void readLog()
+  }
+
   /**
    * Read one task + its event stream without opening the drawer.
    *
@@ -238,9 +345,16 @@ export const useBoardStore = defineStore('board', () => {
     poll.value = choice
     if (choice === 'off') {
       stop()
+      // The log tail is part of the same pump: off stops it too. The first page
+      // already loaded stays on screen; the manual refresh remains the way to
+      // pull more without turning polling back on.
+      stopLogTimer()
       void refresh()
     } else {
       start()
+      // The log tab may still be open from before polling was switched off --
+      // resume its tail now that the pump is live again.
+      if (logActive.value && logTaskId.value) startLog(logTaskId.value)
     }
   }
 
@@ -274,6 +388,7 @@ export const useBoardStore = defineStore('board', () => {
 
   function dispose(): void {
     stop()
+    stopLogTimer()
     unsubscribe?.()
   }
 
@@ -289,6 +404,14 @@ export const useBoardStore = defineStore('board', () => {
     fetchBudget,
     capped,
     detail,
+    logTaskId,
+    logText,
+    logNext,
+    logEof,
+    logSize,
+    logOmitted,
+    logTruncated,
+    logError,
     poll,
     polling,
     unknownWords,
@@ -300,6 +423,9 @@ export const useBoardStore = defineStore('board', () => {
     openTask,
     fetchDetail,
     closeTask,
+    startLog,
+    stopLog,
+    refreshLog,
     start,
     stop,
     setPoll,

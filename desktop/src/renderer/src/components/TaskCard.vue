@@ -106,7 +106,7 @@ const waveClass = computed(() => `w${waveSlot(props.task.queue_seq)}`)
       <span>{{ task.adapter ?? '—' }}</span>
       <span>{{ t('card.attempt') }} {{ task.attempt ?? 0 }}</span>
       <span>{{ duration(task.started_at, task.finished_at) }}</span>
-      <span>{{ t('card.files') }} {{ task.files_changed ?? 0 }}</span>
+      <span>{{ t('card.files') }} {{ task.files_changed_live ?? task.files_changed ?? 0 }}</span>
     </span>
 
     <!-- The queue's order: a "same wave" chip whose colour reads as the wave,

@@ -308,7 +308,28 @@ export default {
     now: '现在',
     noClaim: '（worker 未给出结果）',
     noTask: '没有这个任务',
-    verdict: '验收判定'
+    verdict: '验收判定',
+    tab: { overview: '概览', log: '日志' }
+  },
+
+  /* The log panel: live tail, local search, the notices. The search scope is
+     stated in loaded bytes -- never a hard-coded 64KB -- and the truncation
+     notice names the line cap rather than dropping the head in silence. */
+  log: {
+    empty: '暂无输出',
+    omitted: '已省略前 {n}',
+    search: {
+      placeholder: '搜索已加载内容',
+      scope: '搜索范围：已加载 {n}',
+      none: '无匹配',
+      prev: '上一个命中',
+      next: '下一个命中'
+    },
+    jumpBottom: '回到底部（{n} 行新）',
+    copy: '复制',
+    copied: '已复制',
+    refresh: '刷新',
+    truncated: '仅保留最后 {n} 行（更早的已丢弃）'
   },
 
   ev: {

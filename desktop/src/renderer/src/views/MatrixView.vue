@@ -14,7 +14,7 @@
  */
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import StatusMark from '../components/StatusMark.vue'
 import TaskCard from '../components/TaskCard.vue'
 import TaskDrawer from '../components/TaskDrawer.vue'
@@ -22,6 +22,7 @@ import type { Task } from '../api/client'
 import { ICONS } from '../icons'
 import {
   DONE_WINDOW,
+  HIDE_KEY,
   RANGES,
   boardQuery,
   canGrowBudget,
@@ -137,7 +138,9 @@ function isExpanded(id: string): boolean {
 }
 
 function openTask(id: string): void {
-  void router.push(`/matrix/${id}`)
+  // Carry the filter / tab query along: a bare path clears the address bar,
+  // which is the real reason opening a detail used to lose the filter.
+  void router.push({ name: 'matrix', params: { taskId: id }, query: route.query })
 }
 
 /** The card menu's actions. Advance / rerun go straight to the store; stop,
@@ -160,12 +163,25 @@ async function reorder(task: Task, seq: number): Promise<void> {
   if (await tasks.patchQueueSeq(task, seq)) await store.refresh()
 }
 
+/** Every query key the board itself reads or writes. Anything else (today
+ *  `tab`, tomorrow whatever a later feature adds) belongs to another feature
+ *  and has to survive a filter change rather than be rebuilt away. */
+const BOARD_KEYS = new Set(['range', 'projects', 'project', 'done', HIDE_KEY])
+
 /** Rewrite the board's query, dropping defaults so a default board is `/matrix`
  *  with no query. `push` (not `replace`): the back button has to undo filter
- *  changes, which is the whole point of putting them in the address bar. */
+ *  changes, which is the whole point of putting them in the address bar. Keys
+ *  the board does not own are carried over untouched -- rebuilding the whole
+ *  query from `boardQuery` used to silently drop them. */
 function applyFilter(patch: Partial<BoardFilter>): void {
   const next = { ...filter.value, ...patch }
-  void router.push({ query: Object.fromEntries(new URLSearchParams(boardQuery(next))) })
+  const produced = Object.fromEntries(new URLSearchParams(boardQuery(next)))
+  const query: LocationQueryRaw = {}
+  for (const [key, value] of Object.entries(route.query)) {
+    if (!BOARD_KEYS.has(key) && value !== undefined) query[key] = value
+  }
+  Object.assign(query, produced)
+  void router.push({ query })
 }
 
 function onRange(value: string): void {
@@ -195,6 +211,24 @@ function onProjects(value: string[]): void {
   applyFilter({ projects: isAll ? null : [...value] })
 }
 
+/** Already showing "every project"? `null` is the default that also counts
+ *  projects registered later, so it is what "全选" means. */
+const allProjectsSelected = computed(() => filter.value.projects === null)
+
+/** Already showing "none"? The explicit empty array -- different from the
+ *  default, so it is a real, disable-able state of its own. */
+const noProjectsSelected = computed(
+  () => filter.value.projects !== null && filter.value.projects.length === 0
+)
+
+function selectAllProjects(): void {
+  applyFilter({ projects: null })
+}
+
+function clearProjects(): void {
+  applyFilter({ projects: [] })
+}
+
 // Keep the store's fetch budget in step with the address bar's range. A change
 // resets the budget, so a narrower range never inherits a wider fetch.
 watch(filter, (next) => store.setRange(next.range), { immediate: true })
@@ -210,13 +244,36 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
         <span>{{ t('board.project') }}</span>
         <el-select
           class="sel sel-projects"
+          popper-class="sel-projects-popper"
           size="small"
           multiple
+          filterable
           collapse-tags
           collapse-tags-tooltip
           :model-value="selectedProjects"
           @change="onProjects"
         >
+          <!-- All / none, inside the dropdown's own header. Both stop the
+               click so the popper stays open: picking "all" is a step in the
+               filter, not a dismissal of it. -->
+          <template #header>
+            <div class="sel-head">
+              <button
+                type="button"
+                :disabled="allProjectsSelected"
+                @click.stop.prevent="selectAllProjects"
+              >
+                {{ t('rail.all') }}
+              </button>
+              <button
+                type="button"
+                :disabled="noProjectsSelected"
+                @click.stop.prevent="clearProjects"
+              >
+                {{ t('rail.none') }}
+              </button>
+            </div>
+          </template>
           <el-option
             v-for="project in store.projects"
             :key="project.id"
@@ -670,5 +727,35 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
 }
 .fold.collapse {
   color: var(--ink-4);
+}
+</style>
+
+<!-- The dropdown is teleported to the body, so its header row cannot live in
+     the scoped block. Keyed under the popper's own class so no other select
+     picks it up. -->
+<style>
+.sel-projects-popper .sel-head {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--rule-2);
+}
+.sel-projects-popper .sel-head button {
+  flex: 1;
+  font: 11.5px/1 var(--sans);
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.sel-projects-popper .sel-head button:hover:not(:disabled) {
+  background: var(--raise);
+}
+.sel-projects-popper .sel-head button:disabled {
+  color: var(--ink-4);
+  opacity: 0.6;
+  cursor: default;
 }
 </style>
