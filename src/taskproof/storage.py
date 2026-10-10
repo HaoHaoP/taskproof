@@ -114,7 +114,6 @@ TASK_COLUMNS = frozenset(
         "exit_code",
         "pid",
         "pgid",
-        "queue_seq",
         "workdir",
         "result_path",
         "verify_cmd",
@@ -139,13 +138,13 @@ def _row_dict(task) -> dict:
 
 
 def insert_task(conn: sqlite3.Connection, task) -> None:
-    """Insert a new task row (status queued). Raises on duplicate id."""
+    """Insert a new task row (status running). Raises on duplicate id."""
     row = _row_dict(task)
     # The model calls the column `group`; the table calls it `group_name`.
     if "group" in row and "group_name" not in row:
         row["group_name"] = row.pop("group")
     if not row.get("status"):
-        row["status"] = "queued"
+        row["status"] = "running"
     if not row.get("created_at"):
         row["created_at"] = now_iso()
 
@@ -215,8 +214,8 @@ def list_tasks(conn, *, status=None, project=None, limit=50):
 
 
 #: Statuses that count as "in progress" in the project overview. These are the
-#: non-terminal states: a queued task is still work the user is waiting on.
-IN_PROGRESS_STATUSES = ("queued", "running", "verifying")
+#: non-terminal states: work the user is waiting on.
+IN_PROGRESS_STATUSES = ("running", "verifying")
 
 
 def project_overview(conn: sqlite3.Connection):

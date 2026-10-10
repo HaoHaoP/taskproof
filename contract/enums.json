@@ -3,10 +3,6 @@
   "note": "generated from the Python constants; run --check in CI",
   "statuses": [
     {
-      "id": "queued",
-      "terminal": false
-    },
-    {
       "id": "running",
       "terminal": false
     },

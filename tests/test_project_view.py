@@ -128,7 +128,7 @@ class ProjectViewBase(unittest.TestCase):
 
 class ProjectOverviewTest(ProjectViewBase):
     def test_overview_counts_match_list_tasks(self):
-        self.insert("t-a1", "alpha", status="queued")
+        self.insert("t-a1", "alpha", status="verifying")
         self.insert("t-a2", "alpha", status="failed")
         self.insert("t-a3", "alpha", status="done")
         self.insert("t-b1", "beta", status="running")
@@ -143,7 +143,7 @@ class ProjectOverviewTest(ProjectViewBase):
                 self.assertEqual(row["total"], len(tasks), row["project"])
                 self.assertEqual(
                     row["in_progress"],
-                    sum(t["status"] in ("queued", "running", "verifying") for t in tasks),
+                    sum(t["status"] in ("running", "verifying") for t in tasks),
                 )
                 self.assertEqual(
                     row["failed"], sum(t["status"] == "failed" for t in tasks)
@@ -157,7 +157,7 @@ class ProjectOverviewTest(ProjectViewBase):
             conn.close()
 
         self.assertEqual(by_id["alpha"]["total"], 3)
-        self.assertEqual(by_id["alpha"]["in_progress"], 1)  # queued
+        self.assertEqual(by_id["alpha"]["in_progress"], 1)  # verifying
         self.assertEqual(by_id["alpha"]["failed"], 1)
         self.assertEqual(by_id["beta"]["in_progress"], 1)  # running
         self.assertEqual(by_id["beta"]["failed"], 1)

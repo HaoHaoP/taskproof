@@ -422,14 +422,6 @@ class FilesChangedLiveEndToEndTest(unittest.TestCase):
         finally:
             conn.close()
 
-    def _task_row(self, task_id):
-        conn = storage.connect(storage.db_path(self.ws))
-        try:
-            row = storage.get_task(conn, task_id)
-            return dict(row) if row is not None else None
-        finally:
-            conn.close()
-
     @unittest.skipUnless(_git_available(), "git is required for the live probe")
     def test_live_count_follows_a_real_running_task(self):
         # Seed the tree with two changes so the count has somewhere to start.
@@ -437,31 +429,36 @@ class FilesChangedLiveEndToEndTest(unittest.TestCase):
             with open(os.path.join(self.proj, name), "w", encoding="utf-8") as fh:
                 fh.write("x\n")
 
-        # Park first (id known up front), then advance the same row on a worker
-        # so the running window can be queried before the adapter exits.
-        task_id = dispatch.dispatch(
-            self.ws, "proj", "live", start=False,
-            adapter="custom:sh -c 'sleep 12; echo done'",
-        )
+        # Dispatch on a worker so the running window can be queried before the
+        # adapter exits. The id is minted inside the worker, so discover it from
+        # the task list once the row lands.
         worker = threading.Thread(
-            target=dispatch.run_queued, args=(self.ws, task_id)
+            target=lambda: dispatch.dispatch(
+                self.ws, "proj", "live",
+                adapter="custom:sh -c 'sleep 12; echo done'",
+            )
         )
         worker.start()
         try:
             deadline = time.monotonic() + 20.0
+            task_id = None
             observed = None
             while time.monotonic() < deadline:
-                # Wait for status + workdir: the flip to `running` and the
-                # workdir write are two statements, so `running` alone can be
-                # seen a beat before the path that the live probe needs.
-                observed = self._task_row(task_id)
-                if (
-                    observed is not None
-                    and observed["status"] == STATUS_RUNNING
-                    and observed["workdir"]
-                ):
-                    break
+                # Wait for status + workdir: the insert and the workdir write are
+                # two statements, so `running` alone can be seen a beat before the
+                # path that the live probe needs.
+                conn = storage.connect(storage.db_path(self.ws))
+                try:
+                    rows = storage.list_tasks(conn, project="proj", limit=5)
+                finally:
+                    conn.close()
+                if rows:
+                    task_id = rows[0]["id"]
+                    observed = dict(rows[0])
+                    if observed["status"] == STATUS_RUNNING and observed["workdir"]:
+                        break
                 time.sleep(0.05)
+            self.assertIsNotNone(task_id, "no real task was observed")
             self.assertEqual(
                 observed["status"], STATUS_RUNNING,
                 "no real running task was observed",

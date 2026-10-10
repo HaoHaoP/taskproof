@@ -2,8 +2,8 @@
 
 The board must be usable as a standalone snapshot (data inlined, no API, no
 external assets) and must never render user-supplied text as live markup. The
-new layout is a swimlane matrix: one row per project, seven grid items each
-(the sticky project lane plus six status cells), a left multi-select rail, and
+new layout is a swimlane matrix: one row per project, six grid items each
+(the sticky project lane plus five status cells), a left multi-select rail, and
 one detail drawer per task.
 """
 
@@ -16,7 +16,7 @@ from taskproof import dispatch, storage
 from taskproof.board import render
 from taskproof.models import Task
 
-STATUS_KEYS = ("queued", "running", "verifying", "done", "failed", "timeout")
+STATUS_KEYS = ("running", "verifying", "done", "failed", "timeout")
 
 
 def _rowrow_block(doc, project):
@@ -110,16 +110,25 @@ class BoardTest(unittest.TestCase):
 
     # ── matrix structure ────────────────────────────────────────────────
 
-    def test_grid_has_project_column_and_six_status_columns(self):
+    def test_grid_has_project_column_and_five_status_columns(self):
         self._insert("t-1", brief="a")
         doc = render.render_board(self.ws)
         self.assertIn('<div class="hd corner">项目</div>', doc)
         for status in STATUS_KEYS:
             self.assertIn(f'class="hd st-h-{status}"', doc)
-        # corner + six status headers == seven header cells.
-        self.assertEqual(doc.count('<div class="hd '), 7)
+        # corner + five status headers == six header cells.
+        self.assertEqual(doc.count('<div class="hd '), 6)
 
-    def test_each_lane_wraps_seven_grid_items_in_a_contents_rowrow(self):
+    def test_lane_count_matches_the_grid_template(self):
+        # The CSS column count is written by hand, so it must track _STATUSES:
+        # a stale repeat(N, ...) silently shifts every swimlane by a column.
+        self._insert("t-1", brief="a")
+        doc = render.render_board(self.ws)
+        self.assertEqual(len(render._STATUSES), 5)
+        self.assertIn("repeat(5,", doc)
+        self.assertNotIn("repeat(6,", doc)
+
+    def test_each_lane_wraps_six_grid_items_in_a_contents_rowrow(self):
         self._insert("t-1", brief="a", status="done")
         self._insert("t-2", brief="b", status="running")
         self._insert("t-3", brief="c", status="failed", verify_exit=1)
@@ -129,9 +138,9 @@ class BoardTest(unittest.TestCase):
         )
         block = _rowrow_block(doc, "proj")
         self.assertEqual(block.count('<div class="lane">'), 1)
-        self.assertEqual(block.count('<div class="cell">'), 6)
+        self.assertEqual(block.count('<div class="cell">'), 5)
         self.assertEqual(
-            block.count('<div class="lane">') + block.count('<div class="cell">'), 7
+            block.count('<div class="lane">') + block.count('<div class="cell">'), 6
         )
 
     def test_lane_has_tally_and_status_headers_carry_counts(self):

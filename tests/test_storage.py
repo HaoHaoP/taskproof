@@ -51,13 +51,13 @@ class StorageCrudTest(unittest.TestCase):
         self.assertEqual(row["project"], "proj")
         self.assertEqual(row["group_name"], "grp")
         self.assertEqual(row["brief"], "do the thing")
-        self.assertEqual(row["status"], "queued")
+        self.assertEqual(row["status"], "running")
         self.assertIsNotNone(row["created_at"])
 
-    def test_insert_defaults_status_to_queued(self):
+    def test_insert_defaults_status_to_running(self):
         storage.insert_task(self.conn, {"id": "t-2", "project": "p", "brief": "b"})
         row = storage.get_task(self.conn, "t-2")
-        self.assertEqual(row["status"], "queued")
+        self.assertEqual(row["status"], "running")
 
     def test_get_missing_returns_none(self):
         self.assertIsNone(storage.get_task(self.conn, "nope"))
@@ -76,13 +76,13 @@ class StorageCrudTest(unittest.TestCase):
         with self.assertRaises(TaskproofError):
             storage.update_task(self.conn, "t-4", status="running", bogus=2)
         # the rejected call must not have applied any part of the patch
-        self.assertEqual(storage.get_task(self.conn, "t-4")["status"], "queued")
+        self.assertEqual(storage.get_task(self.conn, "t-4")["status"], "running")
 
     def test_update_task_rejects_sql_injection_style_key(self):
         storage.insert_task(self.conn, make_task("t-5"))
         with self.assertRaises(TaskproofError):
             storage.update_task(self.conn, "t-5", **{"status=1, id='oops'": "x"})
-        self.assertEqual(storage.get_task(self.conn, "t-5")["status"], "queued")
+        self.assertEqual(storage.get_task(self.conn, "t-5")["status"], "running")
 
     # -- list --------------------------------------------------------------
 
@@ -98,7 +98,7 @@ class StorageCrudTest(unittest.TestCase):
         done = storage.list_tasks(self.conn, status="done")
         self.assertEqual([r["id"] for r in done], ["t-7"])
 
-        many = storage.list_tasks(self.conn, status=["queued", "done"])
+        many = storage.list_tasks(self.conn, status=["running", "done"])
         self.assertEqual({r["id"] for r in many}, {"t-6", "t-7", "t-8"})
 
     # -- next_task_id ------------------------------------------------------
@@ -178,7 +178,7 @@ class StorageCrudTest(unittest.TestCase):
 
     def test_append_event_without_payload(self):
         storage.insert_task(self.conn, make_task("t-10"))
-        storage.append_event(self.conn, "t-10", "queued")
+        storage.append_event(self.conn, "t-10", "verifying")
         rows = storage.list_events(self.conn, "t-10")
         self.assertEqual(len(rows), 1)
         self.assertIsNone(rows[0]["payload"])

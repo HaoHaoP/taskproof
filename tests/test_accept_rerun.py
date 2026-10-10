@@ -27,7 +27,7 @@ from taskproof.models import (
     STATUS_CANCELLED,
     STATUS_DONE,
     STATUS_FAILED,
-    STATUS_QUEUED,
+    STATUS_RUNNING,
     STATUS_TIMEOUT,
 )
 
@@ -140,10 +140,28 @@ class _Base(unittest.TestCase):
             dispatch.dispatch(self.ws, "proj", "breach", adapter=_BREACH)
         return self.latest_id()
 
-    def park(self, brief="later"):
-        return dispatch.dispatch(
-            self.ws, "proj", brief, adapter=_CLEAN, start=False
-        )
+    def non_terminal(self, brief="pending", status=STATUS_RUNNING):
+        """Insert a non-terminal row directly and return its id.
+
+        The queue is gone, so there is no ``--park`` to mint a non-terminal
+        card. The lifecycle guards under test only read the row's status, so a
+        row written straight into the store is the honest fixture.
+        """
+        self._row_seq = getattr(self, "_row_seq", 0) + 1
+        task_id = f"t-20261010-9{self._row_seq:02d}"
+        conn = self.open_conn()
+        try:
+            storage.insert_task(conn, {
+                "id": task_id,
+                "project": "proj",
+                "group": "proj",
+                "brief": brief,
+                "status": status,
+                "adapter": _CLEAN,
+            })
+        finally:
+            conn.close()
+        return task_id
 
     def red(self, *, verify="exit 1"):
         """Dispatch a clean run whose acceptance goes red; return the failed id."""
@@ -161,10 +179,10 @@ class _Base(unittest.TestCase):
         return self.latest_id()
 
     def cancelled(self):
-        """Park a card and cancel it while still queued; return a cancelled id."""
-        queued = self.park("drop me")
-        dispatch.cancel_task(self.ws, queued)
-        return queued
+        """Insert a running card and cancel it; return the cancelled id."""
+        running = self.non_terminal("drop me")
+        dispatch.cancel_task(self.ws, running)
+        return running
 
 
 # ---------------------------------------------------------------------------
@@ -235,17 +253,17 @@ class AcceptTest(_Base):
 
     # ③ accept works on blocked (note optional) and failed (note required);
     # every other state is refused, unchanged.
-    def test_accept_refuses_done_timeout_cancelled_and_queued(self):
+    def test_accept_refuses_done_timeout_cancelled_and_running(self):
         done = dispatch.dispatch(self.ws, "proj", "clean", adapter=_CLEAN)
         timeout = self.timed_out()
         cancelled = self.cancelled()
-        queued = self.park("parked")
+        running = self.non_terminal("pending")
 
         for task_id, before in (
             (done, STATUS_DONE),
             (timeout, STATUS_TIMEOUT),
             (cancelled, STATUS_CANCELLED),
-            (queued, STATUS_QUEUED),
+            (running, STATUS_RUNNING),
         ):
             self.assertEqual(self.row(task_id)["status"], before)
             code, _out, err = self.run_cli("accept", task_id)
@@ -404,8 +422,8 @@ class RerunTest(_Base):
 
     # ⑥ rerun refuses a non-terminal card
     def test_rerun_non_terminal_is_refused(self):
-        queued = self.park("parked")
-        code, _out, err = self.run_cli("rerun", queued)
+        running = self.non_terminal("pending")
+        code, _out, err = self.run_cli("rerun", running)
         self.assertNotEqual(code, 0)
         self.assertIn("only a terminal task can be rerun", err)
         # No new card was minted.
@@ -638,9 +656,9 @@ class RealProcessTest(_Base):
             e["payload"] for e in self.events(new) if e["event"] == "rerun"
         ])
 
-        # ⑥ a queued card is refused by the real CLI
-        queued = self.park("parked")
-        proc = self._run_cli("rerun", queued)
+        # ⑥ a non-terminal card is refused by the real CLI
+        running = self.non_terminal("pending")
+        proc = self._run_cli("rerun", running)
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("only a terminal task can be rerun", proc.stderr)
 

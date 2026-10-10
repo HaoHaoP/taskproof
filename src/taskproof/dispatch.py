@@ -39,7 +39,6 @@ from .models import (
     STATUS_CANCELLED,
     STATUS_DONE,
     STATUS_FAILED,
-    STATUS_QUEUED,
     STATUS_RUNNING,
     STATUS_TIMEOUT,
     STATUS_VERIFYING,
@@ -64,7 +63,6 @@ class TaskStateError(UsageError):
 #: Every status the dashboard reports on, so a status with no rows still shows
 #: up as 0 instead of disappearing from the summary.
 _ALL_STATUSES = (
-    STATUS_QUEUED,
     STATUS_RUNNING,
     STATUS_VERIFYING,
     STATUS_DONE,
@@ -103,46 +101,26 @@ def prepare_workspace(workspace: str) -> None:
             handle.write(registry.SAMPLE_REGISTRY)
 
 
-def next_queue_seq(workspace: str) -> int:
-    """The wave a no-number tail-append should join: ``max(queue_seq) + 1``.
+def _cap_aware_refusal(exc: ConcurrencyError, setting) -> ConcurrencyError:
+    """Point a GLOBAL-cap refusal at its value, its source, and its ways out.
 
-    ``NULL`` seqs are skipped (the REST layer still permits a seq-less park),
-    and the tail never reuses a number another card already holds, so two
-    ``--park`` runs in a row land on two successive waves instead of quietly
-    overwriting each other. An empty queue starts at wave 1.
-    """
-    prepare_workspace(workspace)
-    conn = storage.connect(storage.db_path(workspace))
-    try:
-        storage.migrate(conn)
-        row = conn.execute("SELECT MAX(queue_seq) FROM tasks").fetchone()
-    finally:
-        conn.close()
-    top = row[0] if row is not None else None
-    return int(top) + 1 if top is not None else 1
-
-
-def _park_aware_refusal(exc: ConcurrencyError, setting) -> ConcurrencyError:
-    """Point a GLOBAL-cap refusal at its value, its source, and three ways out.
-
-    A same-group refusal is returned untouched: the queued card would sit in the
-    very same group and block again, so the honest hint there stays "wait your
-    turn" and it never mentions ``--park``. ``concurrency`` already phrases the
-    two cases distinctly ("global cap reached" vs "group '<g>' is busy") — the
-    same signal the REST layer turns into its ``reason`` field — so the reroute
-    needs no change to the concurrency module, and both the CLI ``run`` and the
-    REST ``advance`` paths get it because both go through this module.
+    A same-group refusal is returned untouched: the honest hint there stays
+    "wait your turn". ``concurrency`` already phrases the two cases distinctly
+    ("global cap reached" vs "group '<g>' is busy") — the same signal the REST
+    layer turns into its ``reason`` field — so the reroute needs no change to
+    the concurrency module, and both the CLI ``run`` and the REST create paths
+    get it because both go through this module.
 
     For a global-cap refusal we append the *effective* cap and where it came
-    from (card 42: ``上限 3，来源：自动探测 14 核 ÷ 4``) and name all three
-    exits — wait for a slot / ``run --cap N`` / ``taskproof config
-    --concurrency N`` — so the operator is never told "no" without a next step.
+    from (card 42: ``上限 3，来源：自动探测 14 核 ÷ 4``) and name the exits —
+    ``run --cap N`` / ``taskproof config --concurrency N`` — so the operator is
+    never told "no" without a next step.
     """
     if str(exc).startswith("global cap"):
         return ConcurrencyError(
             f"{exc}（上限 {setting.value}，来源：{concurrency.source_label(setting)}）",
             hint=(
-                "等空位（--park 排队）／临时抬高（run --cap N）／"
+                "临时抬高（run --cap N）／"
                 "改配置（taskproof config --concurrency N）"
             ),
         )
@@ -161,17 +139,10 @@ def dispatch(
     worktree: bool = False,
     skip_verify: bool = False,
     timeout: Optional[int] = None,
-    start: bool = True,
-    queue_seq: Optional[int] = None,
     rerun_of: Optional[str] = None,
     cap: Optional[int] = None,
 ) -> str:
-    """Run one task end to end (``start=True``) or park it queued.
-
-    With ``start=False`` this only builds the row: status ``queued``, the
-    requested ``queue_seq``, no concurrency claim, no adapter. The queue daemon
-    (card 24) is what later advances a queued row; a manual ``run`` still takes
-    the ``start=True`` path. Returns the task id either way.
+    """Run one task end to end and return its id.
 
     ``rerun_of`` names the terminal card this run is a fresh copy of; when set,
     the new card gets a ``rerun`` event carrying ``rerun_of`` and the old card
@@ -199,8 +170,7 @@ def dispatch(
 
     # The effective global cap for this dispatch, with its source (card 42). A
     # `--cap N` is a one-off override: it rides the event stream but is never
-    # written to the registry. Resolved up front so a parked card can remember
-    # the cap it was fired with — it takes effect when the card is advanced.
+    # written to the registry.
     setting = concurrency.resolve(reg.defaults, cap)
 
     # Resolve the adapter object now (a bare constructor, no side effects): a bad
@@ -219,61 +189,15 @@ def dispatch(
         prefix_date = datetime.now().strftime("%Y%m%d")
         task_id = storage.next_task_id(conn, prefix_date=prefix_date)
 
-        # ②b A parked task is only a row: no slot, no adapter, no process. Its
-        # explicit `queue_seq` is the sole source of queue order (same number =
-        # same wave). `start=True` keeps the historic synchronous behaviour.
-        if not start:
-            storage.insert_task(
-                conn,
-                Task(
-                    id=task_id,
-                    project=project.id,
-                    group=project.group,
-                    brief=brief,
-                    status=STATUS_QUEUED,
-                    adapter=adapter,
-                    model=model,
-                    reasoning=reasoning,
-                    queue_seq=queue_seq,
-                    created_at=storage.now_iso(),
-                ),
-            )
-            storage.append_event(
-                conn,
-                task_id,
-                "queued",
-                {
-                    "project": project.id,
-                    "group": project.group,
-                    "adapter": adapter,
-                    "queue_seq": queue_seq,
-                    # Card 22 parks a row with only its `tasks` columns; the
-                    # run flags have no column, so they ride along in this
-                    # event payload. `run_queued` reads them back when the
-                    # queue advances the row.
-                    "read_only": read_only,
-                    "worktree": worktree,
-                    "skip_verify": skip_verify,
-                    "timeout": timeout,
-                    # A `run --cap N --park` records the cap here (no column):
-                    # the card takes no slot now, and the cap takes effect when
-                    # the queue advances it (see `run_queued`).
-                    "cap": cap,
-                },
-            )
-            if rerun_of:
-                _link_rerun(conn, task_id, rerun_of)
-            return task_id
-
         # ③ claim the group slot + a slot under the global cap. A refusal is a
-        # ConcurrencyError (exit 75) and nothing is queued.
+        # ConcurrencyError (exit 75) and no task row is written.
         ttl = max(1, int(effective_timeout)) + 60
         try:
             scopes = concurrency.acquire(
                 conn, task_id, project.group, cap=setting.value, ttl=ttl
             )
         except ConcurrencyError as exc:
-            raise _park_aware_refusal(exc, setting) from None
+            raise _cap_aware_refusal(exc, setting) from None
 
         # ⑨ Whatever happens below — success, a recorded failure, or a raised
         # error — the exact credential from ③ is released. `release` verifies the
@@ -290,7 +214,6 @@ def dispatch(
                 model=model,
                 reasoning=reasoning,
                 pid=os.getpid(),
-                queue_seq=queue_seq,
                 created_at=storage.now_iso(),
                 started_at=storage.now_iso(),
             )
@@ -306,7 +229,6 @@ def dispatch(
                     "read_only": read_only,
                     "worktree": worktree,
                     "skip_verify": skip_verify,
-                    "queue_seq": queue_seq,
                     # The hard timeout this run enforces. It has no column, so it
                     # rides in the event: `rerun` reads it back to reuse the same
                     # flag (See `_run_options`).
@@ -358,11 +280,10 @@ def _execute_claimed(
 ) -> None:
     """Steps 5-8 for a task that is already `running` and holds a slot.
 
-    Shared by `dispatch(start=True)` (row inserted running) and `run_queued`
-    (row flipped from queued to running). Owns the whole worktree lifecycle
-    (create -> execute -> keep-if-changed / remove-if-clean) and raises whatever
-    `_execute` raises; it never touches the concurrency claim, which stays the
-    caller's.
+    The row is already `running` and holds a slot. Owns the whole worktree
+    lifecycle (create -> execute -> keep-if-changed / remove-if-clean) and
+    raises whatever `_execute` raises; it never touches the concurrency claim,
+    which stays the caller's.
     """
     worktree_path = None
     run_dir = project.path
@@ -379,11 +300,9 @@ def _execute_claimed(
             storage.append_event(conn, task_id, "worktree_created", {"path": run_dir})
 
         # Land the run directory on the row the moment it is final -- after a
-        # worktree has resolved its path, before the adapter spawns. Both starts
-        # funnel through here (dispatch(start=True) inserts the row running,
-        # run_queued flips it queued->running), so this single write covers both.
-        # Without it the row carried NULL workdir for the whole run and the
-        # live `files_changed_live` probe had nothing to look at.
+        # worktree has resolved its path, before the adapter spawns. Without it
+        # the row carried NULL workdir for the whole run and the live
+        # `files_changed_live` probe had nothing to look at.
         storage.update_task(conn, task_id, workdir=run_dir)
 
         _execute(
@@ -451,39 +370,12 @@ def _link_rerun(conn, new_id: str, old_id: str) -> None:
     storage.append_event(conn, old_id, "rerun", {"rerun_as": new_id})
 
 
-def _queued_options(conn, task_id: str) -> dict:
-    """Recover the run flags a parked task carried in its `queued` event.
-
-    Card 22 parked a row with only its `tasks` columns (project, brief, adapter,
-    model, reasoning, queue_seq); read_only / worktree / skip_verify / timeout
-    and (card 42) a one-off `cap` have no column, so they were recorded in the
-    `queued` event payload. The latest such event wins. A row parked by an older
-    build (no payload) yields `{}` and the queue advances it with the documented
-    defaults.
-    """
-    row = conn.execute(
-        "SELECT payload FROM events WHERE task_id = ? AND event = 'queued' "
-        "ORDER BY id DESC LIMIT 1",
-        (task_id,),
-    ).fetchone()
-    if row is None or row[0] is None:
-        return {}
-    try:
-        payload = json.loads(row[0])
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
 def _run_options(conn, task_id: str) -> dict:
     """Recover the run flags a task carried, for `rerun` to reuse.
 
-    Same idea as :func:`_queued_options`, but broader: a parked card records its
-    flags on the `queued` event, while a card born running (``dispatch`` with
-    ``start=True``) records read_only / worktree / skip_verify / timeout on the
-    `started` event. Both are read oldest-first and merged, so the newest value
-    of each key wins and a card advanced out of the queue keeps the flags the
-    queue remembered.
+    A card born running records read_only / worktree / skip_verify / timeout on
+    its `started` event. The events are read oldest-first and merged, so the
+    newest value of each key wins.
 
     A flag missing from every event is simply absent; `rerun` then applies the
     documented default (read_only / worktree / skip_verify false; timeout =
@@ -493,7 +385,7 @@ def _run_options(conn, task_id: str) -> dict:
     options: dict = {}
     rows = conn.execute(
         "SELECT payload FROM events WHERE task_id = ? "
-        "AND event IN ('queued', 'started') ORDER BY id ASC",
+        "AND event = 'started' ORDER BY id ASC",
         (task_id,),
     ).fetchall()
     for row in rows:
@@ -509,116 +401,6 @@ def _run_options(conn, task_id: str) -> dict:
                 options[key] = payload[key]
     return options
 
-
-def run_queued(workspace: str, task_id: str) -> str:
-    """Advance ONE existing ``queued`` row: ``queued -> running -> ...``.
-
-    THE population point `taskproof queue` is built on, and the same entry the
-    manual "fire now" button (card 23) calls to jump a single card out of its
-    wave. It mints NO new id: the row named by ``task_id`` is the very row that
-    ends up running (and terminal), so a queued card keeps its id, its
-    ``queue_seq`` and its place in history.
-
-    Differences from ``dispatch(start=True)``:
-      * the project / brief / adapter / model / reasoning come from the stored
-        row, not from arguments (the `queued` event carries the run flags);
-      * a refusal by the concurrency gate (``ConcurrencyError``, exit 75) leaves
-        the row ``queued`` and unchanged — the queue retries it on a later tick
-        instead of dropping or duplicating it.
-
-    Raises ``TaskNotFoundError`` (no such row) or ``TaskStateError`` (the row is
-    not ``queued``); an attempt that starts raises whatever ``_execute`` raises
-    (the row is still recorded terminal in that case). Returns ``task_id``.
-    """
-    prepare_workspace(workspace)
-    conn = storage.connect(storage.db_path(workspace))
-    try:
-        storage.migrate(conn)
-        row = storage.get_task(conn, task_id)
-        if row is None:
-            raise TaskNotFoundError(f"no such task: {task_id}")
-        if row["status"] != STATUS_QUEUED:
-            raise TaskStateError(
-                f"task {task_id} is {row['status']}; only a queued task can be advanced"
-            )
-
-        reg = registry.load(registry.workspace_registry_path(workspace))
-        project = reg.require(row["project"])
-        options = _queued_options(conn, task_id)
-        effective_timeout = (
-            options.get("timeout") if options.get("timeout") is not None else reg.timeout
-        )
-        # A `--cap` the card was parked with takes effect *now*, when it leaves
-        # the queue: a parked card holds no slot, so the override belongs to the
-        # advance, not the park (card 42, Q1/`--park` semantics).
-        setting = concurrency.resolve(reg.defaults, options.get("cap"))
-        # Resolve the adapter the row was parked with, before any claim exists.
-        adapter_obj = get_adapter(
-            row["adapter"],
-            model=row["model"],
-            reasoning=row["reasoning"],
-            timeout=effective_timeout,
-        )
-
-        # 3. Claim the slot BEFORE flipping the row, so a refusal (exit 75)
-        # leaves it exactly as the queue found it: `queued`, same seq, no pid.
-        ttl = max(1, int(effective_timeout)) + 60
-        try:
-            scopes = concurrency.acquire(
-                conn, task_id, project.group, cap=setting.value, ttl=ttl
-            )
-        except ConcurrencyError as exc:
-            raise _park_aware_refusal(exc, setting) from None
-        try:
-            # 4. queued -> running, SAME id. Only status / pid / started_at are
-            # rewritten; brief, queue_seq and created_at are left untouched.
-            storage.update_task(
-                conn,
-                task_id,
-                status=STATUS_RUNNING,
-                pid=os.getpid(),
-                started_at=storage.now_iso(),
-            )
-            storage.append_event(
-                conn,
-                task_id,
-                "started",
-                {
-                    "project": project.id,
-                    "group": project.group,
-                    "adapter": row["adapter"],
-                    "read_only": bool(options.get("read_only")),
-                    "worktree": bool(options.get("worktree")),
-                    "skip_verify": bool(options.get("skip_verify")),
-                    "queue_seq": row["queue_seq"],
-                    # Distinguishes "left the queue" from a task that was born
-                    # running via `dispatch(start=True)`.
-                    "advanced": True,
-                    # The effective global cap *and its source* at advance time
-                    # (card 42). A cap recorded on the `queued` event rides
-                    # through here as source `cli`.
-                    "cap": setting.value,
-                    "cap_source": setting.source,
-                },
-            )
-            _execute_claimed(
-                conn,
-                task_id=task_id,
-                project=project,
-                adapter_obj=adapter_obj,
-                adapter_name=row["adapter"],
-                brief=row["brief"],
-                workspace=workspace,
-                read_only=bool(options.get("read_only")),
-                worktree=bool(options.get("worktree")),
-                skip_verify=bool(options.get("skip_verify")),
-                timeout=effective_timeout,
-            )
-            return task_id
-        finally:
-            concurrency.release(conn, scopes)
-    finally:
-        conn.close()
 
 
 def _execute(
@@ -908,6 +690,15 @@ def _execute(
         ran = False
         note = skip_reason
     else:
+        # ⑦a Flip the card to `verifying` for the whole acceptance window, before
+        # the command starts. Acceptance can run for seconds to minutes and the
+        # phase has to be visible while it does; writing it before
+        # `run_acceptance` also means a spawn failure or a hung check is still
+        # recorded as `verifying` rather than a stale `running`.
+        storage.update_task(conn, task_id, status=STATUS_VERIFYING)
+        storage.append_event(
+            conn, task_id, "verifying", {"command": project.verify}
+        )
         outcome = verify.run_acceptance(
             run_dir, project.verify, timeout=timeout
         )
@@ -1481,7 +1272,7 @@ def task_detail(workspace: str, task_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Control: cancel / remove / queue_seq
+# Control: cancel / remove
 # ---------------------------------------------------------------------------
 
 
@@ -1489,7 +1280,7 @@ def cancel_task(workspace: str, task_id: str) -> dict:
     """Stop a task and record the terminal state `cancelled`.
 
     * `running` / `verifying`: signal the recorded process group (SIGTERM, then
-      SIGKILL after a grace period). `queued`: nothing to kill, just record.
+      SIGKILL after a grace period).
     * The workdir is NEVER touched — matching "a failed dispatch does not roll
       back its workspace".
     * A task already in a terminal state is a readable error, never a silent
@@ -1508,7 +1299,7 @@ def cancel_task(workspace: str, task_id: str) -> dict:
             raise TaskStateError(
                 f"task {task_id} is already {status}; nothing to cancel"
             )
-        if status not in (STATUS_QUEUED, STATUS_RUNNING, STATUS_VERIFYING):
+        if status not in (STATUS_RUNNING, STATUS_VERIFYING):
             raise TaskStateError(
                 f"task {task_id} cannot be cancelled from state {status}"
             )
@@ -1635,7 +1426,7 @@ def accept_task(
     a human judged the recorded failure a false red, and that judgement is kept
     in the `accepted` event alongside the evidence the human saw.
 
-    Every other status (queued / running / verifying / done / timeout /
+    Every other status (running / verifying / done / timeout /
     cancelled) is refused with a readable `TaskStateError`, so `accept` can never
     silently re-close a card. The card's `verify_*` columns and `finished_at` are
     left untouched — the run's own facts do not change because a human later
@@ -1720,9 +1511,8 @@ def rerun_task(workspace: str, task_id: str) -> str:
 
     Only a terminal card may be rerun, `blocked` included; a non-terminal card
     is refused so two attempts of the same work can never overlap. The new card
-    goes down the normal ``dispatch(start=True)`` path (never queued, never a
-    wave) and gets ``rerun_of`` while the old card gets ``rerun_as``. Returns
-    the new task id.
+    goes down the normal ``dispatch`` path and gets ``rerun_of`` while the old
+    card gets ``rerun_as``. Returns the new task id.
     """
     conn = storage.connect(storage.db_path(workspace))
     try:
@@ -1751,7 +1541,6 @@ def rerun_task(workspace: str, task_id: str) -> str:
         worktree=bool(options.get("worktree")),
         skip_verify=bool(options.get("skip_verify")),
         timeout=options.get("timeout"),
-        start=True,
         rerun_of=task_id,
     )
 
@@ -1824,30 +1613,6 @@ def remove_task(workspace: str, task_id: str) -> str:
     finally:
         conn.close()
 
-
-def set_queue_seq(workspace: str, task_id: str, queue_seq) -> dict:
-    """Set the explicit queue order of a task that is still `queued`.
-
-    Field-level maintenance, not a fourth action: same discipline as a registry
-    PATCH. Editing the order of a task that already left the queue is refused so
-    a stale UI cannot reorder history. Returns the updated task row.
-    """
-    conn = storage.connect(storage.db_path(workspace))
-    try:
-        storage.migrate(conn)
-        row = storage.get_task(conn, task_id)
-        if row is None:
-            raise TaskNotFoundError(f"no such task: {task_id}")
-        if row["status"] != STATUS_QUEUED:
-            raise TaskStateError(
-                f"task {task_id} is {row['status']}; "
-                "queue_seq is only editable while queued"
-            )
-        storage.update_task(conn, task_id, queue_seq=queue_seq)
-        storage.append_event(conn, task_id, "queue_seq", {"queue_seq": queue_seq})
-        return dict(storage.get_task(conn, task_id))
-    finally:
-        conn.close()
 
 
 def summary_counts(workspace: str, conn) -> dict:

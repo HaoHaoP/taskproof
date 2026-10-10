@@ -8,7 +8,6 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional
 
 # Task lifecycle. Terminal states: DONE, FAILED, BLOCKED, TIMEOUT, CANCELLED.
-STATUS_QUEUED = "queued"
 STATUS_RUNNING = "running"
 STATUS_VERIFYING = "verifying"
 STATUS_DONE = "done"
@@ -52,7 +51,7 @@ class Task:
     project: str
     group: str
     brief: str
-    status: str = STATUS_QUEUED
+    status: str = STATUS_RUNNING
     adapter: str = "codex"
     model: Optional[str] = None
     reasoning: Optional[str] = None
@@ -64,9 +63,6 @@ class Task:
     #: session/group, not the dispatching process' group). `cancel` signals
     #: exactly this group.
     pgid: Optional[int] = None
-    #: Explicit queue order for a `queued` task. NULL for a task that was never
-    #: parked; same number = same wave (see control-plane design, section 3).
-    queue_seq: Optional[int] = None
     workdir: Optional[str] = None
     result_path: Optional[str] = None
     verify_cmd: Optional[str] = None

@@ -91,7 +91,7 @@ tasks
   project       TEXT        注册表 id
   group         TEXT        并发分组
   brief         TEXT        任务描述
-  status        TEXT        queued|running|verifying|done|failed|blocked|timeout|cancelled
+  status        TEXT        running|verifying|done|failed|blocked|timeout|cancelled
   adapter       TEXT        codex|claude|gemini|opencode|custom:<cmd>
   model         TEXT
   reasoning     TEXT
@@ -99,7 +99,6 @@ tasks
   exit_code     INTEGER
   pid           INTEGER
   pgid          INTEGER     适配器自成一组，cancel 就定位这个 pgid
-  queue_seq     INTEGER     显式队列序号（仅 queued 可写）
   workdir       TEXT
   result_path   TEXT
   verify_cmd    TEXT
@@ -151,8 +150,8 @@ claims                          -- 并发守卫，带过期回收
               其它所有字节；doctor 与只读 API 暴露同样的 {value, source, detail}。
 硬超时        默认 1800 秒；超时判定卡死，只杀【该任务】的进程
 越限行为      被拒的派发退出 75（同组占用 / 全局上限）；
-              全局上限的拒绝带上生效值、来源与三条出路 —— 等空位（--park 排队）
-              ／临时抬高（run --cap N）／改配置（taskproof config --concurrency N）；
+              全局上限的拒绝带上生效值、来源与出路 ——
+              临时抬高（run --cap N）／改配置（taskproof config --concurrency N）；
               同组拒绝不套这段：它只是"谁能跑"，不是容量。
 不追溯        改值不动任何在跑的卡；改小到低于在跑数时打印这些卡与已跑时长，
               一个进程都不杀。
@@ -164,7 +163,6 @@ claims                          -- 并发守卫，带过期回收
 任务的 `status` 记录这次运行**是什么**，终态则说明它为什么停下。
 
 ```
-queued                    已入队，等待推进
 running / verifying       适配器在跑，随后验收在跑
 done                      验收通过（或被记成 SKIPPED，绝不记成"通过"）
 failed                    适配器失败，或验收跑了且没过
@@ -179,7 +177,7 @@ cancelled                 被人主动停掉
 事实都进账本 —— `forbidden` 事件带着越界路径，`verify` 事件带着真实结果。越界优先
 于验收红：无论验收什么结果，卡都是 `blocked`，由 `verify_exit` 告诉人活本身好不好。
 
-因为 `blocked` 是终态，队列不推进它，`cancel` 拒绝它（没有进程可杀），`rm` 像对待
+因为 `blocked` 是终态，`cancel` 拒绝它（没有进程可杀），`rm` 像对待
 其它终态一样删掉它。放行一张 `blocked` 卡是人的决定，走层3 的 `accept <id>`；
 调度管线绝不自动把它升成 `done`。`accept` 是人的**登记**、不是判据：它绝不重跑验收，
 也绝不改写 `verify_*`。作用在 `blocked` 上时它判决的是**越界**、不是活本身：验收绿才判
@@ -268,15 +266,12 @@ taskproof projects                      列已登记项目
 taskproof run <project|path> "<brief>"  派活（主命令）
           [--adapter X] [--model X] [--reasoning X]
           [--read-only] [--worktree] [--no-verify] [--timeout N]
-          [--park[=N]]  只入队、先不发车；不写号=追尾，=N 指定波次
 taskproof tasks [--status S] [--project P] [--limit N]
 taskproof show <task-id>                单任务详情
 taskproof log <task-id>                 事件流
 taskproof verify <task-id>              复跑验收（只更新事实，不动终态）
 taskproof accept <task-id> [--note T]   放行 blocked 或 failed 卡（failed 必带 --note）
 taskproof rerun <task-id>               从终态卡起一张新卡，并在账本里双向关联
-taskproof advance <task-id>             立刻发车：把一张排队卡单独越过波次推出去
-taskproof queue                          常驻守护进程：无人值守连推波次（阻塞）
 taskproof cancel <task-id>              停任务（对自己那棵进程树 SIGTERM→SIGKILL）
 taskproof rm <task-id>                  删除终态任务的记录、事件与保留的 worktree
 taskproof board [--open | --serve PORT | --out FILE]
@@ -289,25 +284,6 @@ taskproof gc                            归档与轮转
 （`<仓库父目录>/<仓库名>-wt-<任务id>`）。跑完干净就删除；若仍留有改动则保留，打印
 `worktree kept: ... (N files changed)`，追加一条 `worktree` 事件，之后由
 `taskproof rm <任务id>` 删除。
-
-`--park[=N]` 是队列的 CLI 入口：它只写一行 `queued` 记录（`status` 为
-`queued`，带一个显式 `queue_seq`）后立刻返回 —— 不占并发槽、不起适配器。
-`--park` 不带号是**追尾**：波次 = `max(queue_seq) + 1`；`--park=N` 显式钉在
-第 `N` 波。`queue_seq` 相同的卡属于**同一波**，只有所有更低编号的波全部排空，
-某一波才推进。运行开关（`--worktree`、`--read-only`、`--no-verify`、
-`--timeout`、`--model`、`--reasoning`）存进那张排队行，等它被推进时才生效。
-不带 `--park` 的 `run` 保持老的同步行为：立即发车。
-
-**谁推进队列 —— 两条路，各有取舍：**
-
-* `taskproof queue` —— 常驻守护进程，无人值守地把当前波次往前推；同组被拒的卡
-  （停在 `queued`、绝不丢弃）下一拍重试。省心，但它会在前一张还没提交时就开始
-  下一张，两张卡的 diff 会糊在一起。
-* `taskproof advance <id>` —— 人工一张一张地发；这样保住**逐卡提交边界**，下一张
-  只在操作者说发时才动。
-
-同一波内，同 group 互斥照旧生效：只跑一张，另一张被拒（exit 75）后**落回
-`queued` 不丢**，由守护进程或之后的 `advance` 接着推。
 
 人类可读输出跟随 locale；`--json` 给机器读。
 
@@ -346,7 +322,7 @@ taskproof api --port 0 --allow-write
 ```
 
 **矩阵列模型。** 列表示*任务走到了流水线的哪一步*；任务没通过的原因属于卡片
-自身的属性，不是一个阶段。所以看板是五列 —— 排队、进行中、验收中、完成、
+自身的属性，不是一个阶段。所以看板是四列 —— 进行中、验收中、完成、
 未通过 —— 最后一列收纳全部异常终态（`failed`、`blocked`、`timeout`、
 `cancelled`），各自保留自己的颜色与字形。
 

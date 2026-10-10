@@ -33,7 +33,6 @@ from taskproof.dispatch import (
     dispatch,
     prepare_workspace,
     remove_task,
-    run_queued,
     summary_counts,
     task_detail,
 )
@@ -44,6 +43,7 @@ from taskproof.models import (
     STATUS_FAILED,
     STATUS_RUNNING,
     STATUS_TIMEOUT,
+    STATUS_VERIFYING,
     TERMINAL_STATUSES,
 )
 
@@ -1013,38 +1013,41 @@ class WorktreeTest(DispatchBase):
         self._git_repo()
         self.write_registry(verify="exit 0")
 
-        # Park first so the id is known before the worker starts; `run_queued`
-        # then advances the SAME row (the queued event carries worktree=True).
-        task_id = dispatch(
-            self.ws, "proj", "x", start=False, worktree=True,
-            adapter="custom:sh -c 'sleep 1.5; echo done'",
-        )
-        worker = threading.Thread(
-            target=run_queued, args=(self.ws, task_id)
-        )
+        result = {}
+
+        def _run():
+            result["task_id"] = dispatch(
+                self.ws, "proj", "x", worktree=True,
+                adapter="custom:sh -c 'sleep 1.5; echo done'",
+            )
+
+        worker = threading.Thread(target=_run)
         worker.start()
         try:
+            # The id is minted inside dispatch, so discover it from the row the
+            # run is writing: wait for a running row that already carries its
+            # workdir (the status insert and the workdir update are not atomic,
+            # so `running` alone can be observed a beat before the path).
             deadline = time.monotonic() + 20.0
             row = None
             while time.monotonic() < deadline:
                 conn = self.open_conn()
                 try:
-                    candidate = storage.get_task(conn, task_id)
-                    # Wait for the row to be running AND carry a workdir: the
-                    # two writes (status flip, then workdir) are not atomic, so
-                    # `running` alone can be observed a beat before the path.
-                    if (
-                        candidate is not None
-                        and candidate["status"] == STATUS_RUNNING
-                        and candidate["workdir"]
-                    ):
-                        row = dict(candidate)
-                        break
+                    candidates = storage.list_tasks(
+                        conn, status=STATUS_RUNNING, limit=5
+                    )
                 finally:
                     conn.close()
+                for candidate in candidates:
+                    if candidate["workdir"]:
+                        row = dict(candidate)
+                        break
+                if row is not None:
+                    break
                 time.sleep(0.05)
             self.assertIsNotNone(row, "no running row observed for the worktree run")
 
+            task_id = row["id"]
             expected = os.path.join(self.tmp, f"project-wt-{task_id}")
             # The recorded workdir is the checkout, provably not the main tree.
             self.assertEqual(row["workdir"], expected)
@@ -1053,6 +1056,7 @@ class WorktreeTest(DispatchBase):
         finally:
             worker.join(timeout=30)
         self.assertFalse(worker.is_alive())
+        self.assertEqual(result.get("task_id"), task_id)
         self.assertEqual(
             task_detail(self.ws, task_id)["task"]["status"], STATUS_DONE
         )
@@ -1072,6 +1076,65 @@ class WorktreeTest(DispatchBase):
             dispatch(self.ws, "proj", "x", worktree=True,
                      adapter="custom:sh -c 'echo hello'")
         self.assertEqual(self.active_claims(), 0)
+
+
+class VerifyingLifecycleTest(DispatchBase):
+    """The acceptance window is a real, observable ``verifying`` state.
+
+    The evidence is a *real* run: a ``custom:`` adapter finishes quickly, then a
+    slow acceptance command holds the card in ``verifying`` long enough to catch
+    it in the database. No hand-built ``Task(status="verifying")`` is involved --
+    the point is that ``dispatch`` itself persists the state.
+    """
+
+    def test_acceptance_window_persists_verifying_then_done(self):
+        self.write_registry(verify="sh -c 'sleep 1.5; echo ok'")
+
+        result = {}
+
+        def _run():
+            result["task_id"] = dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter="custom:sh -c 'sleep 0.2; echo done'",
+            )
+
+        worker = threading.Thread(target=_run)
+        worker.start()
+        task_id = None
+        seen_verifying = False
+        deadline = time.monotonic() + 30.0
+        try:
+            while time.monotonic() < deadline:
+                conn = self.open_conn()
+                try:
+                    rows = {
+                        r["id"]: r["status"]
+                        for r in storage.list_tasks(conn, limit=10)
+                    }
+                finally:
+                    conn.close()
+                if task_id is None:
+                    for candidate_id in rows:
+                        task_id = candidate_id
+                        break
+                if task_id is not None and rows.get(task_id) == STATUS_VERIFYING:
+                    seen_verifying = True
+                    break
+                if task_id is not None and rows.get(task_id) in TERMINAL_STATUSES:
+                    break
+                time.sleep(0.02)
+        finally:
+            worker.join(timeout=30)
+
+        self.assertFalse(worker.is_alive())
+        self.assertIsNotNone(task_id, "no task row observed for the run")
+        self.assertTrue(seen_verifying, "never observed the card in `verifying`")
+        detail = task_detail(self.ws, task_id)
+        self.assertEqual(detail["task"]["status"], STATUS_DONE)
+        events = [e["event"] for e in detail["events"]]
+        self.assertIn("verifying", events)
 
 
 class ShapesTest(DispatchBase):
@@ -1105,7 +1168,6 @@ class ShapesTest(DispatchBase):
 
         self.assertEqual(counts["done"], 1)
         self.assertEqual(counts["failed"], 0)
-        self.assertIn("queued", counts)
         self.assertIn("running", counts)
         self.assertIn("timeout", counts)
         for value in counts.values():

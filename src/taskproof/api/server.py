@@ -15,17 +15,13 @@ Security choices (deliberate, and the whole reason this module exists):
   to other processes under the same macOS account via ``ps``; a stdout pipe has
   only the parent as reader.
 * The write surface has two families sharing one gate: registry create / edit /
-  delete, and task control. Task control is five action semantics —
-  ``POST /api/tasks`` (dispatch, or ``start=false`` to park a queued row),
-  ``POST /api/tasks/<id>/advance`` (fire ONE queued card now, out of its wave,
-  via ``dispatch.run_queued``), ``POST /api/tasks/<id>/accept`` (clear a
-  ``blocked`` card: ``done`` when its acceptance passed, else ``failed``; also
+  delete, and task control. Task control is four action semantics —
+  ``POST /api/tasks`` (dispatch and run), ``POST /api/tasks/<id>/accept`` (clear
+  a ``blocked`` card: ``done`` when its acceptance passed, else ``failed``; also
   clear a ``failed`` card to ``done`` with a required ``{"note": "…"}`` body,
-  each recorded as one ``accepted`` event), ``POST /api/tasks/<id>/cancel`` (SIGTERM
-  -> SIGKILL the task's own process group, or drop a queued card), and
-  ``DELETE /api/tasks/<id>`` (terminal only). Reordering a queued card is field
-  maintenance, not a sixth action: ``PATCH /api/tasks/<id>`` accepts only
-  ``queue_seq``.
+  each recorded as one ``accepted`` event),
+  ``POST /api/tasks/<id>/cancel`` (SIGTERM -> SIGKILL the task's own process
+  group), and ``DELETE /api/tasks/<id>`` (terminal only).
 * CORS is narrow on purpose. The browser renderer is never same-origin with
   this API: the dev renderer is a Vite dev server, and a packaged renderer is a
   ``file://`` page whose Origin is the literal string ``null``. Responses echo
@@ -88,8 +84,8 @@ _PATCH_FIELDS = {
     "forbidden_paths",
     "result_schema",
 }
-#: Body of `POST /api/tasks`. `start` names the two exits of the dispatch form
-#: (fire now vs park queued); everything else mirrors `dispatch()`.
+#: Body of `POST /api/tasks`. Every field mirrors `dispatch()`; a create always
+#: runs.
 _TASK_CREATE_FIELDS = {
     "project",
     "brief",
@@ -100,8 +96,6 @@ _TASK_CREATE_FIELDS = {
     "worktree",
     "skip_verify",
     "timeout",
-    "start",
-    "queue_seq",
 }
 
 #: The origins the desktop renderer may legitimately present, and nothing else.
@@ -471,8 +465,7 @@ class _Handler(BaseHTTPRequestHandler):
         except ConcurrencyError as exc:
             # Same-group serialisation or the global cap refused the spawn: the
             # caller should retry, not fix its request. 429, and the body says
-            # which limit bit (see _concurrency_payload). An `advance` leaves the
-            # queued row untouched, so retrying it later is safe.
+            # which limit bit (see _concurrency_payload).
             status, payload = 429, _concurrency_payload(exc)
         except RegistryError as exc:
             status, payload = 400, {"error": str(exc)}
@@ -501,13 +494,6 @@ class _Handler(BaseHTTPRequestHandler):
                 if not task_id or "/" in task_id:
                     return 404, {"error": "not found", "path": parsed.path}
                 return self._cancel_task(task_id)
-            if path.startswith("/api/tasks/") and path.endswith("/advance"):
-                task_id = unquote(
-                    path[len("/api/tasks/"):-len("/advance")]
-                )
-                if not task_id or "/" in task_id:
-                    return 404, {"error": "not found", "path": parsed.path}
-                return self._advance_task(task_id)
             if path.startswith("/api/tasks/") and path.endswith("/accept"):
                 task_id = unquote(
                     path[len("/api/tasks/"):-len("/accept")]
@@ -530,8 +516,6 @@ class _Handler(BaseHTTPRequestHandler):
             task_id = unquote(path[len("/api/tasks/"):])
             if not task_id or "/" in task_id:
                 return 404, {"error": "not found", "path": parsed.path}
-            if method == "PATCH":
-                return self._patch_task(task_id, self._body())
             if method == "DELETE":
                 return self._delete_task(task_id)
 
@@ -668,14 +652,6 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(brief, str) or not brief.strip():
             raise RegistryError("brief is required")
 
-        start = body.get("start", True)
-        if not isinstance(start, bool):
-            raise RegistryError("start must be a boolean")
-        queue_seq = body.get("queue_seq")
-        if queue_seq is not None and (
-            isinstance(queue_seq, bool) or not isinstance(queue_seq, int)
-        ):
-            raise RegistryError("queue_seq must be an integer")
         timeout = body.get("timeout")
         if timeout is not None and (
             isinstance(timeout, bool) or not isinstance(timeout, int)
@@ -693,17 +669,8 @@ class _Handler(BaseHTTPRequestHandler):
             worktree=bool(body.get("worktree", False)),
             skip_verify=bool(body.get("skip_verify", False)),
             timeout=timeout,
-            start=start,
-            queue_seq=queue_seq,
         )
         return 201, {"task": self._task_record(task_id)}
-
-    def _advance_task(self, task_id):
-        # Fire ONE queued row now, out of its wave. ``run_queued`` keeps the id
-        # and queue_seq; a concurrency refusal (exit 75) surfaces as 429 in
-        # ``_write_request`` and leaves the row queued.
-        dispatch.run_queued(self.workspace, task_id)
-        return 200, {"task": self._task_record(task_id)}
 
     def _accept_task(self, task_id, body=None):
         # The same human disposition as `taskproof accept <id>`; the audit event
@@ -729,23 +696,6 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _delete_task(self, task_id):
         return 200, {"removed": dispatch.remove_task(self.workspace, task_id)}
-
-    def _patch_task(self, task_id, body):
-        # Field maintenance, not an action: queue_seq is the only editable field.
-        unknown = set(body) - {"queue_seq"}
-        if unknown:
-            raise RegistryError(
-                f"unsupported field(s): {', '.join(sorted(unknown))}"
-            )
-        if "queue_seq" not in body:
-            raise RegistryError("queue_seq is required")
-        queue_seq = body["queue_seq"]
-        if queue_seq is not None and (
-            isinstance(queue_seq, bool) or not isinstance(queue_seq, int)
-        ):
-            raise RegistryError("queue_seq must be an integer")
-        task = dispatch.set_queue_seq(self.workspace, task_id, queue_seq)
-        return 200, {"task": task}
 
     def _task_record(self, task_id):
         detail = dispatch.task_detail(self.workspace, task_id)
@@ -844,7 +794,7 @@ class _Handler(BaseHTTPRequestHandler):
             return 404, {"error": "not found", "path": self.path}
 
         # A missing task is a 404; a missing *log file* on a real task is a
-        # normal empty tail (queued, or a task that never produced output).
+        # normal empty tail (a task that never produced output).
         detail = dispatch.task_detail(self.workspace, task_id)
         if detail.get("task") is None:
             return 404, {"error": "no such task", "task_id": task_id}

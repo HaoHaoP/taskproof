@@ -1,5 +1,5 @@
-"""Task control surface: pid/pgid identity, cancel/rm, queued + queue_seq,
-schema migration, and the three write endpoints.
+"""Task control surface: pid/pgid identity, cancel/rm, schema migration, and
+the task/project write endpoints.
 
 Everything here runs harmless ``custom:`` adapters in a throwaway workspace
 under a TemporaryDirectory: no real agent is invoked and nothing reaches the
@@ -26,7 +26,6 @@ from taskproof.api import server
 from taskproof.models import (
     STATUS_CANCELLED,
     STATUS_DONE,
-    STATUS_QUEUED,
     STATUS_RUNNING,
     Task,
 )
@@ -96,10 +95,32 @@ class _WorkspaceCase(unittest.TestCase):
         storage.migrate(conn)
         return conn
 
-    def park(self, brief="later", *, queue_seq=None, adapter="custom:echo hi"):
-        return dispatch.dispatch(
-            self.ws, "proj", brief, adapter=adapter, start=False, queue_seq=queue_seq
-        )
+    def non_terminal(self, brief="later", *, adapter="custom:echo hi",
+                     task_id="t-20261010-900"):
+        """Land a non-terminal (running) row directly.
+
+        The queue is gone, so no dispatch path leaves a card non-terminal
+        without a live process; tests that only need "a cancellable row"
+        write one straight to the table.
+        """
+        conn = self.open_conn()
+        try:
+            storage.insert_task(
+                conn,
+                Task(
+                    id=task_id,
+                    project="proj",
+                    group="proj",
+                    brief=brief,
+                    status=STATUS_RUNNING,
+                    adapter=adapter,
+                    created_at=storage.now_iso(),
+                    started_at=storage.now_iso(),
+                ),
+            )
+        finally:
+            conn.close()
+        return task_id
 
 
 # ---------------------------------------------------------------------------
@@ -218,63 +239,12 @@ class MigrationTest(unittest.TestCase):
 
 
 class ColumnRegistrationTest(unittest.TestCase):
-    def test_columns_are_registered_for_crud(self):
-        for name in ("pgid", "queue_seq"):
-            self.assertIn(name, storage.TASK_COLUMNS)
+    def test_pgid_column_is_registered_for_crud(self):
+        self.assertIn("pgid", storage.TASK_COLUMNS)
 
-    def test_model_carries_the_new_fields(self):
-        task = Task(id="t", project="p", group="g", brief="b", pgid=7, queue_seq=3)
+    def test_model_carries_pgid(self):
+        task = Task(id="t", project="p", group="g", brief="b", pgid=7)
         self.assertEqual(task.pgid, 7)
-        self.assertEqual(task.queue_seq, 3)
-
-
-# ---------------------------------------------------------------------------
-# queued rows + queue_seq
-# ---------------------------------------------------------------------------
-
-
-class QueuedDispatchTest(_WorkspaceCase):
-    def test_start_false_parks_a_queued_row_with_seq_and_no_process(self):
-        task_id = self.park(queue_seq=5)
-        task = dispatch.task_detail(self.ws, task_id)["task"]
-        self.assertEqual(task["status"], STATUS_QUEUED)
-        self.assertEqual(task["queue_seq"], 5)
-        self.assertIsNone(task["pid"])
-        self.assertIsNone(task["pgid"])
-        self.assertFalse(task["started_at"])
-
-        events = [e["event"] for e in dispatch.task_detail(self.ws, task_id)["events"]]
-        self.assertIn("queued", events)
-        self.assertNotIn("started", events)
-
-    def test_queued_row_is_visible_to_cli_tasks(self):
-        task_id = self.park("parked by cli", queue_seq=2)
-        out = io.StringIO()
-        err = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = cli.main(["--workspace", self.ws, "--json", "tasks"])
-        self.assertEqual(code, 0, err.getvalue())
-        listed = json.loads(out.getvalue())["tasks"]
-        entry = next(t for t in listed if t["id"] == task_id)
-        self.assertEqual(entry["status"], STATUS_QUEUED)
-        self.assertEqual(entry["queue_seq"], 2)
-
-    def test_set_queue_seq_edits_a_queued_row(self):
-        task_id = self.park(queue_seq=1)
-        updated = dispatch.set_queue_seq(self.ws, task_id, 9)
-        self.assertEqual(updated["queue_seq"], 9)
-        events = [e["event"] for e in dispatch.task_detail(self.ws, task_id)["events"]]
-        self.assertIn("queue_seq", events)
-
-    def test_set_queue_seq_refuses_a_non_queued_row(self):
-        task_id = self.park(queue_seq=1)
-        dispatch.cancel_task(self.ws, task_id)
-        with self.assertRaises(dispatch.TaskStateError):
-            dispatch.set_queue_seq(self.ws, task_id, 4)
-
-    def test_set_queue_seq_unknown_id(self):
-        with self.assertRaises(dispatch.TaskNotFoundError):
-            dispatch.set_queue_seq(self.ws, "t-nope", 1)
 
 
 # ---------------------------------------------------------------------------
@@ -282,9 +252,9 @@ class QueuedDispatchTest(_WorkspaceCase):
 # ---------------------------------------------------------------------------
 
 
-class CancelQueuedTest(_WorkspaceCase):
-    def test_cancel_queued_records_terminal_state_and_event(self):
-        task_id = self.park(queue_seq=1)
+class CancelNonTerminalTest(_WorkspaceCase):
+    def test_cancel_non_terminal_records_terminal_state_and_event(self):
+        task_id = self.non_terminal()
         out = dispatch.cancel_task(self.ws, task_id)
         self.assertEqual(out["status"], STATUS_CANCELLED)
         self.assertTrue(out["finished_at"])
@@ -292,7 +262,7 @@ class CancelQueuedTest(_WorkspaceCase):
         self.assertIn("cancelled", events)
 
     def test_cancel_terminal_is_a_readable_error(self):
-        task_id = self.park(queue_seq=1)
+        task_id = self.non_terminal()
         dispatch.cancel_task(self.ws, task_id)
         with self.assertRaises(dispatch.TaskStateError) as ctx:
             dispatch.cancel_task(self.ws, task_id)
@@ -306,7 +276,7 @@ class CancelQueuedTest(_WorkspaceCase):
         marker = os.path.join(self.proj, "precious.txt")
         with open(marker, "w", encoding="utf-8") as fh:
             fh.write("keep me\n")
-        task_id = self.park(queue_seq=1)
+        task_id = self.non_terminal()
         dispatch.cancel_task(self.ws, task_id)
         with open(marker, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "keep me\n")
@@ -339,7 +309,7 @@ class RemoveTest(_WorkspaceCase):
             dispatch.remove_task(self.ws, "t-nope")
 
     def test_remove_terminal_deletes_task_and_events_but_keeps_audit_jsonl(self):
-        task_id = self.park("to be removed", queue_seq=1)
+        task_id = self.non_terminal("to be removed")
         dispatch.cancel_task(self.ws, task_id)
 
         conn = self.open_conn()
@@ -387,7 +357,7 @@ class CliControlTest(_WorkspaceCase):
         return code, out.getvalue(), err.getvalue()
 
     def test_cancel_and_rm_round_trip(self):
-        task_id = self.park(queue_seq=3)
+        task_id = self.non_terminal()
         code, out, err = self.run_cli("cancel", task_id)
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["status"], STATUS_CANCELLED)
@@ -400,35 +370,18 @@ class CliControlTest(_WorkspaceCase):
         self.assertEqual(code, 64)
 
     def test_cli_cancel_terminal_reports_usage_error(self):
-        task_id = self.park(queue_seq=3)
+        task_id = self.non_terminal()
         self.run_cli("cancel", task_id)
         code, _out, err = self.run_cli("cancel", task_id)
         self.assertEqual(code, 64)
         self.assertIn("already", err)
 
     def test_cli_rm_non_terminal_prints_cancel_hint(self):
-        task_id = self.park(queue_seq=3)
+        task_id = self.non_terminal()
         code, _out, err = self.run_cli("rm", task_id)
         self.assertEqual(code, 64)
         self.assertIn("cancel", err)
         self.assertIn(f"taskproof cancel {task_id}", err)
-
-    def test_cli_advance_fires_a_queued_card(self):
-        task_id = self.park(queue_seq=4)
-        code, out, err = self.run_cli("advance", task_id)
-        self.assertEqual(code, 0, err)
-        payload = json.loads(out)
-        self.assertEqual(payload["task_id"], task_id)
-        self.assertEqual(payload["status"], STATUS_DONE)
-        self.assertEqual(payload["task"]["queue_seq"], 4)
-
-    def test_cli_advance_non_queued_is_nonzero(self):
-        task_id = self.park(queue_seq=1)
-        self.assertEqual(self.run_cli("advance", task_id)[0], 0)
-        code, _out, err = self.run_cli("advance", task_id)
-        self.assertNotEqual(code, 0)
-        self.assertIn("only a queued task", err)
-
 
 # ---------------------------------------------------------------------------
 # Real process: cancel reaches the whole adapter tree
@@ -511,42 +464,14 @@ class CancelRealProcessTest(_WorkspaceCase):
         self.assertNotIn("timeout", events)
 
     def test_cancel_after_process_started_already_gone_is_safe(self):
-        # A queued cancel path with no process at all: must not raise on kill.
-        task_id = self.park("no process", queue_seq=1)
+        # A running row whose process is already gone: must not raise on kill.
+        task_id = self.non_terminal("no process")
         out = dispatch.cancel_task(self.ws, task_id)
         self.assertEqual(out["status"], STATUS_CANCELLED)
 
 
-class AdvanceRealProcessTest(_WorkspaceCase):
-    """`taskproof advance` as a real subprocess: the documented CLI door."""
-
-    def _run_cli(self, *argv, timeout=30):
-        return subprocess.run(
-            [sys.executable, "-m", "taskproof", "--workspace", self.ws, *argv],
-            env=_env(),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-
-    def test_advance_runs_a_queued_card_to_done(self):
-        task_id = self.park("advance me", queue_seq=9)
-        proc = self._run_cli("advance", task_id)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        detail = dispatch.task_detail(self.ws, task_id)
-        self.assertEqual(detail["task"]["status"], STATUS_DONE)
-        self.assertEqual(detail["task"]["queue_seq"], 9)
-
-    def test_advance_non_queued_exits_nonzero(self):
-        task_id = self.park("advance me", queue_seq=1)
-        self.assertEqual(self._run_cli("advance", task_id).returncode, 0)
-        proc = self._run_cli("advance", task_id)
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("only a queued task", proc.stderr)
-
-
 # ---------------------------------------------------------------------------
-# Write API: four action endpoints + PATCH, behind --allow-write + token
+# Write API: task/project mutations, behind --allow-write + token
 # ---------------------------------------------------------------------------
 
 _API_REGISTRY = (
@@ -612,28 +537,31 @@ class _TaskApiCase(unittest.TestCase):
             finally:
                 exc.close()
 
-    def _mk_queued(self, queue_seq=None):
-        body = {"project": "alpha", "brief": "park me", "start": False}
-        if queue_seq is not None:
-            body["queue_seq"] = queue_seq
-        status, payload = self._request("/api/tasks", method="POST", body=body)
-        self.assertEqual(status, 201, payload)
-        return payload["task"]["id"]
+    def _mk_running(self, project="alpha", *, brief="live card",
+                    task_id="t-20261010-901"):
+        """Land a non-terminal (running) row straight in the table.
 
-    def _park(self, project="alpha", *, brief="park me", queue_seq=None):
-        # A harmless custom: adapter, so ADVANCING it can never reach a real
-        # agent even though it runs the task end to end.
-        body = {
-            "project": project,
-            "brief": brief,
-            "adapter": "custom:echo hi",
-            "start": False,
-        }
-        if queue_seq is not None:
-            body["queue_seq"] = queue_seq
-        status, payload = self._request("/api/tasks", method="POST", body=body)
-        self.assertEqual(status, 201, payload)
-        return payload["task"]["id"]
+        With the queue gone, no endpoint leaves a card cancellable without a
+        live process; tests that only need "a non-terminal row to act on"
+        write one directly (committed, so the server thread sees it).
+        """
+        conn = self.open_conn()
+        try:
+            storage.insert_task(
+                conn,
+                Task(
+                    id=task_id,
+                    project=project,
+                    group=project,
+                    brief=brief,
+                    status=STATUS_RUNNING,
+                    created_at=storage.now_iso(),
+                    started_at=storage.now_iso(),
+                ),
+            )
+        finally:
+            conn.close()
+        return task_id
 
     def open_conn(self):
         conn = storage.connect(storage.db_path(self.ws))
@@ -670,9 +598,8 @@ class TaskWriteDisabledTest(_TaskApiCase):
     def test_all_task_writes_are_405(self):
         cases = [
             ("/api/tasks", "POST", {"project": "alpha", "brief": "x"}),
-            ("/api/tasks/t-1/advance", "POST", None),
             ("/api/tasks/t-1/cancel", "POST", None),
-            ("/api/tasks/t-1", "PATCH", {"queue_seq": 1}),
+            ("/api/tasks/t-1/accept", "POST", None),
             ("/api/tasks/t-1", "DELETE", None),
         ]
         for path, method, body in cases:
@@ -682,70 +609,20 @@ class TaskWriteDisabledTest(_TaskApiCase):
 
 
 class TaskWriteApiTest(_TaskApiCase):
-    # -- advance: fire ONE queued card now, out of its wave ---------------
-
-    def test_advance_fires_a_queued_card_keeping_id_and_queue_seq(self):
-        task_id = self._park("alpha", brief="fire me", queue_seq=6)
-        status, payload = self._request(f"/api/tasks/{task_id}/advance", method="POST")
-        self.assertEqual(status, 200, payload)
-        task = payload["task"]
-        self.assertEqual(task["id"], task_id)          # id unchanged
-        self.assertEqual(task["queue_seq"], 6)         # queue_seq unchanged
-        self.assertEqual(task["status"], STATUS_DONE)  # actually ran
-
-        # the same id / queue_seq are what the persisted row holds
-        row = self._row(task_id)
-        self.assertEqual(row["id"], task_id)
-        self.assertEqual(row["queue_seq"], 6)
-        self.assertEqual(row["status"], STATUS_DONE)
-
-    def test_advance_non_queued_is_409(self):
-        task_id = self._park("alpha")
-        self.assertEqual(
-            self._request(f"/api/tasks/{task_id}/advance", method="POST")[0], 200
-        )
-        status, payload = self._request(f"/api/tasks/{task_id}/advance", method="POST")
-        self.assertEqual(status, 409, payload)
-        self.assertIn("only a queued task", payload["error"])
-
-    def test_advance_unknown_id_is_404(self):
-        status, payload = self._request("/api/tasks/t-nope/advance", method="POST")
-        self.assertEqual(status, 404, payload)
-        self.assertIn("error", payload)
-
-    def test_advance_without_token_is_403(self):
-        task_id = self._park("alpha")
-        status, _payload = self._request(
-            f"/api/tasks/{task_id}/advance", method="POST", token=None
-        )
-        self.assertEqual(status, 403)
-
-    def test_advance_group_busy_is_429_and_leaves_row_queued(self):
-        task_id = self._park("alpha", queue_seq=3)
-        # Pin the group: the card's own group is busy, so the spawn is refused.
-        self._hold("alpha", cap=3)
-        status, payload = self._request(f"/api/tasks/{task_id}/advance", method="POST")
-        self.assertEqual(status, 429, payload)
-        self.assertEqual(payload["reason"], "group")
-        self.assertIn("busy", payload["detail"])
-
-        # The refusal left the row exactly as it was: still queued, same seq.
-        row = self._row(task_id)
-        self.assertEqual(row["status"], STATUS_QUEUED)
-        self.assertEqual(row["queue_seq"], 3)
-
-
-    def test_create_queued_returns_201_visible_via_api(self):
+    def test_create_returns_201_visible_via_api(self):
         status, payload = self._request(
             "/api/tasks",
             method="POST",
-            body={"project": "alpha", "brief": "park me", "start": False, "queue_seq": 4},
+            body={
+                "project": "alpha",
+                "brief": "run now",
+                "adapter": "custom:echo hi",
+                "skip_verify": True,
+            },
         )
         self.assertEqual(status, 201)
         task = payload["task"]
-        self.assertEqual(task["status"], STATUS_QUEUED)
-        self.assertEqual(task["queue_seq"], 4)
-        self.assertIsNone(task["pid"])
+        self.assertEqual(task["status"], STATUS_DONE)
 
         status, listed = self._request("/api/tasks")
         self.assertEqual(status, 200)
@@ -768,15 +645,15 @@ class TaskWriteApiTest(_TaskApiCase):
         self.assertEqual(status, 200)
         self.assertEqual(detail["task"]["status"], STATUS_DONE)
 
-    def test_cancel_endpoint_marks_queued_cancelled(self):
-        task_id = self._mk_queued()
+    def test_cancel_endpoint_marks_running_cancelled(self):
+        task_id = self._mk_running()
         status, payload = self._request(f"/api/tasks/{task_id}/cancel", method="POST")
         self.assertEqual(status, 200)
         self.assertEqual(payload["task"]["status"], STATUS_CANCELLED)
         self.assertTrue(payload["task"]["finished_at"])
 
     def test_cancel_terminal_is_409(self):
-        task_id = self._mk_queued()
+        task_id = self._mk_running()
         self._request(f"/api/tasks/{task_id}/cancel", method="POST")
         status, payload = self._request(f"/api/tasks/{task_id}/cancel", method="POST")
         self.assertEqual(status, 409, payload)
@@ -787,12 +664,12 @@ class TaskWriteApiTest(_TaskApiCase):
         self.assertIn("error", payload)
 
     def test_delete_non_terminal_is_409(self):
-        task_id = self._mk_queued()
+        task_id = self._mk_running()
         status, payload = self._request(f"/api/tasks/{task_id}", method="DELETE")
         self.assertEqual(status, 409, payload)
 
     def test_delete_terminal_removes_task_and_its_events(self):
-        task_id = self._mk_queued()
+        task_id = self._mk_running()
         self._request(f"/api/tasks/{task_id}/cancel", method="POST")
         self.assertEqual(self._request(f"/api/tasks/{task_id}")[0], 200)
 
@@ -814,41 +691,11 @@ class TaskWriteApiTest(_TaskApiCase):
         status, payload = self._request("/api/tasks/t-nope", method="DELETE")
         self.assertEqual(status, 404)
 
-    def test_patch_edits_only_queue_seq(self):
-        task_id = self._mk_queued(queue_seq=1)
-        status, payload = self._request(
-            f"/api/tasks/{task_id}", method="PATCH", body={"queue_seq": 9}
-        )
-        self.assertEqual(status, 200)
-        self.assertEqual(payload["task"]["queue_seq"], 9)
-
-    def test_patch_rejects_any_other_field(self):
-        task_id = self._mk_queued(queue_seq=1)
-        status, payload = self._request(
-            f"/api/tasks/{task_id}", method="PATCH", body={"brief": "hijack"}
-        )
-        self.assertEqual(status, 400)
-        self.assertIn("error", payload)
-
-    def test_patch_non_queued_is_409(self):
-        task_id = self._mk_queued()
-        self._request(f"/api/tasks/{task_id}/cancel", method="POST")
-        status, payload = self._request(
-            f"/api/tasks/{task_id}", method="PATCH", body={"queue_seq": 2}
-        )
-        self.assertEqual(status, 409)
-
-    def test_patch_unknown_id_is_404(self):
-        status, payload = self._request(
-            "/api/tasks/t-nope", method="PATCH", body={"queue_seq": 1}
-        )
-        self.assertEqual(status, 404)
-
     def test_create_unknown_field_is_400(self):
         status, payload = self._request(
             "/api/tasks",
             method="POST",
-            body={"project": "alpha", "brief": "x", "start": False, "bogus": 1},
+            body={"project": "alpha", "brief": "x", "bogus": 1},
         )
         self.assertEqual(status, 400)
         self.assertIn("error", payload)
@@ -857,7 +704,7 @@ class TaskWriteApiTest(_TaskApiCase):
         status, payload = self._request(
             "/api/tasks",
             method="POST",
-            body={"project": "alpha", "brief": "x", "start": False},
+            body={"project": "alpha", "brief": "x"},
             token=None,
         )
         self.assertEqual(status, 403)
@@ -866,7 +713,7 @@ class TaskWriteApiTest(_TaskApiCase):
         status, payload = self._request(
             "/api/tasks",
             method="POST",
-            body={"project": "alpha", "brief": "x", "start": False},
+            body={"project": "alpha", "brief": "x"},
             token="not-the-token",
         )
         self.assertEqual(status, 403)
@@ -875,7 +722,12 @@ class TaskWriteApiTest(_TaskApiCase):
         status, payload = self._request(
             "/api/tasks",
             method="POST",
-            body={"project": "alpha", "brief": "x", "start": False},
+            body={
+                "project": "alpha",
+                "brief": "x",
+                "adapter": "custom:echo hi",
+                "skip_verify": True,
+            },
         )
         self.assertEqual(status, 201)
         self.assertNotIn(self.token, json.dumps(payload))
@@ -887,7 +739,7 @@ class TaskWriteApiTest(_TaskApiCase):
 
 
 # ---------------------------------------------------------------------------
-# advance: the 429 body must name WHICH limit bit (group vs global cap)
+# create: the 429 body must name WHICH limit bit (group vs global cap)
 # ---------------------------------------------------------------------------
 
 
@@ -926,23 +778,23 @@ class _CapOneApiCase(_TaskApiCase):
         self.thread.start()
 
 
-class AdvanceCapApiTest(_CapOneApiCase):
-    def test_advance_cap_full_is_429_naming_the_cap(self):
-        beta_id = self._park("beta", queue_seq=2)
-        # alpha holds the only global slot; beta's own group is still free.
+class CreateCapApiTest(_CapOneApiCase):
+    def test_create_cap_full_is_429_naming_the_cap(self):
+        # alpha holds the only global slot; beta's own group is still free,
+        # so the refusal must be about the GLOBAL cap, not the group.
         self._hold("alpha", cap=1)
-        status, payload = self._request(f"/api/tasks/{beta_id}/advance", method="POST")
+        status, payload = self._request(
+            "/api/tasks",
+            method="POST",
+            body={"project": "beta", "brief": "x", "adapter": "custom:echo hi"},
+        )
         self.assertEqual(status, 429, payload)
         self.assertEqual(payload["reason"], "cap")
         self.assertIn("global cap", payload["detail"])
 
-        row = self._row(beta_id)
-        self.assertEqual(row["status"], STATUS_QUEUED)
-        self.assertEqual(row["queue_seq"], 2)
-
 
 # ---------------------------------------------------------------------------
-# Card 41: a global-cap refusal points at --park; a group refusal does not
+# a global-cap refusal must name the remaining escape routes (no --park)
 # ---------------------------------------------------------------------------
 
 
@@ -995,7 +847,7 @@ class CapRefusalHintCliTest(unittest.TestCase):
     def _hold(self, group):
         return self._acquire(group, cap=1)
 
-    def test_global_cap_refusal_hint_names_park(self):
+    def test_global_cap_refusal_hint_names_escape_routes(self):
         release = self._hold("alpha")  # fills the only global slot
         try:
             proc = self._run("run", "beta", "brief", "--adapter", "custom:echo hi")
@@ -1003,7 +855,9 @@ class CapRefusalHintCliTest(unittest.TestCase):
             release()
         self.assertEqual(proc.returncode, 75, proc.stderr)
         self.assertIn("global cap", proc.stderr)
-        self.assertIn("--park", proc.stderr)
+        self.assertIn("run --cap", proc.stderr)
+        self.assertIn("taskproof config --concurrency", proc.stderr)
+        self.assertNotIn("--park", proc.stderr)
 
     def test_same_group_refusal_hint_does_not_name_park(self):
         release = self._hold("beta")  # beta's own group is busy
@@ -1015,7 +869,7 @@ class CapRefusalHintCliTest(unittest.TestCase):
         self.assertIn("group", proc.stderr)
         self.assertNotIn("--park", proc.stderr)
 
-    def test_global_cap_refusal_names_value_source_and_three_exits(self):
+    def test_global_cap_refusal_names_value_source_and_two_exits(self):
         release = self._hold("alpha")  # fills the only global slot
         try:
             proc = self._run("run", "beta", "brief", "--adapter", "custom:echo hi")
@@ -1024,9 +878,9 @@ class CapRefusalHintCliTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 75, proc.stderr)
         self.assertIn("上限 1", proc.stderr)
         self.assertIn("来源：projects.toml", proc.stderr)
-        self.assertIn("--park", proc.stderr)
         self.assertIn("run --cap", proc.stderr)
         self.assertIn("taskproof config --concurrency", proc.stderr)
+        self.assertNotIn("--park", proc.stderr)
 
     def test_global_cap_refusal_reports_the_auto_source(self):
         # A registry with no `concurrency` key -> the effective cap (and the

@@ -14,7 +14,7 @@ import tempfile
 import unittest
 
 from taskproof import cli, concurrency, dispatch, registry, storage
-from taskproof.models import STATUS_DONE, STATUS_QUEUED, STATUS_RUNNING, Task
+from taskproof.models import STATUS_DONE, STATUS_RUNNING, Task
 
 
 def _q(value) -> str:
@@ -141,90 +141,15 @@ class ChainTest(CliBase):
         self.assertEqual(len(json.loads(out)["tasks"]), 20)
 
 
-class ParkCliTest(CliBase):
-    """Card 41: `taskproof run --park[=N]` is the CLI door into the queue."""
+class RunCliTest(CliBase):
+    """`taskproof run` fires immediately; there is no queue and no `--park`."""
 
     def setUp(self):
         super().setUp()
         self.run_cli("--workspace", self.ws, "init")
         self.write_registry()
 
-    def _park(self, *extra):
-        code, out = self.run_cli(
-            "--workspace", self.ws, "--json", "run", "proj", "parked",
-            "--adapter", "custom:echo hi", "--park", *extra,
-        )
-        self.assertEqual(code, 0, out)
-        return json.loads(out)
-
-    def test_park_tails_the_queue_at_wave_one(self):
-        payload = self._park()
-        self.assertEqual(payload["status"], STATUS_QUEUED)
-        self.assertEqual(payload["queue_seq"], 1)
-        task = dispatch.task_detail(self.ws, payload["task_id"])["task"]
-        self.assertEqual(task["status"], STATUS_QUEUED)
-        self.assertEqual(task["queue_seq"], 1)
-        self.assertIsNone(task["pid"])  # parking takes no slot and spawns nothing
-        self.assertIsNone(task["pgid"])
-        self.assertFalse(task["started_at"])
-
-    def test_park_writes_only_a_queued_event(self):
-        payload = self._park()
-        events = [
-            e["event"]
-            for e in dispatch.task_detail(self.ws, payload["task_id"])["events"]
-        ]
-        # No `started`, no `adapter` event: a parked card is only a row.
-        self.assertEqual(events, ["queued"])
-
-    def test_park_human_output_names_the_wave(self):
-        code, out = self.run_cli(
-            "--workspace", self.ws, "run", "proj", "parked",
-            "--adapter", "custom:echo hi", "--park",
-        )
-        self.assertEqual(code, 0)
-        self.assertTrue(out.startswith("parked t-"), out)
-        self.assertIn("at wave 1", out)
-
-    def test_park_explicit_wave_is_honoured(self):
-        code, out = self.run_cli(
-            "--workspace", self.ws, "--json", "run", "proj", "pinned",
-            "--adapter", "custom:echo hi", "--park=5",
-        )
-        self.assertEqual(code, 0, out)
-        self.assertEqual(json.loads(out)["queue_seq"], 5)
-
-    def test_two_parks_tail_without_overwriting(self):
-        first = self._park()
-        second = self._park()
-        self.assertEqual((first["queue_seq"], second["queue_seq"]), (1, 2))
-
-    def test_park_keeps_the_run_flags_on_the_row(self):
-        code, out = self.run_cli(
-            "--workspace", self.ws, "--json", "run", "proj", "flagged",
-            "--adapter", "custom:echo hi", "--park",
-            "--read-only", "--worktree", "--no-verify", "--timeout", "30",
-            "--model", "m1", "--reasoning", "high",
-        )
-        self.assertEqual(code, 0, out)
-        task_id = json.loads(out)["task_id"]
-        detail = dispatch.task_detail(self.ws, task_id)
-        queued = next(e for e in detail["events"] if e["event"] == "queued")
-        self.assertTrue(queued["payload"]["read_only"])
-        self.assertTrue(queued["payload"]["worktree"])
-        self.assertTrue(queued["payload"]["skip_verify"])
-        self.assertEqual(queued["payload"]["timeout"], 30)
-        self.assertEqual(detail["task"]["model"], "m1")
-        self.assertEqual(detail["task"]["reasoning"], "high")
-
-    def test_park_rejects_a_non_integer_wave(self):
-        code, _ = self.run_cli(
-            "--workspace", self.ws, "run", "proj", "bad",
-            "--adapter", "custom:echo hi", "--park=abc",
-        )
-        self.assertEqual(code, 64)
-
-    def test_run_without_park_still_runs_immediately(self):
+    def test_run_immediately_runs_to_completion(self):
         code, out = self.run_cli(
             "--workspace", self.ws, "--json", "run", "proj", "now",
             "--adapter", "custom:echo hi",
@@ -232,10 +157,22 @@ class ParkCliTest(CliBase):
         self.assertEqual(code, 0, out)
         payload = json.loads(out)
         self.assertEqual(payload["status"], STATUS_DONE)
-        # Backward compatibility: the synchronous shape is unchanged — no
-        # top-level queue_seq, and the row carries none either.
+        task = dispatch.task_detail(self.ws, payload["task_id"])["task"]
+        self.assertEqual(task["status"], STATUS_DONE)
+        # The queue is gone: the payload advertises no seq, and the retired
+        # physical column (kept for live DBs) is never populated.
         self.assertNotIn("queue_seq", payload)
-        self.assertIsNone(payload["task"]["queue_seq"])
+        self.assertIsNone(task["queue_seq"])
+
+    def test_run_rejects_park(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as ctx:
+            cli.main([
+                "--workspace", self.ws, "run", "proj", "parked",
+                "--adapter", "custom:echo hi", "--park",
+            ])
+        self.assertEqual(ctx.exception.code, 64)
+        self.assertIn("park", err.getvalue())
 
 
 class ExitCodeTest(CliBase):
@@ -560,17 +497,6 @@ class RunCapCliTest(CliBase):
         started = next(e for e in detail["events"] if e["event"] == "started")
         self.assertEqual(started["payload"]["cap"], 5)
         self.assertEqual(started["payload"]["cap_source"], "cli")
-
-    def test_park_records_the_cap_for_advance(self):
-        code, out = self.run_cli(
-            "--workspace", self.ws, "--json", "run", "proj", "brief",
-            "--adapter", "custom:echo hi", "--park", "--cap", "5",
-        )
-        self.assertEqual(code, 0, out)
-        task_id = json.loads(out)["task_id"]
-        detail = dispatch.task_detail(self.ws, task_id)
-        queued = next(e for e in detail["events"] if e["event"] == "queued")
-        self.assertEqual(queued["payload"]["cap"], 5)
 
     def test_cap_below_one_is_a_usage_error(self):
         code, _ = self.run_cli(

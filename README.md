@@ -108,10 +108,10 @@ skill is the missing half: how to drive the tool without the failure modes the
 hard way. Both languages ship: `SKILL.md` (English) and `SKILL.zh-CN.md`
 (简体中文).
 
-The rules in it are not invented; each is a lesson from breaking something. A
-parked card's brief, for instance, is frozen into its row at the moment it is
-enqueued, so **editing the card file afterwards has no effect on a queued row** —
-exactly the kind of practical rule the skill exists to record. It turns the
+The rules in it are not invented; each is a lesson from breaking something.
+`pkill -f` is the classic one, for instance: a card is passed as process argv, so
+the pattern also matches the dispatcher itself and kills the run — exactly the
+kind of practical rule the skill exists to record. It turns the
 lessons of this build into steps you can copy: register a project,
 put a card in a file and pass it with `$(cat …)`, fire it with an explicit
 `--adapter` and `--timeout`, then read state back with `taskproof tasks --all`
@@ -180,36 +180,6 @@ taskproof api --port 8787            # local read-only REST API for clients
 - SQLite for state (transactional claims, not lock files)
 - JSONL audit stream, write-only, rotated monthly
 - Pluggable adapters (codex / claude / gemini / opencode + any command)
-
-## Queue and advance
-
-`--park` puts a card in the queue instead of running it now:
-
-```bash
-taskproof run <project> "<task>" --park       # append at the tail wave
-taskproof run <project> "<task>" --park=2     # pin wave 2
-```
-
-A parked card is only a row: it takes **no concurrency slot** and no adapter
-runs. Three rules hold:
-
-- **A wave is one `queue_seq`.** Cards that share a `queue_seq` are one wave, and
-  a wave only advances after every lower-numbered wave has fully drained.
-- **A group still runs one card at a time.** Two same-group cards never overlap:
-  one takes the group, the other is refused (exit 75) and **falls back to
-  `queued`** — it is never dropped, and the daemon retries it on the next tick.
-- **A parked card's brief is frozen when it is enqueued.** `advance` reads the
-  stored brief; editing the card file afterwards does not change a queued row.
-
-Who advances the queue is your call:
-
-- `taskproof queue` — a resident daemon that pushes the queue continuously
-  (blocks).
-- `taskproof advance <id>` — fire one card by hand.
-
-Prefer `advance` when you want to review and commit each card before the next
-starts: the daemon starts the next card before the previous one is committed, so
-the two diffs blur together.
 
 ## The concurrency cap
 
@@ -292,9 +262,10 @@ refused with **409** and the current content is handed back, so a hand-edited
 
 What the console does today:
 
-- **Seven columns** — queued / running / verifying / done / cancelled / needs
-  review / not passing. A column header can be hidden with the `?hide=` query
-  parameter.
+- **Columns** — running / verifying / done / cancelled / needs review / not
+  passing. The console still lays out a now-always-empty `queued` column; the
+  next desktop card removes it. A column header can be hidden with the `?hide=`
+  query parameter.
 - The **finished columns fold** to the most recent cards, with a bar to reveal
   the rest.
 - A **"acceptance passed"** badge on a blocked card whose acceptance went green.

@@ -32,7 +32,6 @@ DEFAULT_OUT = os.path.join("contract", "enums.json")
 #: Canonical lifecycle order. The board groups these into columns; the contract
 #: only fixes the vocabulary and which states are terminal.
 STATUS_ORDER = (
-    models.STATUS_QUEUED,
     models.STATUS_RUNNING,
     models.STATUS_VERIFYING,
     models.STATUS_DONE,

@@ -100,7 +100,7 @@ tasks
   project       TEXT        registry id
   group         TEXT        concurrency group
   brief         TEXT        task description
-  status        TEXT        queued|running|verifying|done|failed|blocked|timeout|cancelled
+  status        TEXT        running|verifying|done|failed|blocked|timeout|cancelled
   adapter       TEXT        codex|claude|gemini|opencode|custom:<cmd>
   model         TEXT
   reasoning     TEXT
@@ -108,7 +108,6 @@ tasks
   exit_code     INTEGER
   pid           INTEGER
   pgid          INTEGER     adapter's own process group (cancel signals this)
-  queue_seq     INTEGER     explicit queue order; set only while queued
   workdir       TEXT
   result_path   TEXT
   verify_cmd    TEXT
@@ -165,7 +164,7 @@ Hard timeout         default 1800s; on expiry the task is judged stuck and
                      THAT task's process is killed
 Over-limit behaviour a refused dispatch exits 75 (group busy / global cap);
                      a GLOBAL-cap refusal names the effective value, its source
-                     and three ways out — wait (`--park`) / `run --cap N` /
+                     and the ways out — `run --cap N` /
                      `taskproof config --concurrency N`. A same-group refusal
                      stays silent on those: it is only "who runs", not capacity.
 Not retroactive      editing the cap never touches a running card; lowering it
@@ -180,7 +179,6 @@ A task's `status` records what the run *is*; the terminal states say why it
 stopped.
 
 ```
-queued                   parked, waiting for a worker
 running / verifying      the adapter is running, then acceptance is running
 done                     acceptance passed (or was recorded SKIPPED, never "passed")
 failed                   the adapter failed, or acceptance ran and went red
@@ -199,8 +197,8 @@ paths and the `verify` event with the real result. A breach outranks a red
 acceptance: the card is `blocked` either way, and `verify_exit` tells the human
 whether the work itself was sound.
 
-Because `blocked` is terminal, the queue never advances it, `cancel` refuses it
-(there is no process to kill), and `rm` deletes it like any other terminal row.
+Because `blocked` is terminal, `cancel` refuses it (there is no process to kill),
+and `rm` deletes it like any other terminal row.
 Clearing a `blocked` card is a human decision made in layer 3 via `accept <id>`;
 the dispatch pipeline never auto-promotes it to `done`. `accept` is a human
 **registration**, not a verdict: it never re-runs acceptance and never rewrites
@@ -314,15 +312,12 @@ taskproof projects                      list registered projects
 taskproof run <project|path> "<brief>"  dispatch (primary command)
           [--adapter X] [--model X] [--reasoning X]
           [--read-only] [--worktree] [--no-verify] [--timeout N]
-          [--park[=N]]  park it queued now; tail the queue, or pin wave N
 taskproof tasks [--status S] [--project P] [--limit N]
 taskproof show <task-id>                single task detail
 taskproof log <task-id>                 event stream
 taskproof verify <task-id>              re-run acceptance (facts only; never moves the status)
 taskproof accept <task-id> [--note T]   clear a blocked or failed card (failed needs --note)
 taskproof rerun <task-id>               start a fresh, ledger-linked copy of a terminal task
-taskproof advance <task-id>             fire one queued task now, out of its wave
-taskproof queue                          resident daemon: push waves unattended (blocks)
 taskproof cancel <task-id>              stop a task (SIGTERM -> SIGKILL its own tree)
 taskproof rm <task-id>                  delete a terminal task's record, events and kept worktree
 taskproof board [--open | --serve PORT | --out FILE]
@@ -336,30 +331,6 @@ taskproof gc                            archive and rotate
 clean; if it still has changes it is kept, printed as
 `worktree kept: ... (N files changed)`, recorded as a `worktree` event, and
 deleted later by `taskproof rm <task-id>`.
-
-`--park[=N]` is the CLI entry to the queue: it writes a `queued` row
-(status `queued`, an explicit `queue_seq`) and returns at once — no concurrency
-slot is taken and no adapter is spawned. `--park` with no number **tails** the
-queue at `max(queue_seq) + 1`; `--park=N` pins wave `N`. Cards that share a
-`queue_seq` are one **wave**, and a wave only advances once every lower-numbered
-wave has drained. The run flags (`--worktree`, `--read-only`, `--no-verify`,
-`--timeout`, `--model`, `--reasoning`) are stored on the parked row and only take
-effect when it is advanced. A `run` with no `--park` keeps the old synchronous
-behaviour: it dispatches immediately.
-
-**Who advances the queue — two paths, a real trade-off:**
-
-* `taskproof queue` — a resident daemon that keeps pushing the current wave
-  unattended, retrying a same-group card that was refused (it stays `queued`,
-  never dropped). Convenient, but it will start the next card before the previous
-  one is committed, so two cards' diffs can blur together.
-* `taskproof advance <id>` — a human fires exactly one queued card, again and
-  again if they like; this preserves the per-card commit boundary, because the
-  next card only moves when the operator says so.
-
-Inside a wave, same-group mutual exclusion still applies: one card runs, the
-other is refused (exit 75) and **falls back to `queued` without being lost**; the
-daemon or a later `advance` picks it up.
 
 Human-readable output follows the locale; `--json` for machines.
 
@@ -383,8 +354,8 @@ The static dashboard is **frozen**: it keeps working as a `file://` snapshot and
 is not developed further. Stage 2 builds a separate Electron application in
 `desktop/` that consumes the same loopback REST API. That API stays read-only by
 default; only an explicit `--allow-write` opens a session-token-gated write
-surface (project create / edit / delete, plus task control: dispatch / advance /
-accept / cancel / remove / queue-seq edit) on top of it. `accept` is written
+surface (project create / edit / delete, plus task control: dispatch / accept /
+cancel / remove) on top of it. `accept` is written
 both ways — `POST /api/tasks/<id>/accept` (optional body `{"note": "…"}`, required
 to clear a `failed` card) and `taskproof accept <id> [--note "…"]`; `rerun` is
 CLI-only on purpose (the v1 "run it again" affordance is a prefilled form, not a
@@ -411,7 +382,7 @@ taskproof api --port 0 --allow-write
 
 **Matrix column model.** Columns express *which stage of the pipeline a task has
 reached*; the reason a task did not pass is a property of the card, not a stage.
-The board therefore has five columns — queued, running, verifying, done, and
+The board therefore has four columns — running, verifying, done, and
 *not passing* — where the last one holds every abnormal terminal state
 (`failed`, `blocked`, `timeout`, `cancelled`), each keeping its own colour and
 glyph.

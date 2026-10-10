@@ -96,22 +96,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help=(
             "one-off global concurrency cap for THIS dispatch only (not written "
-            "to the registry); with --park it takes effect when the card is advanced"
+            "to the registry)"
         ),
     )
-    p.add_argument(
-        "--park",
-        nargs="?",
-        const="",
-        default=None,
-        metavar="N",
-        help=(
-            "park the card queued instead of running it now (no concurrency slot, "
-            "no adapter); --park tails the queue at wave max(queue_seq)+1, "
-            "--park=N pins wave N; advance later with `taskproof queue` or `taskproof advance <id>`"
-        ),
-    )
-
     p = sub.add_parser("tasks", help="list tasks")
     p.add_argument("--status")
     p.add_argument("--project", help="project id, alias, or path (overrides cwd)")
@@ -127,12 +114,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--follow", "-f", action="store_true")
 
     p = sub.add_parser("verify", help="re-run acceptance for a task")
-    p.add_argument("task_id")
-
-    p = sub.add_parser(
-        "advance",
-        help="fire a queued task now, out of its wave (keeps its id and queue_seq)",
-    )
     p.add_argument("task_id")
 
     p = sub.add_parser(
@@ -158,7 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("task_id")
 
     p = sub.add_parser(
-        "cancel", help="stop a task (kill its process tree) or drop a queued one"
+        "cancel", help="stop a task (kill its process tree)"
     )
     p.add_argument("task_id")
 
@@ -180,11 +161,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
     p.add_argument("--allow-write", action="store_true",
                    help="enable token-protected registry writes")
-
-    sub.add_parser(
-        "queue",
-        help="run the resident queue daemon (advances parked tasks; blocks)",
-    )
 
     p = sub.add_parser(
         "config",
@@ -455,22 +431,6 @@ def cmd_projects(args):
 
 
 def cmd_run(args):
-    start = True
-    queue_seq = None
-    if args.park is not None:
-        # `--park` (no number) tails the queue at max(queue_seq)+1; `--park=N`
-        # pins wave N. Either way the card is only a row: no concurrency slot,
-        # no adapter, and no `started` event (card 22's queued branch).
-        start = False
-        if args.park == "":
-            queue_seq = dispatch.next_queue_seq(args.workspace)
-        else:
-            try:
-                queue_seq = int(args.park)
-            except (TypeError, ValueError):
-                raise UsageError(
-                    f"--park expects an integer wave number, got {args.park!r}"
-                )
     cap = None
     if args.cap is not None:
         if args.cap < 1:
@@ -490,19 +450,12 @@ def cmd_run(args):
         worktree=args.worktree,
         skip_verify=args.no_verify,
         timeout=args.timeout,
-        start=start,
-        queue_seq=queue_seq,
         cap=cap,
     )
     task = dispatch.task_detail(args.workspace, task_id).get("task") or {}
     status = task.get("status")
     payload = {"task_id": task_id, "status": status, "task": task}
-    if start:
-        human = f"{task_id}  {status or ''}  {args.project}"
-    else:
-        payload["queue_seq"] = task.get("queue_seq")
-        human = f"parked {task_id} at wave {queue_seq}"
-    emit(args, payload, human)
+    emit(args, payload, f"{task_id}  {status or ''}  {args.project}")
     return 0
 
 
@@ -709,14 +662,6 @@ def cmd_verify(args):
     return 0
 
 
-def cmd_advance(args):
-    task_id = dispatch.run_queued(args.workspace, args.task_id)
-    task = dispatch.task_detail(args.workspace, task_id)["task"]
-    payload = {"task_id": task_id, "status": task.get("status"), "task": task}
-    emit(args, payload, f"{task_id}  {task.get('status', '')}  advanced")
-    return 0
-
-
 def cmd_accept(args):
     task = dispatch.accept_task(
         args.workspace, args.task_id, note=getattr(args, "note", None)
@@ -905,13 +850,6 @@ def cmd_api(args):
     from .api import server
 
     return server.serve(args.workspace, args.port, allow_write=args.allow_write)
-
-
-def cmd_queue(args):
-    """Block on the resident queue daemon until SIGINT/SIGTERM."""
-    from . import queue
-
-    return queue.run_forever(args.workspace)
 
 
 def _check_workspace(workspace) -> dict:
@@ -1241,14 +1179,12 @@ COMMANDS = {
     "show": cmd_show,
     "log": cmd_log,
     "verify": cmd_verify,
-    "advance": cmd_advance,
     "accept": cmd_accept,
     "rerun": cmd_rerun,
     "cancel": cmd_cancel,
     "rm": cmd_rm,
     "board": cmd_board,
     "api": cmd_api,
-    "queue": cmd_queue,
     "doctor": cmd_doctor,
     "gc": cmd_gc,
     "config": cmd_config,
