@@ -200,6 +200,29 @@ describe('matrix grid columns', () => {
     expect(view).toMatch(/settings\.setColumnCap\(key, command\)/)
   })
 
+  it('does not style the Element Plus tooltip trigger for layout', () => {
+    // WHY: Element Plus also puts .el-tooltip__trigger on the chip button. Its
+    // extra class selector would beat .cap-chip's own display rule and collapse
+    // the chip into a block, so the component must not style that internal class
+    // for layout.
+    expect(
+      styleRules.some((entry) => entry.selector.includes('el-tooltip__trigger'))
+    ).toBe(false)
+  })
+
+  it('keeps the cap chip as a flex container', () => {
+    // The flex container is what keeps the caret at the right edge.
+    expect(rule('.cap-chip')['display']).toMatch(/^(inline-flex|flex)$/)
+  })
+
+  it('uses the shared SVG caret without the old font-size compensation', () => {
+    expect(rule('.cap-caret')['font-size']).toBeUndefined()
+
+    const caretSpan = view.match(/<span\b[^>]*class="cap-caret"[^>]*>/)?.[0]
+    expect(caretSpan).toContain('aria-hidden="true"')
+    expect(caretSpan).toContain('v-html="ICONS.caret"')
+  })
+
   it('compiles the cap command handler to forward the event value', () => {
     // This is the layer that catches the TP-card71 trap: Vue compiles an event
     // call expression as an inline statement, so its return value is discarded.
