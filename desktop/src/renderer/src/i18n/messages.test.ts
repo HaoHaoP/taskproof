@@ -30,16 +30,11 @@ describe('card 35 message keys (the needs-review lane)', () => {
     expect(at(zhCN, 'status.blocked')).toBe('阻塞')
   })
 
-  it('names the acceptance-passed badge and the accept action everywhere', () => {
+  it('names the acceptance-passed badge in both locales', () => {
+    // The accept *action* (and its confirm / stale copy) is gone; only the
+    // read-only badge the card still shows survives.
     expect(at(en, 'card.acceptancePassed')).toBeTruthy()
     expect(at(zhCN, 'card.acceptancePassed')).toBeTruthy()
-    expect(at(en, 'task.accept')).toBeTruthy()
-    expect(at(zhCN, 'task.accept')).toBeTruthy()
-    expect(at(en, 'task.confirmAccept.title')).toBeTruthy()
-    expect(at(zhCN, 'task.confirmAccept.title')).toBeTruthy()
-    // The stale-copy a 409 (no longer blocked) shows.
-    expect(at(en, 'task.notice.stale')).toBeTruthy()
-    expect(at(zhCN, 'task.notice.stale')).toBeTruthy()
   })
 })
 
@@ -139,5 +134,81 @@ describe('card 54 message keys (the log tab)', () => {
     expect(at(zhCN, 'log.refresh')).toBe('刷新')
     expect(at(en, 'log.truncated')).toBe('Only the last {n} lines are kept (earlier lines dropped)')
     expect(at(zhCN, 'log.truncated')).toBe('仅保留最后 {n} 行（更早的已丢弃）')
+  })
+})
+
+/**
+ * Card 59 made the desktop console read-only. Every write-surface key -- the
+ * whole `task.*` control namespace, the project add / edit / remove labels and
+ * their error copy, and the dialog Save button -- must be gone from BOTH
+ * locales, while the handful of keys the read-only overview still renders stay.
+ */
+describe('card 59 message keys (read-only console)', () => {
+  // Flat, dotted project keys (vue-i18n matches the whole string first), so they
+  // are read straight off the object rather than by path traversal.
+  const removedProj = [
+    'proj.add',
+    'proj.edit',
+    'proj.remove',
+    'proj.actions',
+    'proj.register',
+    'proj.detect',
+    'proj.detect.run',
+    'proj.detect.d',
+    'proj.path',
+    'proj.path.d',
+    'proj.path.locked',
+    'proj.id.locked',
+    'proj.aliases',
+    'proj.group',
+    'proj.group.d',
+    'proj.verify',
+    'proj.verify.d',
+    'proj.verify.none',
+    'proj.verifykind',
+    'proj.forbidden',
+    'proj.forbidden.d',
+    'proj.schema',
+    'proj.schema.d',
+    'proj.schema.default',
+    'proj.schema.none',
+    'proj.probe',
+    'proj.add.hint',
+    'proj.edit.hint',
+    'proj.remove.q',
+    'proj.remove.hint',
+    'proj.conflict',
+    'proj.reload',
+    'proj.keep',
+    'proj.writing',
+    'proj.detecting',
+    'proj.error.conflict',
+    'proj.error.invalid',
+    'proj.error.forbidden',
+    'proj.error.notfound',
+    'proj.error.network'
+  ]
+
+  it('drops the whole write surface from both locales', () => {
+    for (const [name, messages] of Object.entries(locales)) {
+      const m = messages as Record<string, unknown>
+      // The dispatch / control namespace is gone outright.
+      expect(at(m, 'task'), `${name}:task`).toBeUndefined()
+      for (const key of removedProj) {
+        expect(m[key], `${name}:${key}`).toBeUndefined()
+      }
+      // The dialog Save button went with the dialogs (Cancel stays for About).
+      expect(at(m, 'dlg.save'), `${name}:dlg.save`).toBeUndefined()
+    }
+  })
+
+  it('keeps the keys the read-only overview still renders', () => {
+    for (const [name, messages] of Object.entries(locales)) {
+      const m = messages as Record<string, unknown>
+      expect(m['proj.group.default'], `${name}:proj.group.default`).toBeTruthy()
+      expect(at(m, 'probe.passed'), `${name}:probe.passed`).toBeTruthy()
+      expect(at(m, 'probe.failed'), `${name}:probe.failed`).toBeTruthy()
+      expect(at(m, 'probe.none'), `${name}:probe.none`).toBeTruthy()
+    }
   })
 })

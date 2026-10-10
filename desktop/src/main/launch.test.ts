@@ -191,11 +191,11 @@ describe('launchFlags', () => {
     expect(portArg(launchFlags(base({ portMode: 'fixed', port: 8123 })))).toBe('8123')
   })
 
-  it('puts the global --workspace flag before the api subcommand', () => {
+  it('builds the read-only argv: workspace, api subcommand, port -- no write flag', () => {
     const args = launchFlags(base())
-    expect(args.indexOf('--workspace')).toBeLessThan(args.indexOf('api'))
-    expect(args[args.indexOf('--workspace') + 1]).toBe('/tmp/ws')
-    expect(args).toContain('--allow-write')
+    // Exact shape: the global --workspace flag, the api subcommand, then the port.
+    // The board never asks the API to accept writes, so the argv carries none.
+    expect(args).toEqual(['--workspace', '/tmp/ws', 'api', '--port', '0'])
   })
 })
 

@@ -153,15 +153,15 @@ export function resolveLaunchCommand(input: ResolveLaunchInput): ResolvedLaunchC
  * The argv that follows the resolved command.
  *
  *  - the global `--workspace` flag precedes the subcommand;
- *  - `--allow-write` belongs to `api` and opens the token-protected write
- *    surface;
+ *  - the `api` subcommand is read-only (no write flag): the desktop board only
+ *    ever reads the local service;
  *  - `portMode: 'auto'` asks for `--port 0` (the OS picks a free port);
  *    `'fixed'` passes the user's port through unchanged, so an occupied port
  *    fails loudly instead of silently switching.
  */
 export function launchFlags(current: LaunchSettings): string[] {
   const port = current.portMode === 'fixed' ? String(current.port) : '0'
-  return ['--workspace', current.workspace, 'api', '--allow-write', '--port', port]
+  return ['--workspace', current.workspace, 'api', '--port', port]
 }
 
 /**

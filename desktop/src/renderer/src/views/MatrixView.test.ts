@@ -171,10 +171,6 @@ describe('matrix grid columns', () => {
     expect(view).not.toMatch(/status\.\$\{column\.key\}/)
   })
 
-  it('routes the blocked card menu accept item through the store confirm', () => {
-    expect(view).toMatch(/action === 'accept'/)
-    expect(view).toMatch(/tasks\.openAccept\(task\)/)
-  })
 
   it('puts a hide switch in every column header, not in the board row', () => {
     // The switch lives in the header it hides: "which column" is the header

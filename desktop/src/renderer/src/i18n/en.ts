@@ -52,73 +52,6 @@ export default {
 
   card: { attempt: 'try', files: 'files', acceptancePassed: 'Acceptance passed' },
 
-  /* The console's four actions plus the dispatch form. They live
-     flat under `task.*` (singular) so the card menu, the store's failure copy
-     and the dialogs all read one namespace -- `tasks` (plural) is the table. */
-  task: {
-    new: 'New task',
-    menu: 'Actions',
-    accept: 'Accept',
-    stop: 'Stop',
-    delete: 'Delete',
-    rerun: 'Run again',
-    busy: 'Working…',
-    dismiss: 'Dismiss',
-    compose: {
-      title: 'New task',
-      rerun: 'Run again',
-      project: 'Project',
-      brief: 'Brief',
-      briefPlaceholder: 'What should the agent do?',
-      adapter: 'Adapter',
-      timeout: 'Timeout',
-      seconds: 'seconds',
-      review: 'Review consequences',
-      back: 'Back',
-      noProjects: 'No projects registered yet'
-    },
-    summary: {
-      title: 'Before dispatch',
-      project: 'Project',
-      path: 'Real path',
-      adapter: 'Adapter',
-      timeout: 'Max duration',
-      forbidden: 'Protected paths',
-      none: 'none',
-      seconds: '{n} seconds',
-      dispatch: 'Dispatch now',
-      queue: 'Save for later'
-    },
-    confirmStop: {
-      title: 'Stop this task?',
-      body: 'The workspace will not be touched. The task is recorded as cancelled. This cannot be undone.',
-      confirm: 'Stop'
-    },
-    confirmAccept: {
-      title: 'Accept this card?',
-      body: 'The boundary breach is confirmed as passing, and the task lands on Done or Not passing by its acceptance result. This cannot be undone.',
-      confirm: 'Accept'
-    },
-    confirmDelete: {
-      title: 'Delete this task?',
-      body: 'Deletes the task record and its event stream. This cannot be undone.',
-      confirm: 'Delete'
-    },
-    error: {
-      concurrency: 'Refused for now: {detail}',
-      state: "This does not apply to the task's current state: {detail}",
-      invalid: 'The request was rejected: {detail}',
-      forbidden: 'The local service refused the write (bad token).',
-      notfound: 'No such task: {detail}',
-      network: 'Cannot reach the local service: {detail}'
-    },
-    notice: {
-      group: "This project's lane is busy — retry later.",
-      cap: 'Global concurrency is full — retry later.',
-      stale: 'This card is no longer waiting for review; the board has been refreshed.'
-    }
-  },
-
   tasks: {
     title: 'All tasks',
     sub: 'Click any row for detail and the verdict.',
@@ -140,55 +73,13 @@ export default {
     }
   },
 
-  /* The add / edit / remove copy is verbatim from the prototype. Those keys are
-     flat and dotted (`proj.group` next to `proj.group.default`); vue-i18n
-     matches the whole key before splitting, so they are kept as-is. */
-  'proj.add': 'Add project',
-  'proj.edit': 'Edit…',
-  'proj.remove': 'Remove',
-  'proj.actions': 'Actions',
-  'proj.register': 'Register',
-  'proj.detect': 'Detect',
-  'proj.detect.run': 'Detect',
-  'proj.detect.d': 'Same as taskproof register --dry-run: pick the code directory, guess the acceptance command, draft AGENTS.',
-  'proj.path': 'Repository path',
-  'proj.path.d': 'Absolute path. Detection and the acceptance command both run here.',
-  'proj.path.locked': 'Immutable once registered. A different path is a different project, and past tasks would be orphaned.',
-  'proj.id.locked': 'Immutable — tasks.project stores this id.',
-  'proj.aliases': 'Aliases',
-  'proj.group': 'Concurrency group',
-  'proj.group.d': 'Only one task per group runs at a time. Empty means the default group — i.e. everything serialised.',
+  /* The registry's default-group label, still shown in the read-only project
+     overview. Every other project key was a write-surface label and is gone. */
   'proj.group.default': 'default · all serialised',
-  'proj.verify': 'Acceptance command',
-  'proj.verify.d': 'Run independently by taskproof after the agent exits. The agent saying "done" is never evidence.',
-  'proj.verify.none': 'not configured (verification is recorded as SKIPPED, never as passed)',
-  'proj.verifykind': 'Acceptance kind',
-  'proj.forbidden': 'Protected paths',
-  'proj.forbidden.d': 'Comma separated. Touching these fails the task.',
-  'proj.schema': 'Structured result',
-  'proj.schema.d': 'Constrain the agent final answer to JSON.',
-  'proj.schema.default': 'Default',
-  'proj.schema.none': 'Off',
-  'proj.probe': 'Probe result',
-  'proj.add.hint': 'Confirms into ~/.taskproof/projects.toml — a hand-editable config file you can commit to your own git.',
-  'proj.edit.hint': 'Before saving, the app compares projects.toml with the file on disk; a conflict is surfaced, never silently overwritten.',
-  'proj.remove.q': 'Remove this project from the registry?',
-  'proj.remove.hint': 'Removes the registry entry only — nothing in the repository is deleted. Its task history loses its project.',
-  'proj.conflict': '~/.taskproof/projects.toml was changed outside the app.',
-  'proj.reload': 'Reload file',
-  'proj.keep': 'Keep my edits',
-  /* Not in the prototype: the busy labels and error copy the buttons need. */
-  'proj.writing': 'Writing…',
-  'proj.detecting': 'Detecting…',
-  'proj.error.conflict': 'The registry changed on disk; nothing was written.',
-  'proj.error.invalid': 'The registry rejected the change: {detail}',
-  'proj.error.forbidden': 'The local service refused the write (bad token).',
-  'proj.error.notfound': 'No such project: {detail}',
-  'proj.error.network': 'Cannot reach the local service: {detail}',
 
   probe: { passed: 'probe passed', failed: 'probe failed', none: 'none' },
 
-  dlg: { cancel: 'Cancel', save: 'Save' },
+  dlg: { cancel: 'Cancel' },
 
   service: {
     local: 'local service',
@@ -207,7 +98,7 @@ export default {
 
   empty: {
     projects: 'No projects registered yet',
-    hint: 'No projects yet. Add one on the Projects page (or run taskproof register <path>) and the console fills in.'
+    hint: 'No projects yet. Register one from the CLI — taskproof register <path> — then dispatch work with taskproof run.'
   },
 
   theme: { dark: 'Dark', light: 'Light', system: 'System' },

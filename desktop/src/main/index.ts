@@ -16,8 +16,6 @@ import { dirname, join } from 'path'
 import * as settings from './settings'
 import { ApiService, type LaunchSpec } from './service'
 import { runDoctor } from './doctor'
-import { createProjectsClient, type ProjectsClient } from './projects'
-import { createTasksClient, type TasksClient } from './tasks'
 import { launchFlags, resolveLaunchCommand, spawnOnBoot, type ResolvedLaunchCommand } from './launch'
 import { gitAvailable } from './git'
 import { ensureWorkspace } from './workspace'
@@ -29,13 +27,7 @@ import {
   notificationBody,
   type NotifiableTask
 } from './desktop'
-import type {
-  AboutInfo,
-  DesktopSettings,
-  ProjectCreatePayload,
-  ProjectPatch,
-  TaskCreatePayload
-} from '../preload/types'
+import type { AboutInfo, DesktopSettings } from '../preload/types'
 
 // The app's display name is now "Taskproof", but Electron derives `userData`
 // from the package name -- so a rename (or a bumped productName) would silently
@@ -106,8 +98,7 @@ function launchSpec(): LaunchSpec {
   const resolved = resolveFor(current)
   const spec: LaunchSpec = {
     command: resolved.argv[0],
-    // The global `--workspace` flag precedes the subcommand; `--allow-write`
-    // belongs to `api` and opens the token-protected write surface.
+    // The global `--workspace` flag precedes the read-only `api` subcommand.
     args: [...resolved.argv.slice(1), ...launchFlags(current)],
     workspace: current.workspace,
     env: resolved.env
@@ -118,53 +109,13 @@ function launchSpec(): LaunchSpec {
 
 const api = new ApiService(launchSpec)
 
-/**
- * The write client, rebuilt whenever the service comes up on a new port or a
- * new token. Everything that talks HTTP-with-a-token goes through here; the
- * renderer only ever sees the named IPC methods below.
- */
-let projectsClient: ProjectsClient | null = null
-let tasksClient: TasksClient | null = null
-/** `${port}:${token}` at the moment both clients were minted. A service
- *  restart changes both, so this is the single trigger that re-mints them. */
-let clientKey = ''
-
-/**
- * Both write clients are minted together, off the same port/token snapshot.
- * Keeping them in one place means a restart swaps them atomically -- there is
- * no window where the registry client has the new token and the task client
- * still holds the old one.
- */
-function ensureClients(): { projects: ProjectsClient; tasks: TasksClient } {
-  const port = api.getStatus().port
-  const token = api.getToken() ?? ''
-  const key = `${port}:${token}`
-  if (!projectsClient || !tasksClient || clientKey !== key) {
-    const baseUrl = port ? `http://127.0.0.1:${port}` : ''
-    projectsClient = createProjectsClient({ baseUrl, token })
-    tasksClient = createTasksClient({ baseUrl, token })
-    clientKey = key
-  }
-  return { projects: projectsClient, tasks: tasksClient }
-}
-
-function projects(): ProjectsClient {
-  return ensureClients().projects
-}
-
-/** The task control client. Same token, same lifetime, different surface. */
-function tasks(): TasksClient {
-  return ensureClients().tasks
-}
-
 // ---------------------------------------------------------------------------
 // Desktop integration: tray, Dock badge, notifications, launch-at-login.
 //
 // These are the switches the settings page used to only persist. The renderer
-// owns the *data* it already polls, but the read endpoints are not token-gated,
-// so the main process reads `/api/summary` and `/api/tasks` itself -- one owner
-// for the badge and the notification de-duplication, and the write token stays
-// where it belongs (this process).
+// owns the *data* it already polls, but the read endpoints are open, so the
+// main process reads `/api/summary` and `/api/tasks` itself -- one owner for the
+// badge and the notification de-duplication.
 // ---------------------------------------------------------------------------
 
 /** How often the main process re-reads the API while a switch needs the data. */
@@ -731,7 +682,7 @@ function registerIpc(): void {
   ipcMain.handle('tp:app:about', () => aboutInfo())
   // Spelled out rather than `clipboard.writeText(text)` inline so the channel
   // is greppable: this is the only place diagnostic text reaches the clipboard,
-  // and the text is assembled in the renderer (which never holds the token).
+  // and the text is assembled in the renderer from a fixed whitelist.
   ipcMain.handle('tp:app:copy-text', (_event, text: string) => {
     clipboard.writeText(String(text))
   })
@@ -758,26 +709,6 @@ function registerIpc(): void {
     }
   })
 
-  // Registry writes. Each answers with a typed result; the token and the
-  // expected_hash handshake stay in this process.
-  ipcMain.handle('tp:projects:registry', () => projects().registry())
-  ipcMain.handle('tp:projects:probe', (_event, path: string) => projects().probe(String(path)))
-  ipcMain.handle('tp:projects:create', (_event, payload: ProjectCreatePayload) =>
-    projects().create(payload)
-  )
-  ipcMain.handle('tp:projects:patch', (_event, id: string, patch: ProjectPatch) =>
-    projects().patch(String(id), patch)
-  )
-  ipcMain.handle('tp:projects:remove', (_event, id: string) => projects().remove(String(id)))
-
-  // Task control. Same narrow shape as the registry writes above: the token and
-  // the HTTP verb stay in this process, the renderer gets a typed result.
-  ipcMain.handle('tp:tasks:create', (_event, payload: TaskCreatePayload) =>
-    tasks().create(payload)
-  )
-  ipcMain.handle('tp:tasks:cancel', (_event, id: string) => tasks().cancel(String(id)))
-  ipcMain.handle('tp:tasks:accept', (_event, id: string) => tasks().accept(String(id)))
-  ipcMain.handle('tp:tasks:remove', (_event, id: string) => tasks().remove(String(id)))
 }
 
 api.onStatus((status) => {

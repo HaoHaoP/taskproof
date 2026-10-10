@@ -39,11 +39,8 @@ import {
 } from '../matrix'
 import { columnLabelKey } from '../contract'
 import { useBoardStore } from '../stores/board'
-import { useTasksStore } from '../stores/tasks'
-import type { TaskAction } from '../taskmenu'
 
 const store = useBoardStore()
-const tasks = useTasksStore()
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
@@ -141,17 +138,6 @@ function openTask(id: string): void {
   // Carry the filter / tab query along: a bare path clears the address bar,
   // which is the real reason opening a detail used to lose the filter.
   void router.push({ name: 'matrix', params: { taskId: id }, query: route.query })
-}
-
-/** The card menu's actions. Rerun goes straight to the store; stop, accept and
- *  delete raise their confirmation sheets first (a write that landed re-reads
- *  the board). `accept` is blocked-only and cannot be undone, so it goes through
- *  the same confirm step as stop / delete. */
-function onAction(task: Task, action: TaskAction): void {
-  if (action === 'stop') tasks.openStop(task)
-  else if (action === 'accept') tasks.openAccept(task)
-  else if (action === 'delete') tasks.openDelete(task)
-  else if (action === 'rerun') void tasks.openRerun(task)
 }
 
 /** Every query key the board itself reads or writes. Anything else (today
@@ -319,15 +305,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
       </div>
     </div>
 
-    <!-- A refused spawn (429) changes nothing. Say so, and let it be dismissed
-         -- never show it as a failure. -->
-    <div v-if="tasks.notice" class="notice">
-      <span>{{ tasks.notice }}</span>
-      <button type="button" class="nx" @click="tasks.dismissNotice()">
-        {{ t('task.dismiss') }}
-      </button>
-    </div>
-
     <div class="matrix">
       <div class="grid" :style="gridStyle">
         <div class="hd corner">{{ t('rail.title') }}</div>
@@ -405,7 +382,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
               :task="task"
               :expanded="isExpanded(task.id)"
               @open="openTask"
-              @action="(action: TaskAction) => onAction(task, action)"
             />
             <div v-if="!tasksIn(project.id, column.key).length" class="dash">—</div>
           </div>
@@ -494,34 +470,6 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
   cursor: pointer;
 }
 .boardbar .cap .grow:hover {
-  background: var(--raise);
-}
-/* The "retry later" strip: a refused spawn is not a failure, so this reads as
-   a note, not an alarm -- the amber of "timed out", not the red of "failed". */
-.notice {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 8px 16px 0;
-  padding: 8px 12px;
-  border-radius: var(--r-ctl);
-  background: var(--w-timeout);
-  color: var(--c-timeout);
-  font: 12px/1.4 var(--sans);
-}
-.notice .nx {
-  margin-left: auto;
-  flex: none;
-  padding: 3px 9px;
-  border: 1px solid var(--rule);
-  border-radius: var(--r-ctl);
-  background: transparent;
-  color: inherit;
-  font: 11.5px/1 var(--sans);
-  cursor: pointer;
-}
-.notice .nx:hover {
   background: var(--raise);
 }
 .matrix {

@@ -7,24 +7,19 @@
  * verification exit code and nothing else -- `✓ 0` or `✗ N` -- and a task that
  * was never verified gets no stamp at all, because there is no verdict to show.
  *
- * The console adds one affordance to the same card: an actions menu whose
- * items follow the status (see `menuFor`).
- *
- * The card is a div with `role="button"` rather than a real <button>, because a
- * menu cannot legally nest inside one.
+ * The card is a div with `role="button"` rather than a real <button>, so the
+ * nested interactive badges stay clickable inside it.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import StatusMark from './StatusMark.vue'
 import type { Task } from '../api/client'
-import { menuFor, type TaskAction } from '../taskmenu'
 import { acceptancePassed } from '../card'
 import { duration } from '../format'
 
 const props = defineProps<{ task: Task; expanded?: boolean }>()
 const emit = defineEmits<{
   open: [id: string]
-  action: [action: TaskAction]
 }>()
 
 const { t } = useI18n()
@@ -35,8 +30,6 @@ const stamp = computed(() => {
   if (exit == null) return null
   return { text: exit === 0 ? '✓ 0' : `✗ ${exit}`, cls: exit === 0 ? 'good' : 'bad' }
 })
-
-const menu = computed(() => menuFor(props.task.status))
 
 /** The "acceptance passed" badge: shown on a blocked card whose acceptance went
  *  green (see `acceptancePassed`). It answers "the result is fine, only the
@@ -61,30 +54,6 @@ const passBadge = computed(() => acceptancePassed(props.task))
       <span class="tail">
         <span v-if="passBadge" class="stamp good">{{ t('card.acceptancePassed') }}</span>
         <span v-if="stamp" class="stamp" :class="stamp.cls">{{ stamp.text }}</span>
-        <el-dropdown trigger="click" placement="bottom-end" @command="(a: TaskAction) => emit('action', a)">
-          <button
-            class="menu-btn"
-            type="button"
-            :aria-label="t('task.menu')"
-            :title="t('task.menu')"
-            @click.stop
-          >
-            ⋯
-          </button>
-          <template #dropdown>
-            <el-dropdown-menu class="tp-card-menu">
-              <el-dropdown-item
-                v-for="item in menu"
-                :key="item.action"
-                :command="item.action"
-                :disabled="item.disabled"
-                :class="{ danger: item.danger }"
-              >
-                {{ t(item.label) }}
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
         <span class="chev">▸</span>
       </span>
     </span>
@@ -166,31 +135,6 @@ const passBadge = computed(() => acceptancePassed(props.task))
   border-color: transparent;
   background: var(--w-failed);
 }
-/* The actions menu trigger: quiet until the card is hovered or the menu is
-   open, so it does not compete with the lamp and the id. */
-.menu-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--ink-4);
-  font: 12px/1 var(--sans);
-  cursor: pointer;
-  opacity: 0;
-}
-.tp-card:hover .menu-btn,
-.menu-btn:focus-visible {
-  opacity: 1;
-}
-.menu-btn:hover {
-  background: var(--raise);
-  color: var(--ink);
-}
 /* The chevron is the disclosure affordance: it turns to point down while the
    drawer is open. */
 .chev {
@@ -227,17 +171,5 @@ const passBadge = computed(() => acceptancePassed(props.task))
   .chev {
     transition: none;
   }
-}
-</style>
-
-<!-- The dropdown is teleported out of this component, so scoped styles cannot
-     reach it. Keyed off the menu's own class so it cannot leak into any other
-     Element Plus dropdown. -->
-<style>
-.tp-card-menu .el-dropdown-menu__item.danger {
-  color: var(--c-failed);
-}
-.tp-card-menu .el-dropdown-menu__item.danger.is-disabled {
-  color: var(--ink-4);
 }
 </style>

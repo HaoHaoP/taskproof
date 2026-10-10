@@ -3,17 +3,14 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import AboutDialog from './components/AboutDialog.vue'
-import TaskConsole from './components/TaskConsole.vue'
 import { ICONS } from './icons'
 import { shellPlaceholder } from './shell'
 import { useElementLocale } from './i18n/element'
 import { useBoardStore } from './stores/board'
-import { useTasksStore } from './stores/tasks'
 import { useSettingsStore } from './stores/settings'
 
 const store = useBoardStore()
 const settings = useSettingsStore()
-const tasks = useTasksStore()
 const route = useRoute()
 const { t } = useI18n()
 
@@ -39,15 +36,11 @@ const settingsView = { name: 'settings', key: 'nav.settings', path: '/settings' 
 const rail = ref(true)
 
 /**
- * The three data views carry the mast's action (新增任务) and status (●实时)
- * controls; settings has none of them. The old toolbar row that used to hold
- * them is gone -- its two surviving pieces live in the mast, and its per-board
+ * The three data views carry the mast's status (●实时) control; settings has
+ * none of it. The old toolbar row that used to hold it is gone -- its per-board
  * project filter moved into the matrix's own row.
  */
 const isDataView = computed(() => ['matrix', 'projects', 'tasks'].includes(String(route.name)))
-/** Settings never shows the mast controls; an empty/offline board hides them too
- *  (there is nothing to dispatch and no project to dispatch it to). */
-const showMastControls = computed(() => isDataView.value && !blank.value)
 
 /**
  * Which placeholder the matrix body shows, if any.
@@ -97,7 +90,7 @@ onBeforeUnmount(() => store.dispose())
         <div class="spacer"></div>
         <!-- Status area: the polling indicator and the tallies. -->
         <span
-          v-if="showMastControls"
+          v-if="isDataView"
           class="live"
           :data-off="store.polling ? null : ''"
         >
@@ -113,17 +106,6 @@ onBeforeUnmount(() => store.dispose())
           <span v-if="store.connected">{{ t('service.local') }} :{{ store.service.port ?? '—' }}</span>
           <span v-else>{{ t('service.offline') }}</span>
         </div>
-        <!-- Action area: the one truly global write, reachable from every data
-             view. Settings deliberately has none. -->
-        <el-button
-          v-if="showMastControls"
-          class="masttask"
-          type="primary"
-          size="small"
-          @click="tasks.openCompose()"
-        >
-          {{ t('task.new') }}
-        </el-button>
       </header>
 
       <div class="shell">
@@ -161,8 +143,7 @@ onBeforeUnmount(() => store.dispose())
 
           <!-- Offline, or a registry with nothing in it yet: this replaces the
                matrix body only. The nav above never gives way, and the projects
-               page keeps its real layout -- that is where the first project is
-               registered. -->
+               page keeps its real layout -- projects are registered from the CLI. -->
           <section v-if="blank" class="blank">
             <div class="big">{{ t(blank === 'offline' ? 'offline.title' : 'empty.projects') }}</div>
             <p class="hint">{{ t(blank === 'offline' ? 'offline.hint' : 'empty.hint') }}</p>
@@ -181,9 +162,6 @@ onBeforeUnmount(() => store.dispose())
       <!-- Mounted once at the shell so the macOS "About Taskproof" menu item can
            open it from any page; the settings row raises the same shared flag. -->
       <AboutDialog />
-      <!-- The console sheets (dispatch / stop / delete) are shell-level too: the
-           mast's 新增任务 button can raise them from any data view. -->
-      <TaskConsole />
     </div>
   </el-config-provider>
 </template>
@@ -320,13 +298,6 @@ onBeforeUnmount(() => store.dispose())
   .live i {
     animation: none;
   }
-}
-/* The mast is a drag region; the one new control in it opts back out so it can
-   still be clicked. */
-.masttask {
-  flex: none;
-  height: 26px;
-  -webkit-app-region: no-drag;
 }
 .shell {
   display: flex;

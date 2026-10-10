@@ -3,19 +3,12 @@
  *
  * Named methods, not a generic `invoke(channel, payload)`: the renderer loads
  * the built bundle and renders agent-produced text, so handing it the whole IPC
- * surface would make any injection a full compromise. Registry writes are named
- * too, and the write token never crosses this boundary -- the main process
- * attaches it to the HTTP request itself.
+ * surface would make any injection a full compromise. The surface is read-only:
+ * settings, shell, app diagnostics and the service status -- there are no write
+ * channels.
  */
 import { contextBridge, ipcRenderer } from 'electron'
-import type {
-  DesktopSettings,
-  ProjectCreatePayload,
-  ProjectPatch,
-  ServiceStatus,
-  TaskCreatePayload,
-  TpApi
-} from './types'
+import type { DesktopSettings, ServiceStatus, TpApi } from './types'
 
 const api: TpApi = {
   service: {
@@ -60,20 +53,7 @@ const api: TpApi = {
         state: () => ipcRenderer.invoke('tp:diag:state'),
         trayClick: () => ipcRenderer.invoke('tp:diag:tray-click')
       }
-    : undefined,
-  projects: {
-    registry: () => ipcRenderer.invoke('tp:projects:registry'),
-    probe: (path: string) => ipcRenderer.invoke('tp:projects:probe', path),
-    create: (payload: ProjectCreatePayload) => ipcRenderer.invoke('tp:projects:create', payload),
-    patch: (id: string, patch: ProjectPatch) => ipcRenderer.invoke('tp:projects:patch', id, patch),
-    remove: (id: string) => ipcRenderer.invoke('tp:projects:remove', id)
-  },
-  tasks: {
-    create: (payload: TaskCreatePayload) => ipcRenderer.invoke('tp:tasks:create', payload),
-    cancel: (id: string) => ipcRenderer.invoke('tp:tasks:cancel', id),
-    accept: (id: string) => ipcRenderer.invoke('tp:tasks:accept', id),
-    remove: (id: string) => ipcRenderer.invoke('tp:tasks:remove', id)
-  }
+    : undefined
 }
 
 if (process.contextIsolated) {

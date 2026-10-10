@@ -6,10 +6,10 @@
  * would hand the entire IPC surface to a renderer that loads remote-ish content
  * and renders agent output.
  *
- * Registry writes go through `TpApi.projects`. That surface is deliberately
- * narrow: it speaks in these result types, and the write token lives only in the
- * main process. The renderer asks for "create this project" and gets back either
- * the new record or a structured failure -- never a token, never an HTTP verb.
+ * The console is read-only: it reads the local API's board and drives the
+ * service, settings, shell and app-menu surfaces. All project registration and
+ * task dispatching live in the CLI; there is no write method here, and the app
+ * never carries an API token.
  */
 
 export type ServiceState = 'starting' | 'ready' | 'stopped' | 'failed'
@@ -51,198 +51,6 @@ export interface DesktopSettings {
   autostart: boolean
 }
 
-// -- registry --------------------------------------------------------------
-
-/** `GET /api/registry`: the optimistic-write handshake. */
-export interface RegistryMeta {
-  path: string
-  /** SHA-256 of the registry's raw bytes, lowercase hex. */
-  hash: string
-  mtime: number
-}
-
-/**
- * The acceptance-probe verdict. The API can report `null` for a project that
- * declares a verify command it has never run; the UI folds that into `none`.
- */
-export type ProbeVerdict = 'passed' | 'failed' | 'none'
-
-/** A project as the API returns it (list, create, patch). */
-export interface ProjectRecord {
-  id: string
-  path: string
-  group: string
-  aliases: string[]
-  verify: string | null
-  verify_kind: string
-  forbidden_paths: string[]
-  result_schema: string
-  auto_registered: boolean
-  probe: ProbeVerdict | null
-  probe_exit: number | null
-}
-
-/** `POST /api/projects/probe` -- the registration draft, before it is stored. */
-export interface ProbeRecord {
-  id: string
-  path: string
-  group: string
-  verify: string | null
-  verify_kind: string
-  probe: ProbeVerdict | null
-  probe_exit: number | null
-  aliases: string[]
-  forbidden_paths: string[]
-}
-
-/**
- * The body of a `409 conflict`: the registry changed on disk since we read the
- * hash. Nothing was written; the caller decides whether to reload or re-apply.
- */
-export interface ConflictSnapshot {
-  /** The hash of the file *now* -- what a retry would have to build on. */
-  hash: string
-  /** The file text at the moment of the clash, so the user can see the drift. */
-  content: string
-  projects: ProjectRecord[]
-}
-
-/**
- * How a registry request failed, mirroring the HTTP contract:
- *  - `conflict`  409 -- the registry changed under us; nothing was written
- *  - `invalid`   400 -- a field was rejected
- *  - `forbidden` 403 -- the token was missing or wrong
- *  - `notfound`  404 -- no such project id
- *  - `network`   the request never reached a response
- */
-export type WriteErrorKind = 'conflict' | 'invalid' | 'forbidden' | 'notfound' | 'network'
-
-export interface WriteError {
-  kind: WriteErrorKind
-  status: number
-  /** Human copy from the server, or the transport error. Never the token. */
-  message: string
-  /** Present only when `kind === 'conflict'`. */
-  conflict?: ConflictSnapshot
-}
-
-/** Every registry call answers with this: a value, or a typed failure. */
-export type RegistryResult<T> = { ok: true; value: T } | { ok: false; error: WriteError }
-
-export interface ProjectCreatePayload {
-  path: string
-  id?: string
-  group?: string
-  aliases?: string[]
-  verify?: string | null
-  verify_kind?: string
-  forbidden_paths?: string[]
-  /** The probe verdict, so it is stored alongside the registration. */
-  probe?: string | null
-  probe_exit?: number | null
-}
-
-/** Mutable project fields. `id` and `path` are immutable and not accepted. */
-export interface ProjectPatch {
-  aliases?: string[]
-  group?: string
-  verify?: string | null
-  verify_kind?: string
-  forbidden_paths?: string[]
-  result_schema?: string
-}
-
-export interface ProjectsApi {
-  registry(): Promise<RegistryResult<RegistryMeta>>
-  probe(path: string): Promise<RegistryResult<ProbeRecord>>
-  create(payload: ProjectCreatePayload): Promise<RegistryResult<{ project: ProjectRecord }>>
-  patch(id: string, patch: ProjectPatch): Promise<RegistryResult<{ project: ProjectRecord }>>
-  remove(id: string): Promise<RegistryResult<{ removed: string }>>
-}
-
-
-// -- tasks (the control surface) -------------------------------------------
-
-/**
- * The task row as it crosses the IPC boundary.
- *
- * Deliberately a *slice*: the main process returns the server's row verbatim,
- * but the renderer only ever reads identity + the two fields the console has to
- * reason about. The full row for display still comes from the read-only
- * `/api/tasks` client -- this is not a second definition of it.
- */
-export interface TaskRow {
-  id: string
-  project: string
-  status: string
-  [field: string]: unknown
-}
-
-/**
- * How a task write failed, mirroring the control-plane HTTP contract:
- *  - `concurrency` 429 -- the spawn was refused (group busy, or the cap is
- *    full). Nothing changed, so the right move is "retry later", not "failed".
- *    `reason` says which limit bit.
- *  - `state`       409 -- the row is in the wrong state for the action
- *    (cancel a terminal task, remove a live one).
- *  - `invalid`     400 -- a field was rejected
- *  - `forbidden`   403 -- the token was missing or wrong
- *  - `notfound`    404 -- no such task id
- *  - `network`     the request never reached a response
- */
-export type TaskErrorKind = 'concurrency' | 'state' | 'invalid' | 'forbidden' | 'notfound' | 'network'
-
-export interface TaskWriteError {
-  kind: TaskErrorKind
-  status: number
-  /** Human copy from the server, or the transport error. Never the token. */
-  message: string
-  /** Present only when `kind === 'concurrency'`: which limit refused the spawn. */
-  reason?: 'group' | 'cap'
-  /** The server's detail line for a refusal (e.g. `group 'app' is busy`). */
-  detail?: string
-  /** The server's retry hint, when it gave one. */
-  hint?: string
-}
-
-/** Every task call answers with this: a value, or a typed failure. */
-export type TaskResult<T> = { ok: true; value: T } | { ok: false; error: TaskWriteError }
-
-/**
- * The body of `POST /api/tasks`. Four fields, matching the console's form:
- * project / brief / adapter / timeout. `start` names the two exits -- true fires
- * now, false saves it for later. Protection paths and worktree are registry
- * concerns and are deliberately not here.
- */
-export interface TaskCreatePayload {
-  project: string
-  brief: string
-  adapter: string
-  /** Hard cap for the run, in seconds. */
-  timeout: number
-  /** false saves it for later (the "save for later" exit). */
-  start: boolean
-}
-
-/**
- * The task control surface. Like `ProjectsApi`, every method answers with a
- * typed result rather than rejecting: the renderer needs to switch on *which*
- * failure (retry-later vs conflict vs network), and a rejected promise would
- * lose that shape. The token and the HTTP verbs live only in the main process.
- */
-export interface TasksApi {
-  create(payload: TaskCreatePayload): Promise<TaskResult<{ task: TaskRow }>>
-  /** Stop a task (`POST …/cancel`); it lands in the cancelled column. */
-  cancel(id: string): Promise<TaskResult<{ task: TaskRow }>>
-  /**
-   * Clear a card that is waiting for review (`POST …/accept`). Only a `blocked`
-   * task is accepted: green acceptance -> `done`, red -> `failed`. A card that
-   * is no longer blocked comes back as a `state` (409) failure.
-   */
-  accept(id: string): Promise<TaskResult<{ task: TaskRow }>>
-  /** Delete a terminal task's row and events (`DELETE …`). */
-  remove(id: string): Promise<TaskResult<{ removed: string }>>
-}
 /** One adapter's verdict from `taskproof doctor`: installed, or why not. */
 export interface AdapterStatus {
   name: string
@@ -366,17 +174,6 @@ export interface TpApi {
      */
     onShowAbout(listener: () => void): () => void
   }
-  /**
-   * Registry writes. Every method answers with a `RegistryResult`, never
-   * throwing across the IPC boundary -- a rejected promise would lose the shape
-   * the UI needs (which failure, and the conflict body).
-   */
-  projects: ProjectsApi
-  /**
-   * Task control: create / stop / accept / delete. Same discipline as
-   * `projects`: named methods, typed results, no token, no verbs.
-   */
-  tasks: TasksApi
   /** Present only with `TP_DESKTOP_DIAG`; see `DiagApi`. */
   diag?: DiagApi
 }

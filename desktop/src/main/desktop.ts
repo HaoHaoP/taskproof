@@ -2,12 +2,11 @@
  * The reasoning behind the desktop-integration switches -- tray, Dock badge and
  * notifications -- kept free of Electron so it can be unit-tested.
  *
- * The renderer is not the only thing that can read the local API: reads are not
- * token-gated, so the main process polls `/api/summary` and `/api/tasks` itself.
- * That keeps the write token on one side of the boundary and gives the switches
- * a single owner. The transport and the Electron objects live in `index.ts`;
- * what lives here is the arithmetic and the de-duplication, the part worth
- * pinning.
+ * The renderer is not the only thing that reads the local API: reads are open,
+ * so the main process polls `/api/summary` and `/api/tasks` itself. That gives
+ * the switches a single owner. The transport and the Electron objects live in
+ * `index.ts`; what lives here is the arithmetic and the de-duplication, the part
+ * worth pinning.
  */
 
 /**

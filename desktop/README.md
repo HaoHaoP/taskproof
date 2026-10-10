@@ -2,7 +2,10 @@
 
 The Electron console. It replaces the stage-1 static board's **rendering layer
 only**; the static board stays as a frozen `file://` snapshot, and the read-only
-loopback REST API is unchanged. The matrix narrows its finished column to the
+loopback REST API is unchanged. The console is itself read-only: it polls the
+local API and renders the board, but every project registration and task
+dispatch lives in the CLI -- there is no write path here, and the app carries no
+API token. The matrix narrows its finished column to the
 ten most recent cards by default (a fold bar reveals the rest) and the whole
 board can be filtered by project and by time range, both held in the address
 bar's query string.
@@ -76,10 +79,11 @@ out.
 
 ## Deliberately not here yet
 
-- **Project CRUD.** Writing `projects.toml` needs a write endpoint plus the
-  session-only local write token, and it must compare the file's mtime/hash
-  before saving. The write path stays in the main process so the token never
-  reaches the renderer.
+- **Project CRUD and task control.** Registering, editing or removing a project
+  and dispatching / stopping / accepting / deleting a task all live in the CLI
+  (`taskproof register`, `taskproof run`, ...). The desktop console is a
+  read-only board: it never writes `projects.toml`, never carries an API token,
+  and offers no write entry point.
 - **Packaging.** `electron-builder` is a dependency and `npm run pack` exists,
   but v1 is dev-run only.
 - **Tray, notifications, dock badge, autostart.** The settings page has no

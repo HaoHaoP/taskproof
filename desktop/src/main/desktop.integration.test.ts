@@ -29,8 +29,8 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 
-/** A stub API child: prints the port/token lines the real CLI prints, then serves
- *  the two read endpoints the poller consumes. Writes `<pid> <port>` when up. */
+/** A stub API child: prints the port line the real CLI prints, then serves the
+ *  two read endpoints the poller consumes. Writes `<pid> <port>` when up. */
 const FAKE_API = `
 import { createServer } from 'node:http'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -53,12 +53,11 @@ srv.listen(want, '127.0.0.1', () => {
   const port = srv.address().port
   writeFileSync(log, process.pid + ' ' + port)
   // Test seam only: while FAKE_API_HOLD points at an existing file, withhold the
-  // port/token lines -- a stand-in for a child that is slow to announce its port.
-  // A real run never sets this, so a real child always announces immediately.
+  // port line -- a stand-in for a child that is slow to announce its port. A real
+  // run never sets this, so a real child always announces immediately.
   const hold = process.env.FAKE_API_HOLD
   if (hold && existsSync(hold)) return
   process.stdout.write('taskproof api listening on http://127.0.0.1:' + port + '\\n')
-  process.stdout.write('taskproof api token fake-session-token\\n')
 })
 process.on('SIGTERM', () => process.exit(0))
 `
@@ -469,7 +468,7 @@ describe('desktop integration (stubbed electron + stubbed API child)', { timeout
     const diagBefore = H.diag.length
     H.notifications.length = 0
 
-    // Withhold the port/token lines on the next child, then restart into it. The
+    // Withhold the port line on the next child, then restart into it. The
     // restart promise blocks until the port read times out, so do not await it.
     writeFileSync(H.holdFile, '')
     void H.ipc['tp:service:restart']()
