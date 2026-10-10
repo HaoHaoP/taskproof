@@ -1278,6 +1278,44 @@ class LaneWorkspaceTest(unittest.TestCase):
             self._run()
         self.assertIn("workspace-rm", str(ctx.exception.hint))
 
+    def test_main_tree_commit_does_not_block_the_running_card(self):
+        """Card67: a sibling checkout's commit must not read as this card's.
+
+        The lane runs in its own long-lived worktree; the branch refs it shares
+        with the main tree are repository-wide. A commit in the main checkout
+        while the card runs moves that shared ref, and before card67 the gate
+        blamed the card. Here the adapter (running with cwd = the lane's
+        worktree) commits in the MAIN tree, and the card must still finish
+        ``done`` -- no ``forbidden`` / ``blocked`` event.
+        """
+        body = (
+            "[defaults]\nconcurrency = 3\ntimeout = 60\n\n"
+            f'[[taskgroup]]\nid = "lane"\npath = "{self.repo}"\n'
+            'verify = "exit 0"\nverify_kind = "check"\n'
+            'workspace = "worktree"\nforbidden_paths = [".git/"]\n'
+        )
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write(body)
+
+        main_before = self._git("rev-parse", "HEAD").stdout.strip()
+        command = (
+            "custom:sh -c 'git -C " + self.repo
+            + " commit --allow-empty -qm main-move && echo done'"
+        )
+        task_id = self._run(command=command)
+
+        # The run really happened in the lane's worktree, and the main tree
+        # really did move underneath it.
+        self.assertEqual(self._workdir(task_id), self._workspace_path())
+        main_after = self._git("rev-parse", "HEAD").stdout.strip()
+        self.assertNotEqual(main_before, main_after)
+
+        detail = task_detail(self.ws, task_id)
+        self.assertEqual(detail["task"]["status"], STATUS_DONE)
+        names = [e["event"] for e in detail["events"]]
+        self.assertNotIn("forbidden", names)
+        self.assertNotIn("blocked", names)
+
     # -- dependency links -------------------------------------------------
 
     def test_explicit_link_points_at_the_main_tree_and_is_idempotent(self):

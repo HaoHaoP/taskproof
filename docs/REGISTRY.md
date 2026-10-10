@@ -245,9 +245,14 @@ state (HEAD, refs and stash) is compared instead of its bookkeeping files, so a
 read-only `git status` index refresh is not a violation while commits, resets,
 branch/tag changes and stashes still are: the probe reads HEAD, the symbolic
 branch, every `refs/heads`, `refs/remotes` and `refs/tags` entry, and the stash
-list. One limit worth knowing: a protected tree larger than 20000 entries is
-sampled, and the audit event records `snapshot_truncated: true` when that
-happens.
+list. `refs/heads/*` is shared by every worktree of the repository, so the
+branches **another** worktree has checked out are dropped from that comparison —
+a commit in a sibling checkout is not this card's doing. The probed worktree's
+own branch, every `refs/remotes` and `refs/tags` entry, and the stash all stay
+in, so a worker that commits, branches, tags, stashes or pushes inside its own
+checkout is still caught. One limit worth knowing: a protected tree larger than
+20000 entries is sampled, and the audit event records `snapshot_truncated: true`
+when that happens.
 
 ## Hard errors
 

@@ -327,6 +327,55 @@ def is_git_forbidden_rule(workdir: str, raw_rule) -> bool:
     return rule_path == ".git"
 
 
+def _branches_checked_out_elsewhere(workdir: str) -> set:
+    """Full branch refs checked out by *other* worktrees of the same repo.
+
+    ``refs/heads/*`` is shared by every worktree of a repository, so a commit,
+    checkout or reset in a sibling checkout moves the very same branch ref the
+    probed worktree sees. That is the point of worktree isolation: it is not
+    this card's doing. ``git worktree list --porcelain`` names each checkout
+    (``worktree <path>``) and the branch it has checked out (``branch
+    refs/heads/<b>``; a detached checkout has no ``branch`` line). We collect
+    the branches of every entry whose path is not the probed worktree's own
+    root, so the caller can drop exactly those refs from the snapshot.
+
+    Returns an empty set when git cannot be run, the path is not a worktree, or
+    the listing is unavailable (an older git, for instance). An empty set means
+    "exclude nothing", which is byte-for-byte today's behaviour.
+    """
+    listing = _git_output(workdir, ["worktree", "list", "--porcelain"])
+    if listing is None or listing[0] != 0:
+        return set()
+
+    # The probed checkout, resolved to its real top: ``workdir`` may be a
+    # subdirectory of the worktree (a lane can point at one) and the listing
+    # always reports the top. Compare real paths so symlinked spellings match.
+    top = _git_output(workdir, ["rev-parse", "--show-toplevel"])
+    if top is None or top[0] != 0:
+        return set()
+    current = os.path.realpath(top[1].strip())
+
+    excluded: set = set()
+
+    def _flush(path: Optional[str], branch: Optional[str]) -> None:
+        if not branch or not path:
+            return
+        if os.path.realpath(path) != current:
+            excluded.add(branch)
+
+    path: Optional[str] = None
+    branch: Optional[str] = None
+    for line in listing[1].splitlines():
+        if line.startswith("worktree "):
+            _flush(path, branch)
+            path = line[len("worktree "):].strip()
+            branch = None
+        elif line.startswith("branch "):
+            branch = line[len("branch "):].strip()
+    _flush(path, branch)
+    return excluded
+
+
 def git_state_snapshot(workdir: str) -> Dict[str, str]:
     """Read the repository state guarded by a forbidden ``.git`` rule.
 
@@ -335,6 +384,13 @@ def git_state_snapshot(workdir: str) -> Dict[str, str]:
     amends, resets, checkouts, branch/tag changes, and stash changes move one of
     these values; a ``git status`` index refresh does not.
 
+    One deliberate narrowing: ``refs/heads/*`` is shared across a repository's
+    worktrees, so branches another worktree has checked out are left out of the
+    snapshot (see :func:`_branches_checked_out_elsewhere`). A commit in a
+    sibling checkout must not read as this card's doing. The probed worktree's
+    own branch, every ``refs/remotes/*`` and ``refs/tags/*`` ref, and the stash
+    stay in, because those are the moves this card can really make.
+
     Returns ``{}`` when ``workdir`` is not a repository, git is not on PATH, or
     git cannot be executed. In that case there is no state to claim changed, so
     the caller must not treat absence as a violation.
@@ -342,6 +398,11 @@ def git_state_snapshot(workdir: str) -> Dict[str, str]:
     repo = _git_output(workdir, ["rev-parse", "--git-dir"])
     if repo is None or repo[0] != 0:
         return {}
+
+    # Branches a sibling worktree has checked out; exclude them from the refs
+    # below. Empty when there is no other worktree, which keeps the snapshot
+    # byte-for-byte identical to the pre-worktree behaviour.
+    elsewhere = _branches_checked_out_elsewhere(workdir)
 
     state: Dict[str, str] = {"HEAD": "", "symbolic-ref": "", "stash": ""}
 
@@ -367,6 +428,8 @@ def git_state_snapshot(workdir: str) -> Dict[str, str]:
         for line in refs[1].splitlines():
             fields = line.strip().split(None, 1)
             if len(fields) == 2:
+                if fields[0] in elsewhere:
+                    continue
                 state[fields[0]] = fields[1]
 
     stashes = _git_output(workdir, ["stash", "list", "--format=%H"])
