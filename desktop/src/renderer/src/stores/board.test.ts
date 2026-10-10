@@ -18,7 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useBoardStore } from './board'
-import type { TaskLog } from '../api/client'
+import type { ProjectGroup, TaskLog } from '../api/client'
 
 describe('polling and start-up', () => {
   beforeEach(() => {
@@ -91,6 +91,98 @@ const PAGE_TWO: TaskLog = {
   size: 11,
   omitted: 0
 }
+
+/**
+ * The D2 shape-C grouped view. The board draws one row per *project*, so the
+ * store holds `GET /api/projects?by=project` and derives the lane -> project
+ * map from its nested `taskgroups` -- the flat one-row-per-lane view is left
+ * for the projects page and the empty-state banner.
+ */
+const GROUPS = [
+  {
+    id: 'alpha',
+    path: '/w/alpha',
+    aliases: ['a'],
+    taskgroups: [
+      { id: 'alpha-core', project: 'alpha', path: '/w/alpha/core' },
+      { id: 'alpha-web', project: 'alpha', path: '/w/alpha/web' }
+    ],
+    summary: {
+      running: 1,
+      verifying: 0,
+      done: 3,
+      failed: 1,
+      blocked: 0,
+      timeout: 0,
+      cancelled: 0
+    }
+  },
+  {
+    id: 'beta',
+    path: '/w/beta',
+    aliases: [],
+    taskgroups: [{ id: 'beta', project: 'beta', path: '/w/beta' }],
+    summary: {
+      running: 0,
+      verifying: 0,
+      done: 0,
+      failed: 0,
+      blocked: 0,
+      timeout: 0,
+      cancelled: 0
+    }
+  }
+] as unknown as ProjectGroup[]
+
+describe('the grouped view (one row per project)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    ;(globalThis as unknown as { window: unknown }).window = { tp: undefined }
+    ;(globalThis as unknown as { location: unknown }).location = { search: '' }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: unknown) => {
+        const url = String(input)
+        // Match the grouped view before the flat one: both contain `/api/projects`.
+        if (url.includes('/api/projects?by=project')) {
+          return Promise.resolve(json({ projects: GROUPS }))
+        }
+        if (url.endsWith('/api/health')) return Promise.resolve(json({ ok: true, version: 'test' }))
+        if (url.includes('/api/summary')) return Promise.resolve(json({ summary: {} }))
+        if (url.includes('/api/projects')) return Promise.resolve(json({ projects: [] }))
+        if (url.includes('/api/tasks')) return Promise.resolve(json({ tasks: [] }))
+        return Promise.reject(new Error(`unexpected request: ${url}`))
+      })
+    )
+  })
+
+  afterEach(() => {
+    useBoardStore().dispose()
+    vi.unstubAllGlobals()
+  })
+
+  it('holds the grouped view and reads the lane -> project map off its lanes', async () => {
+    const store = useBoardStore()
+    await store.refresh()
+
+    expect(store.projectGroups.map((group) => group.id)).toEqual(['alpha', 'beta'])
+    // One project + its nested taskgroups + summary, held as fetched.
+    expect(store.projectGroups[0].taskgroups.map((lane) => lane.id)).toEqual([
+      'alpha-core',
+      'alpha-web'
+    ])
+    expect(store.projectGroups[0].summary).toMatchObject({ running: 1, done: 3, failed: 1 })
+    // The map comes from `taskgroups[].project`, not a second request.
+    expect(store.laneProject).toEqual({
+      'alpha-core': 'alpha',
+      'alpha-web': 'alpha',
+      beta: 'beta'
+    })
+    // The flat view is still fetched (the projects page reads it) but is not
+    // the board's row source.
+    expect(store.projects).toEqual([])
+  })
+})
 
 describe('the log tail', () => {
   let logCalls: string[]

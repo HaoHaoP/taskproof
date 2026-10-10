@@ -14,3 +14,14 @@ import type { Task } from './api/client'
 export function acceptancePassed(task: Pick<Task, 'status' | 'verify_exit'>): boolean {
   return task.status === 'blocked' && task.verify_exit === 0
 }
+
+/**
+ * The lane (taskgroup) a card's task ran in. A task row's `project` column
+ * stores the *lane* id, not the owning project id -- the registry maps lane ->
+ * project for the row a card is drawn under. The card annotates this so a card
+ * that sits under a project row can still name the lane it came from, without
+ * adding a column or a fetch: it is the one field the row already carries.
+ */
+export function laneLabel(task: Pick<Task, 'project'>): string {
+  return task.project
+}

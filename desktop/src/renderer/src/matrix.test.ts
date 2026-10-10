@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Project, Task } from './api/client'
+import type { Project, ProjectGroup, Task } from './api/client'
 import { COLUMNS, type Column } from './contract'
 import {
   DEFAULT_FILTER,
@@ -14,7 +14,9 @@ import {
   groupColumns,
   hiddenTally,
   inRange,
+  laneProjectMap,
   needsMoreBudget,
+  owningProject,
   parseBoardFilter,
   sortColumn,
   visibleColumns,
@@ -158,7 +160,8 @@ describe('time range', () => {
     const filtered = filterBoard(
       rows,
       { ...DEFAULT_FILTER, range: 'today', projects: ['two'] },
-      NOW
+      NOW,
+      {}
     )
     expect(filtered.map((t) => t.id)).toEqual(['b'])
   })
@@ -292,7 +295,7 @@ describe('rows and cards read one set', () => {
     // another row. Now one set feeds both, so the two can never disagree.
     const filter = { ...DEFAULT_FILTER, projects: ['one', 'three'] }
     const lanes = visibleProjects(projects, filter).map((p) => p.id)
-    const kept = filterBoard(rows, filter, NOW)
+    const kept = filterBoard(rows, filter, NOW, {})
     for (const hidden of ['two']) {
       expect(lanes).not.toContain(hidden)
       expect(kept.some((t) => t.project === hidden)).toBe(false)
@@ -303,7 +306,82 @@ describe('rows and cards read one set', () => {
   it('an empty set draws no lanes and keeps no cards', () => {
     const filter = { ...DEFAULT_FILTER, projects: [] }
     expect(visibleProjects(projects, filter)).toEqual([])
-    expect(filterBoard(rows, filter, NOW)).toEqual([])
+    expect(filterBoard(rows, filter, NOW, {})).toEqual([])
+  })
+})
+
+/** A grouped project row with only the fields the mapping reads. */
+function group(id: string, lanes: string[]): ProjectGroup {
+  return {
+    id,
+    path: `/w/${id}`,
+    aliases: [],
+    taskgroups: lanes.map((lane) => ({ id: lane, project: id })),
+    summary: {}
+  } as unknown as ProjectGroup
+}
+
+describe('project rows file cards by the registry lane -> project map', () => {
+  // Two lanes folded into one project, plus a lone one-lane project.
+  const groups = [group('alpha', ['alpha-core', 'alpha-web']), group('beta', ['beta'])]
+
+  it('maps every lane id to its owning project, from the grouped view alone', () => {
+    // The map is built from the nested `taskgroups[].project` back-pointers --
+    // no second request to the flat lane list.
+    expect(laneProjectMap(groups)).toEqual({
+      'alpha-core': 'alpha',
+      'alpha-web': 'alpha',
+      beta: 'beta'
+    })
+  })
+
+  it('files a lane task under its project row, not under its own lane id', () => {
+    const rows = [
+      task('c', { project: 'alpha-core' }),
+      task('w', { project: 'alpha-web' }),
+      task('b', { project: 'beta' })
+    ]
+    const map = laneProjectMap(groups)
+    // The mapping is exactly what changes the answer: the same lane id would
+    // file `c` under `alpha-core`, but the project row is `alpha`.
+    expect(owningProject(rows[0], map)).toBe('alpha')
+    expect(rows[0].project).toBe('alpha-core')
+
+    // Filtering by the *project* id keeps both of its lanes' cards…
+    const alpha = { ...DEFAULT_FILTER, projects: ['alpha'] }
+    expect(visibleProjects(groups, alpha).map((g) => g.id)).toEqual(['alpha'])
+    expect(filterBoard(rows, alpha, NOW, map).map((t) => t.id)).toEqual(['c', 'w'])
+    // …and dropping it drops both, never one without the other.
+    const beta = { ...DEFAULT_FILTER, projects: ['beta'] }
+    expect(visibleProjects(groups, beta).map((g) => g.id)).toEqual(['beta'])
+    expect(filterBoard(rows, beta, NOW, map).map((t) => t.id)).toEqual(['b'])
+  })
+
+  it('falls back to the lane id when the group view has not listed the lane', () => {
+    // Compat: a registry not yet collected lists no groups, so a task's lane id
+    // is its own project row -- exactly today's one-row-per-lane behaviour.
+    expect(owningProject(task('x', { project: 'solo' }), {})).toBe('solo')
+  })
+})
+
+/**
+ * The nail: an uncollected registry (every lane its own project, the shape of
+ * the live `projects.toml`) must still draw one row per lane. Grouping the
+ * rows must neither merge nor drop a single one -- 22 lanes stay 22 rows.
+ */
+describe('an uncollected registry keeps one row per lane', () => {
+  const groups: ProjectGroup[] = Array.from({ length: 22 }, (_, i) => {
+    const id = `p${String(i).padStart(2, '0')}`
+    return group(id, [id])
+  })
+
+  it('draws 22 rows for 22 lanes, and maps every lane to itself', () => {
+    const rows = visibleProjects(groups, DEFAULT_FILTER)
+    expect(rows.length).toBe(22)
+    const map = laneProjectMap(groups)
+    expect(Object.keys(map).length).toBe(22)
+    // Every lane owns itself, so a task keeps the exact row it had today.
+    expect(new Set(Object.values(map))).toEqual(new Set(groups.map((g) => g.id)))
   })
 })
 

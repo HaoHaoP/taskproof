@@ -10,7 +10,7 @@ export default {
     expand: 'Show sidebar'
   },
 
-  rail: { title: 'Projects', all: 'All', none: 'None', tasks: 'tasks' },
+  rail: { title: 'Projects', all: 'All', none: 'None', tasks: 'tasks', lanes: 'lanes' },
 
   /* The matrix's board-level filter and its finished-column window. */
   board: {
@@ -50,7 +50,7 @@ export default {
 
   tally: { tasks: 'tasks', flying: 'in progress', failed: 'failed' },
 
-  card: { attempt: 'try', files: 'files', acceptancePassed: 'Acceptance passed' },
+  card: { attempt: 'try', files: 'files', acceptancePassed: 'Acceptance passed', lane: 'lane' },
 
   tasks: {
     title: 'All tasks',
@@ -232,6 +232,7 @@ export default {
     files: 'files changed',
     adapter: 'adapter',
     group: 'group',
+    lane: 'lane',
     notrun: 'not run'
   },
 

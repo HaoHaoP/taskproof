@@ -76,6 +76,31 @@ export interface Project {
 /** Keyed by status word. Every declared status is present, even at zero. */
 export type Summary = Record<string, number>
 
+/**
+ * One lane (taskgroup) nested inside a grouped project row. The record is the
+ * historical `Project` shape -- the same fields `/api/projects` returns -- minus
+ * the per-lane stats (the group sums them into `summary`) and plus the owning
+ * `project` id, so the lane knows which project row it belongs to.
+ */
+export type ProjectTaskgroup = Omit<
+  Project,
+  'tasks' | 'in_progress' | 'failed' | 'last_activity'
+> & { project: string }
+
+/**
+ * `GET /api/projects?by=project` -- the D2 shape-C grouped view: one row per
+ * owning project, its lanes nested in `taskgroups`, and the lifecycle statuses
+ * summed across those lanes in `summary`. The flat `/api/projects` view (one
+ * row per lane) is untouched and still what the projects page reads.
+ */
+export interface ProjectGroup {
+  id: string
+  path: string
+  aliases: string[]
+  taskgroups: ProjectTaskgroup[]
+  summary: Summary
+}
+
 export interface ApiError extends Error {
   status: number
 }
@@ -90,6 +115,8 @@ export interface BoardClient {
   health(): Promise<{ ok: boolean; version: string }>
   summary(): Promise<Summary>
   projects(): Promise<Project[]>
+  /** The grouped (shape C) view: one row per project, its lanes nested. */
+  projectGroups(): Promise<ProjectGroup[]>
   tasks(params?: { limit?: number; status?: string; project?: string }): Promise<Task[]>
   task(id: string): Promise<{ task: Task; events: TaskEvent[] }>
   events(id: string): Promise<TaskEvent[]>
@@ -115,6 +142,8 @@ export function createClient(baseUrl: string): BoardClient {
     health: () => get('/api/health'),
     summary: async () => (await get<{ summary: Summary }>('/api/summary')).summary,
     projects: async () => (await get<{ projects: Project[] }>('/api/projects')).projects,
+    projectGroups: async () =>
+      (await get<{ projects: ProjectGroup[] }>('/api/projects?by=project')).projects,
     tasks: async (params = {}) => {
       const query = new URLSearchParams()
       if (params.limit !== undefined) query.set('limit', String(params.limit))

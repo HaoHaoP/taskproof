@@ -18,7 +18,7 @@ import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import StatusMark from '../components/StatusMark.vue'
 import TaskCard from '../components/TaskCard.vue'
 import TaskDrawer from '../components/TaskDrawer.vue'
-import type { Task } from '../api/client'
+import type { ProjectGroup, Task } from '../api/client'
 import { ICONS } from '../icons'
 import {
   DONE_WINDOW,
@@ -31,6 +31,7 @@ import {
   gridTracks,
   groupColumns,
   hiddenTally,
+  owningProject,
   parseBoardFilter,
   visibleColumns,
   visibleProjects,
@@ -48,10 +49,11 @@ const { t } = useI18n()
 /** The board's filter, read straight off the address bar. */
 const filter = computed(() => parseBoardFilter(route.query))
 
-/** Every 项目 (project row) the matrix draws a lane for. This is the *same*
- *  selected set `filterBoard` keeps cards by -- so a project the multi-select
- *  drops loses its row and its cards together, never one without the other. */
-const projects = computed(() => visibleProjects(store.projects, filter.value))
+/** Every project row the matrix draws. This is the *same* selected set
+ *  `filterBoard` keeps cards by -- so a project the multi-select drops loses
+ *  its row and its cards together, never one without the other. The rows come
+ *  from the grouped (D2 shape C) view: one row per project, its lanes nested. */
+const projects = computed(() => visibleProjects(store.projectGroups, filter.value))
 
 /**
  * The status columns (泳道) the board shows: every contract column the address
@@ -67,16 +69,22 @@ const lanes = computed(() => visibleColumns(filter.value))
  *  the rest and no hidden column claims a track. */
 const gridStyle = computed(() => ({ gridTemplateColumns: gridTracks(lanes.value.length) }))
 
-/** The registry's ids, in order: what "all selected" means. `filter.projects`
- *  is null in that default state, so the multi-select model falls back to this
- *  full list rather than to an empty selection. */
-const allProjectIds = computed(() => store.projects.map((project) => project.id))
+/** The registry's project ids, in order: what "all selected" means.
+ *  `filter.projects` is null in that default state, so the multi-select model
+ *  falls back to this full list rather than to an empty selection. The values
+ *  (and so the whole "all / none / selected N" arithmetic) are project ids. */
+const allProjectIds = computed(() => store.projectGroups.map((group) => group.id))
 
 /** What the multi-select shows as checked. */
 const selectedProjects = computed(() => filter.value.projects ?? allProjectIds.value)
 
-/** The narrowed board, grouped and ordered -- the source of every cell. */
-const columns = computed(() => groupColumns(filterBoard(store.tasks, filter.value, Date.now())))
+/** The narrowed board, grouped and ordered -- the source of every cell. The
+ *  fourth argument is the lane -> project map: a task row's `project` column
+ *  is a *lane* id, so `filterBoard` and `tasksIn` below must route it through
+ *  the registry to know which project row it belongs under. */
+const columns = computed(() =>
+  groupColumns(filterBoard(store.tasks, filter.value, Date.now(), store.laneProject))
+)
 
 
 /** The finished column's window. The fold bar reads `hidden`; the cell reads
@@ -113,7 +121,40 @@ function countIn(columnKey: string): number {
 }
 
 function tasksIn(projectId: string, columnKey: string): Task[] {
-  return (shown.value[columnKey] ?? []).filter((task) => task.project === projectId)
+  // A task's own `project` column is the lane, not the owning project: file it
+  // under the project row the registry maps its lane to, and nowhere else.
+  return (shown.value[columnKey] ?? []).filter(
+    (task) => owningProject(task, store.laneProject) === projectId
+  )
+}
+
+/** How many lanes a project row carries. A single-lane project (the
+ *  uncollected-registry case) reports 1 -- the row still reads as its own lane. */
+function laneCount(group: ProjectGroup): number {
+  return group.taskgroups.length
+}
+
+/** The project's total card count: the grouped view's status summary summed.
+ *  Same aggregate the per-lane row used to carry on its own. */
+function groupTasks(group: ProjectGroup): number {
+  return Object.values(group.summary).reduce((sum, n) => sum + (n || 0), 0)
+}
+
+/** In-flight across the project's lanes (running + verifying). */
+function groupFlying(group: ProjectGroup): number {
+  return (group.summary.running ?? 0) + (group.summary.verifying ?? 0)
+}
+
+/** Failure-like terminals across the project's lanes (failed + timeout). */
+function groupFailed(group: ProjectGroup): number {
+  return (group.summary.failed ?? 0) + (group.summary.timeout ?? 0)
+}
+
+/** The row's tooltip: the registered aliases. The visible name stays the id --
+ *  aliases are a lookup aid, not the row's identity. Empty when there are none,
+ *  so the attribute is simply absent. */
+function aliasHint(group: ProjectGroup): string {
+  return group.aliases.join(', ')
 }
 
 /** The fold control a terminal header draws *inside itself*, read off the one
@@ -252,11 +293,14 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
             </div>
           </template>
           <el-option
-            v-for="project in store.projects"
-            :key="project.id"
-            :value="project.id"
-            :label="project.id"
-          />
+            v-for="group in store.projectGroups"
+            :key="group.id"
+            :value="group.id"
+            :label="group.id"
+          >
+            <!-- The visible name is the project id; aliases ride a tooltip. -->
+            <span :title="aliasHint(group) || undefined">{{ group.id }}</span>
+          </el-option>
         </el-select>
       </label>
       <label class="fld">
@@ -360,14 +404,17 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
           </button>
         </div>
 
-        <template v-for="project in projects" :key="project.id">
+        <template v-for="group in projects" :key="group.id">
           <div class="lane">
-            <div class="name">{{ project.id }}</div>
-            <div class="pth">{{ project.path }}</div>
+            <!-- The row is a *project*: its id names it, aliases ride a tooltip,
+                 and the lane count says how many lanes sit inside it. -->
+            <div class="name" :title="aliasHint(group) || undefined">{{ group.id }}</div>
+            <div class="pth">{{ group.path }}</div>
             <div class="tally">
-              <span>{{ project.tasks }} {{ t('rail.tasks') }}</span>
-              <span v-if="project.in_progress">{{ project.in_progress }} {{ t('tally.flying') }}</span>
-              <span v-if="project.failed" class="bad">{{ project.failed }} {{ t('tally.failed') }}</span>
+              <span>{{ laneCount(group) }} {{ t('rail.lanes') }}</span>
+              <span>{{ groupTasks(group) }} {{ t('rail.tasks') }}</span>
+              <span v-if="groupFlying(group)">{{ groupFlying(group) }} {{ t('tally.flying') }}</span>
+              <span v-if="groupFailed(group)" class="bad">{{ groupFailed(group) }} {{ t('tally.failed') }}</span>
             </div>
           </div>
           <div
@@ -377,13 +424,13 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
             :class="{ zcol: index % 2 === 1 }"
           >
             <TaskCard
-              v-for="task in tasksIn(project.id, column.key)"
+              v-for="task in tasksIn(group.id, column.key)"
               :key="task.id"
               :task="task"
               :expanded="isExpanded(task.id)"
               @open="openTask"
             />
-            <div v-if="!tasksIn(project.id, column.key).length" class="dash">—</div>
+            <div v-if="!tasksIn(group.id, column.key).length" class="dash">—</div>
           </div>
         </template>
       </div>

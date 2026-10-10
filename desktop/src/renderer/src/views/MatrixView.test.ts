@@ -13,6 +13,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { COLUMNS } from '../contract'
 
 const view = readFileSync(new URL('./MatrixView.vue', import.meta.url), 'utf-8')
 const tokens = readFileSync(new URL('../assets/tokens.css', import.meta.url), 'utf-8')
@@ -251,5 +252,42 @@ describe('matrix capped warning branches (card 45)', () => {
     // The fallback is a plain sentence, not a disabled affordance: there is no
     // `disabled` grow button the reader could mistake for a live one.
     expect(view).not.toMatch(/class="grow"[\s\S]{0,40}disabled/)
+  })
+})
+
+/**
+ * TP-card64: the left rail and the matrix rows are one row per *project* (the
+ * D2 shape C two-layer model), with the lanes nested inside. An uncollected
+ * registry -- every lane its own project, the live shape -- must keep the same
+ * row count and names it has today.
+ */
+describe('the left rail draws one row per project (project granularity)', () => {
+  it('reads the grouped view, whose row count is the project count', () => {
+    expect(view).toContain('visibleProjects(store.projectGroups, filter.value)')
+    expect(view).not.toContain('visibleProjects(store.projects, filter.value)')
+    expect(view).toMatch(/v-for="group in projects" :key="group\.id"/)
+    // The dropdown and the "all / none / selected N" arithmetic are project ids.
+    expect(view).toContain('store.projectGroups.map((group) => group.id)')
+    expect(view).toMatch(/v-for="group in store\.projectGroups"/)
+  })
+
+  it('shows each project name and its lane count, aliases on a tooltip', () => {
+    expect(view).toMatch(/<div class="name" :title="aliasHint\(group\) \|\| undefined">\{\{ group\.id \}\}<\/div>/)
+    expect(view).toMatch(/\{\{ laneCount\(group\) \}\} \{\{ t\('rail\.lanes'\) \}\}/)
+  })
+
+  it('files a card under its project by the registry lane -> project map', () => {
+    expect(view).toMatch(/owningProject\(task, store\.laneProject\) === projectId/)
+    expect(view).not.toMatch(/task\.project === projectId/)
+    // The view never re-derives the mapping; the store holds it.
+    expect(view).toMatch(/store\.laneProject/)
+  })
+
+  it('keeps the six-column grid sized by the visible count, not a literal', () => {
+    // COLUMNS unchanged at six, and the grid still derives its track count --
+    // writing a literal `repeat(6, ...)` would silently strand a wider contract.
+    expect(COLUMNS.length).toBe(6)
+    expect(view).toContain('gridTracks(lanes.value.length)')
+    expect(view).not.toMatch(/repeat\(\s*\d/)
   })
 })

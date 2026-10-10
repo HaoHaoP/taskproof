@@ -402,6 +402,10 @@ watch(
               <dd>{{ task.adapter ?? '—' }}{{ task.model ? ` · ${task.model}` : '' }}</dd>
               <dt>{{ t('ev.group') }}</dt>
               <dd>{{ task.group_name ?? '—' }}</dd>
+              <!-- The lane (taskgroup) is one of the task's facts, at the same
+                   level as the rest: the `project` column is the lane id. -->
+              <dt>{{ t('ev.lane') }}</dt>
+              <dd>{{ task.project }}</dd>
             </dl>
           </div>
         </div>
