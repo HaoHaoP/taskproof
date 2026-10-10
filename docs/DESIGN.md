@@ -306,6 +306,18 @@ matches on the **path itself**, independent of the rule's `kind`, so `file`,
 other ignored path (`node_modules/`, `dist/`) is still watched, and a name that
 merely contains the substring, such as `a__pycache__b.py`, is still a breach.
 
+**A sibling checkout's branch is never a boundary breach.** `refs/heads/*` is
+one namespace shared by every worktree of a repository, so a commit in the main
+checkout advances a branch ref that the guarded worktree's probe also sees. The
+gate therefore drops the branches **other** worktrees have checked out (read
+from `git worktree list --porcelain`) before it compares refs — the same
+"world's noise" rule as byte-code, applied to a card that holds `worktree`
+isolation. The narrowing is exact: the probed worktree's *own* branch stays in
+(only this card moves it), and so do every `refs/remotes/*` ref, every
+`refs/tags/*` ref and the stash. A worker that commits, branches, tags, stashes
+or pushes inside its own checkout is still caught. With no second worktree the
+exclusion set is empty and the snapshot is byte-for-byte the old one.
+
 **`presence:` is not an exception.** A type prefix selects the probe for *its own*
 rule; it never weakens another rule that already covers the same path. In
 particular `presence:` is not an allow-list: adding `presence:t/__pycache__/`

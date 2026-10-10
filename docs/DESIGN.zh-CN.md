@@ -260,6 +260,15 @@ presence   只比文件集合的增删
 跳过它：别的被 ignore 的路径（`node_modules/`、`dist/`）照样盯着，名字里恰好含这段
 子串的 `a__pycache__b.py` 也照样算越界。
 
+**别的工作树检出的分支永远不算越界。** `refs/heads/*` 是整个仓库所有 worktree 共用
+的一套命名空间：主检出里提交一次，就会推进一个被保护 worktree 的探针同样看得见的分支
+ref。所以闸门在比对 ref 之前，会先剔除**别的** worktree 已经检出的分支（读自
+`git worktree list --porcelain`）—— 这与字节码是同一条「世界的噪声」原则，只是落在
+持有 `worktree` 隔离的那张卡上。这条收窄是精确的：被探测 worktree **自己**的分支保留
+（只有这张卡会动它），`refs/remotes/*` 的每一项、`refs/tags/*` 的每一项以及 stash 也
+都保留。worker 在自己的检出里提交、建分支、打标签、stash、push，照样抓得住。没有第二
+棵 worktree 时排除集为空，快照与老口径逐字节相同。
+
 **`presence:` 不是例外。** 类型前缀只为**它自己**那条规则选探针，绝不会削弱另一条
 已经覆盖同一路径的规则。特别地，`presence:` 不是白名单：在 `t/` 规则旁边再加一条
 `presence:t/__pycache__/`，并不会把字节码从 `t/` 里豁免出去 —— `t/` 规则对 `t/` 下的

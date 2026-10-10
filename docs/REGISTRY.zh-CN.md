@@ -212,9 +212,12 @@ Vite/Webpack 的 HMR 会重写 `dist/**`、`node_modules/.cache/**` —— 也�
 若规则指向仓库的 `.git` 目录，则特殊处理：比较 HEAD、refs 与 stash 状态，而不是
 git 的记账文件；因此只读的 `git status` 刷新 index 不算违规，而提交、reset、
 切换/建立分支、打标签和 stash 仍会被抓住 —— 探针读的是 HEAD、符号分支、
-`refs/heads`、`refs/remotes`、`refs/tags` 的每一项，以及 stash 列表。一个需要知道的
-边界：受保护目录超过 20000 个条目时只做抽样，此时审计事件里会记
-`snapshot_truncated: true`。
+`refs/heads`、`refs/remotes`、`refs/tags` 的每一项，以及 stash 列表。`refs/heads/*`
+是整个仓库所有 worktree 共用的，因此**别的** worktree 已经检出的分支会从这次比对里
+剔除 —— 兄弟检出里提交一次，不算这张卡的账。被探测 worktree 自己的分支、
+`refs/remotes` 与 `refs/tags` 的每一项、以及 stash 都保留，worker 在自己的检出里
+提交、建分支、打标签、stash、push 照样抓得住。一个需要知道的边界：受保护目录超过
+20000 个条目时只做抽样，此时审计事件里会记 `snapshot_truncated: true`。
 
 ## 硬错误
 

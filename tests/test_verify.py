@@ -246,7 +246,11 @@ class ForbiddenSnapshotTest(unittest.TestCase):
 class GitStateSnapshotTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.workdir = self._tmp.name
+        # The repo lives one level down so a sibling worktree can sit beside it
+        # under the same unique temp dir (a worktree cannot be nested in the
+        # checkout it was added from).
+        self.workdir = os.path.join(self._tmp.name, "repo")
+        os.makedirs(self.workdir)
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -317,6 +321,156 @@ class GitStateSnapshotTest(unittest.TestCase):
         self._git("stash", "push", "-qm", "probe")
         after = verify.git_state_snapshot(self.workdir)
         self.assertIn("stash", verify.diff_snapshots(before, after))
+
+    # -- card67: refs/heads is shared across worktrees --------------------
+
+    def _git_in(self, cwd, *args):
+        return subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def _seed_commit(self, name="seed.txt"):
+        with open(os.path.join(self.workdir, name), "w") as handle:
+            handle.write("seed\n")
+        self._git("add", name)
+        self._git("commit", "-qm", "seed")
+
+    def _legacy_snapshot(self):
+        """The pre-card67 probe: every ref, no worktree exclusion at all."""
+        state = {"HEAD": "", "symbolic-ref": "", "stash": ""}
+        head = self._git("rev-parse", "--verify", "HEAD")
+        state["HEAD"] = head.stdout.strip()
+        symbolic = self._git("symbolic-ref", "-q", "HEAD")
+        state["symbolic-ref"] = symbolic.stdout.strip()
+        refs = self._git(
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        )
+        for line in refs.stdout.splitlines():
+            fields = line.strip().split(None, 1)
+            if len(fields) == 2:
+                state[fields[0]] = fields[1]
+        stashes = self._git("stash", "list", "--format=%H")
+        state["stash"] = "\n".join(
+            line.strip() for line in stashes.stdout.splitlines() if line.strip()
+        )
+        return state
+
+    def test_a_sibling_worktree_commit_is_not_a_difference(self):
+        """A commit in ANOTHER worktree moves a shared ref, not this card's.
+
+        ``refs/heads/*`` is one namespace for the whole repository, so the
+        branch a sibling has checked out advances in this worktree's listing
+        too. That is worktree isolation working as intended, so the narrowed
+        probe must report no difference -- this is the bug card67 fixes.
+        """
+        self._init_repo()
+        self._seed_commit()
+        sibling = os.path.join(os.path.dirname(self.workdir), "sibling")
+        self._git("worktree", "add", "-q", "-b", "lane", sibling)
+
+        before = verify.git_state_snapshot(self.workdir)
+        # The setup is real: the raw ref list does carry the sibling's branch...
+        raw = self._git("for-each-ref", "--format=%(refname)", "refs/heads")
+        self.assertIn("refs/heads/lane", raw.stdout)
+        # ...but the narrowing knows it belongs to another checkout.
+        self.assertEqual(
+            verify._branches_checked_out_elsewhere(self.workdir),
+            {"refs/heads/lane"},
+        )
+        self.assertNotIn("refs/heads/lane", before)
+
+        with open(os.path.join(sibling, "work.txt"), "w") as handle:
+            handle.write("work\n")
+        self._git_in(sibling, "add", "work.txt")
+        self._git_in(sibling, "commit", "-qm", "sibling work")
+
+        after = verify.git_state_snapshot(self.workdir)
+        self.assertEqual(verify.diff_snapshots(before, after), [])
+        self.assertEqual(before, after)
+
+    def test_own_worktree_history_moves_are_still_seen(self):
+        """The narrowing keeps everything the card itself can move."""
+        self._init_repo()
+        self._seed_commit()
+
+        # A commit of its own.
+        before = verify.git_state_snapshot(self.workdir)
+        self._git("commit", "--allow-empty", "-qm", "mine")
+        self.assertIn(
+            "HEAD", verify.diff_snapshots(before, verify.git_state_snapshot(self.workdir))
+        )
+
+        # A branch of its own (checked out in THIS worktree, so not excluded).
+        before = verify.git_state_snapshot(self.workdir)
+        self._git("checkout", "-q", "-b", "mine-branch")
+        changed = verify.diff_snapshots(before, verify.git_state_snapshot(self.workdir))
+        self.assertIn("refs/heads/mine-branch", changed)
+        self.assertIn("symbolic-ref", changed)
+
+        # A tag of its own.
+        before = verify.git_state_snapshot(self.workdir)
+        self._git("tag", "mine-tag")
+        self.assertIn(
+            "refs/tags/mine-tag",
+            verify.diff_snapshots(before, verify.git_state_snapshot(self.workdir)),
+        )
+
+        # A stash of its own.
+        tracked = os.path.join(self.workdir, "tracked.txt")
+        with open(tracked, "w") as handle:
+            handle.write("seed\n")
+        self._git("add", "tracked.txt")
+        self._git("commit", "-qm", "seed tracked")
+        with open(tracked, "w") as handle:
+            handle.write("changed\n")
+        before = verify.git_state_snapshot(self.workdir)
+        self._git("stash", "push", "-qm", "mine")
+        self.assertIn(
+            "stash",
+            verify.diff_snapshots(before, verify.git_state_snapshot(self.workdir)),
+        )
+
+    def test_a_branch_only_a_sibling_holds_is_excluded(self):
+        """Exclusion is keyed on the ref's branch, not its name shape."""
+        self._init_repo()
+        self._seed_commit()
+        # A branch nobody has checked out stays in the snapshot...
+        self._git("branch", "loose")
+        snapshot = verify.git_state_snapshot(self.workdir)
+        self.assertIn("refs/heads/loose", snapshot)
+        self.assertEqual(verify._branches_checked_out_elsewhere(self.workdir), set())
+
+        # ...the moment a sibling checks it out, it is another worktree's and
+        # drops out; the current worktree's own branch stays in either way.
+        sibling = os.path.join(os.path.dirname(self.workdir), "sibling")
+        self._git("worktree", "add", sibling, "loose")
+        self.assertEqual(
+            verify._branches_checked_out_elsewhere(self.workdir),
+            {"refs/heads/loose"},
+        )
+        self.assertNotIn("refs/heads/loose", verify.git_state_snapshot(self.workdir))
+        current = self._git("symbolic-ref", "--short", "HEAD").stdout.strip()
+        self.assertIn(f"refs/heads/{current}", verify.git_state_snapshot(self.workdir))
+
+    def test_no_other_worktree_matches_the_legacy_snapshot(self):
+        """With no sibling the exclusion set is empty and the snapshot is
+        byte-for-byte the old (pre-narrowing) probe."""
+        self._init_repo()
+        self._seed_commit()
+        self._git("branch", "extra")
+        self._git("tag", "v1")
+
+        self.assertEqual(verify._branches_checked_out_elsewhere(self.workdir), set())
+        self.assertEqual(verify.git_state_snapshot(self.workdir), self._legacy_snapshot())
 
 
 class AcceptanceTest(unittest.TestCase):
