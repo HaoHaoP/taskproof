@@ -49,7 +49,7 @@ pipx install git+https://github.com/HaoHaoP/taskproof
 Or download the wheel from the same Release and install the local file:
 
 ```bash
-pipx install ./taskproof-0.1.0-py3-none-any.whl
+pipx install ./taskproof-0.2.0-py3-none-any.whl
 ```
 
 Or run from a source checkout:
@@ -261,8 +261,10 @@ What the console does today:
 
 - **Columns** — running / verifying / done / cancelled / needs review / not
   passing. A column header can be hidden with the `?hide=` query parameter.
-- The **finished columns fold** to the most recent cards, with a bar to reveal
-  the rest.
+- **Every column's display cap is yours to set**, in the column's own header
+  (`- 10 +`, `All` for no fold). The defaults are the board you already know --
+  done and cancelled fold to the ten most recent, the live columns stay
+  unfolded -- the fold bar still reveals the rest, and expanding is per column.
 - A **"acceptance passed"** badge on a blocked card whose acceptance went green.
 - **Writes are CLI-only.** The console is a viewer over the read-only API:
   dispatch, accept and registry edits all go through `taskproof`, never the UI.
@@ -278,6 +280,14 @@ Everything taskproof may dispatch is declared in one TOML file in the workspace
 (`~/.taskproof/projects.toml`) in two layers: a **project** (the repository and
 its default path) and one or more **taskgroups** (the lanes it dispatches onto,
 each with its own acceptance command and lock).
+
+A lane may also declare a **workspace of its own** (`workspace = "worktree"`):
+one git worktree beside the repository, created the first time a card actually
+fires into that lane and reused from then on, with dependency directories
+symlinked in from the main checkout (`link = [...]`) so nothing is reinstalled.
+`taskproof workspaces` lists them; `taskproof workspace-rm <lane>` prints the
+evidence and deletes one. `--worktree` remains the one-off. The fields are in
+`docs/REGISTRY.md`.
 
 ```toml
 [[project]]
