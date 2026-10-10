@@ -11,13 +11,14 @@ import os
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
 
 from taskproof import dispatch, storage
 from taskproof.api import server
-from taskproof.models import Task
+from taskproof.models import STATUS_DONE, STATUS_RUNNING, Task
 
 
 def _git_available():
@@ -93,6 +94,10 @@ class ApiLogTest(unittest.TestCase):
             "t-nolog",
         ):
             out.append(Task(id=task_id, status="done", **base))
+        # NOTE: this row is a *hand-built* fixture that scripts the helper's
+        # contract only. It does NOT represent what a real running row carries
+        # on disk -- card 55 fixed that (dispatch now writes `workdir` while the
+        # task runs); `FilesChangedLiveEndToEndTest` is the real-run evidence.
         out.append(Task(id="t-live", status="running", workdir=cls.git_repo, **base))
         out.append(Task(id="t-nogit", status="running", workdir=cls.plain_dir, **base))
         out.append(Task(id="t-nowd", status="running", workdir=None, **base))
@@ -336,6 +341,155 @@ class ApiLogTest(unittest.TestCase):
         status, body = self._request("/api/tasks/t-nogit")
         self.assertEqual(status, 200)
         self.assertIsNone(body["task"]["files_changed_live"])
+
+
+class FilesChangedLiveEndToEndTest(unittest.TestCase):
+    """Card 55: `files_changed_live` is fed by a REAL running task, not a fixture.
+
+    A genuine dispatch() runs a slow `custom:` adapter on a worker thread while
+    a real `server.make_server(ws, port=0)` is queried over loopback. The row is
+    born running with `workdir` written before the adapter spawns (see
+    dispatch._execute_claimed), so the derived count is an int during the run
+    and flips back to null once the terminal write lands.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = self._tmp.name
+        self.ws = os.path.join(self.tmp, "workspace")
+        self.proj = os.path.join(self.tmp, "project")
+        os.makedirs(self.proj)
+        dispatch.prepare_workspace(self.ws)
+        self._git_repo(self.proj)
+        with open(
+            os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                "[defaults]\n"
+                "concurrency = 1\n"
+                "timeout = 60\n\n"
+                "[[project]]\n"
+                'id = "proj"\n'
+                f'path = "{self.proj}"\n'
+                'group = "proj"\n'
+                'verify = "exit 0"\n'
+                'verify_kind = "check"\n'
+            )
+
+        self.httpd = server.make_server(self.ws, port=0)
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+        server._LIVE_FILES_CACHE.clear()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=5)
+        self._tmp.cleanup()
+
+    @staticmethod
+    def _git_repo(path):
+        subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=path, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=path, check=True)
+        with open(os.path.join(path, "seed.txt"), "w", encoding="utf-8") as fh:
+            fh.write("seed\n")
+        subprocess.run(["git", "add", "seed.txt"], cwd=path, check=True)
+        subprocess.run(["git", "commit", "-qm", "seed"], cwd=path, check=True)
+
+    def _request(self, path):
+        url = f"http://127.0.0.1:{self.port}{path}"
+        request = urllib.request.Request(url)
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
+
+    def _row(self, task_id):
+        status, body = self._request("/api/tasks")
+        self.assertEqual(status, 200)
+        for row in body["tasks"]:
+            if row["id"] == task_id:
+                return row
+        self.fail(f"{task_id} not in /api/tasks")
+
+    def _status(self, task_id):
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            return storage.get_task(conn, task_id)["status"]
+        finally:
+            conn.close()
+
+    def _task_row(self, task_id):
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            row = storage.get_task(conn, task_id)
+            return dict(row) if row is not None else None
+        finally:
+            conn.close()
+
+    @unittest.skipUnless(_git_available(), "git is required for the live probe")
+    def test_live_count_follows_a_real_running_task(self):
+        # Seed the tree with two changes so the count has somewhere to start.
+        for name in ("one.txt", "two.txt"):
+            with open(os.path.join(self.proj, name), "w", encoding="utf-8") as fh:
+                fh.write("x\n")
+
+        # Park first (id known up front), then advance the same row on a worker
+        # so the running window can be queried before the adapter exits.
+        task_id = dispatch.dispatch(
+            self.ws, "proj", "live", start=False,
+            adapter="custom:sh -c 'sleep 12; echo done'",
+        )
+        worker = threading.Thread(
+            target=dispatch.run_queued, args=(self.ws, task_id)
+        )
+        worker.start()
+        try:
+            deadline = time.monotonic() + 20.0
+            observed = None
+            while time.monotonic() < deadline:
+                # Wait for status + workdir: the flip to `running` and the
+                # workdir write are two statements, so `running` alone can be
+                # seen a beat before the path that the live probe needs.
+                observed = self._task_row(task_id)
+                if (
+                    observed is not None
+                    and observed["status"] == STATUS_RUNNING
+                    and observed["workdir"]
+                ):
+                    break
+                time.sleep(0.05)
+            self.assertEqual(
+                observed["status"], STATUS_RUNNING,
+                "no real running task was observed",
+            )
+
+            row = self._row(task_id)
+            self.assertEqual(row["status"], STATUS_RUNNING)
+            # The live field is an int while the task runs (not null, not None).
+            self.assertIsInstance(row["files_changed_live"], int)
+            first = row["files_changed_live"]
+            self.assertGreaterEqual(first, 2)
+
+            # A new change past the 3s cache window bumps the count by one.
+            with open(os.path.join(self.proj, "three.txt"), "w", encoding="utf-8") as fh:
+                fh.write("y\n")
+            time.sleep(server.LIVE_FILES_MIN_INTERVAL + 1.0)
+            second = self._row(task_id)["files_changed_live"]
+            self.assertEqual(second, first + 1)
+        finally:
+            worker.join(timeout=30)
+        self.assertFalse(worker.is_alive())
+
+        # The task is terminal: the live field goes null and the final column is
+        # written. The adapter made no change, so it equals the seeded count.
+        self.assertEqual(self._status(task_id), STATUS_DONE)
+        final = self._row(task_id)
+        self.assertIsNone(final["files_changed_live"])
+        self.assertEqual(final["files_changed"], second)
 
 
 if __name__ == "__main__":

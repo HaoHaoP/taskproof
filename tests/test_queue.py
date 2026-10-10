@@ -251,6 +251,44 @@ class RunQueuedTest(_WorkspaceCase):
         self.assertEqual(row["status"], STATUS_DONE)
         self.assertEqual(row["verify_cmd"], "SKIPPED")  # not "passed"
 
+    def test_workdir_is_recorded_while_running(self):
+        """A real advance lands workdir on the row before the adapter spawns.
+
+        Card 55: the live `files_changed_live` probe needs the run's directory
+        on the row *while* it runs, not only at `_finish_task` time. This drives
+        a genuine queued -> running advance with a slow adapter and reads the
+        row back from the database during the running window -- no hand-built
+        ``Task(status="running", workdir=...)`` fixture (that shape never occurs
+        in production).
+        """
+        self.write_registry([("p", "g")])
+        task_id = self.park(
+            "p", "slow", queue_seq=1,
+            adapter="custom:sh -c 'sleep 1.5; echo done'",
+        )
+        worker = threading.Thread(
+            target=dispatch.run_queued, args=(self.ws, task_id)
+        )
+        worker.start()
+        try:
+            # Wait for the running flip AND the workdir write: they are two
+            # statements, so `running` alone can be seen a beat before the path.
+            self.wait_for(
+                lambda: self.status(task_id) == STATUS_RUNNING
+                and self.row(task_id)["workdir"] == self.proj,
+                message="slow card running with its workdir recorded",
+            )
+            row = self.row(task_id)
+            self.assertEqual(row["status"], STATUS_RUNNING)
+            # The project path, not NULL and not a leftover from a worktree run.
+            self.assertEqual(row["workdir"], self.proj)
+        finally:
+            worker.join(timeout=30)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(self.status(task_id), STATUS_DONE)
+        # The finish write is the same value, so it stays put.
+        self.assertEqual(self.row(task_id)["workdir"], self.proj)
+
 
 class BlockedNotAdvancedTest(_WorkspaceCase):
     """⑥ Card 34: `blocked` is a true terminal, so the queue skips it."""

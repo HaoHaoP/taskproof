@@ -19,6 +19,7 @@ import io
 import os
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 
@@ -32,6 +33,7 @@ from taskproof.dispatch import (
     dispatch,
     prepare_workspace,
     remove_task,
+    run_queued,
     summary_counts,
     task_detail,
 )
@@ -40,6 +42,7 @@ from taskproof.models import (
     STATUS_BLOCKED,
     STATUS_DONE,
     STATUS_FAILED,
+    STATUS_RUNNING,
     STATUS_TIMEOUT,
     TERMINAL_STATUSES,
 )
@@ -998,6 +1001,70 @@ class WorktreeTest(DispatchBase):
         self.assertNotIn("worktree kept", buf.getvalue())
         self.assertTrue(os.path.exists(os.path.join(self.proj, "made.txt")))
         self.assertEqual(self._worktree_listing().count("worktree "), 1)
+
+    def test_workdir_is_the_worktree_while_running(self):
+        """Card 55: a --worktree run records the *worktree* path as its workdir.
+
+        A real run (not a hand-built row) is driven on a worker thread so we can
+        read the row back during the running window. The workdir must be the
+        fresh checkout, never the main project path -- the live
+        `files_changed_live` probe would otherwise count the wrong tree.
+        """
+        self._git_repo()
+        self.write_registry(verify="exit 0")
+
+        # Park first so the id is known before the worker starts; `run_queued`
+        # then advances the SAME row (the queued event carries worktree=True).
+        task_id = dispatch(
+            self.ws, "proj", "x", start=False, worktree=True,
+            adapter="custom:sh -c 'sleep 1.5; echo done'",
+        )
+        worker = threading.Thread(
+            target=run_queued, args=(self.ws, task_id)
+        )
+        worker.start()
+        try:
+            deadline = time.monotonic() + 20.0
+            row = None
+            while time.monotonic() < deadline:
+                conn = self.open_conn()
+                try:
+                    candidate = storage.get_task(conn, task_id)
+                    # Wait for the row to be running AND carry a workdir: the
+                    # two writes (status flip, then workdir) are not atomic, so
+                    # `running` alone can be observed a beat before the path.
+                    if (
+                        candidate is not None
+                        and candidate["status"] == STATUS_RUNNING
+                        and candidate["workdir"]
+                    ):
+                        row = dict(candidate)
+                        break
+                finally:
+                    conn.close()
+                time.sleep(0.05)
+            self.assertIsNotNone(row, "no running row observed for the worktree run")
+
+            expected = os.path.join(self.tmp, f"project-wt-{task_id}")
+            # The recorded workdir is the checkout, provably not the main tree.
+            self.assertEqual(row["workdir"], expected)
+            self.assertNotEqual(row["workdir"], self.proj)
+            self.assertTrue(os.path.isdir(expected))
+        finally:
+            worker.join(timeout=30)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(
+            task_detail(self.ws, task_id)["task"]["status"], STATUS_DONE
+        )
+        # The finish write keeps the same worktree path.
+        conn = self.open_conn()
+        try:
+            self.assertEqual(
+                storage.get_task(conn, task_id)["workdir"],
+                os.path.join(self.tmp, f"project-wt-{task_id}"),
+            )
+        finally:
+            conn.close()
 
     def test_worktree_requires_git_repo(self):
         self.write_registry(verify="exit 0")  # self.proj is a plain directory

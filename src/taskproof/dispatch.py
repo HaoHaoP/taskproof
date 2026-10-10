@@ -378,6 +378,14 @@ def _execute_claimed(
             run_dir = worktree_path
             storage.append_event(conn, task_id, "worktree_created", {"path": run_dir})
 
+        # Land the run directory on the row the moment it is final -- after a
+        # worktree has resolved its path, before the adapter spawns. Both starts
+        # funnel through here (dispatch(start=True) inserts the row running,
+        # run_queued flips it queued->running), so this single write covers both.
+        # Without it the row carried NULL workdir for the whole run and the
+        # live `files_changed_live` probe had nothing to look at.
+        storage.update_task(conn, task_id, workdir=run_dir)
+
         _execute(
             conn,
             task_id=task_id,
