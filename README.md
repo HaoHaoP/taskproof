@@ -299,6 +299,10 @@ existing project). See
 commented starting point, and [`docs/REGISTRY.md`](docs/REGISTRY.md) for the
 field reference and the list of hard errors.
 
+The static board's left rail groups by **project** — one row per project,
+with the lanes it owns shown on hover — and each task card names the lane it
+ran on.
+
 ## Safety and hygiene
 
 - **Protected paths are fingerprinted, not just diffed.** Forbidden paths are
