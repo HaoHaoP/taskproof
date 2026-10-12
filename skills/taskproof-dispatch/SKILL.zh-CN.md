@@ -1,12 +1,12 @@
 ---
 name: taskproof-dispatch
-description: Use when a main agent dispatches coding cards to worker agents through taskproof and must follow the dispatch discipline — register projects and their lanes, fire cards in parallel by default, read status and logs, kill by PID, and re-verify results objectively instead of trusting the worker.
+description: Use when a main agent dispatches coding cards to worker agents through taskproof and must follow the dispatch discipline — register projects and their lanes, write cards from the template, fire them in parallel by default, read status and logs, kill by PID, and review the machine's acceptance evidence instead of re-running it or trusting the worker.
 ---
 
 # 用 taskproof 派活
 
 `taskproof` 不决定*做什么*，只保证派出去的活被**独立验收**、**留痕**。
-本 skill 是**主智能体**（派活的那一个）的操作手册：一次一张卡，卡里有根因、有验收，发车后自己复核，不认 worker 的自述。
+本 skill 是**主智能体**（派活的那一个）的操作手册：一次一张卡，卡里有根因、有验收，发车后按**证据**复核 —— 机器的验收结果 + 它看不见的那些维面 —— 不重做机器已经做过的事，也不认 worker 的自述。
 
 命令一律是可直接复制的一整行。示例路径统一写 `/absolute/path/to/repo`。
 
@@ -18,7 +18,13 @@ description: Use when a main agent dispatches coding cards to worker agents thro
 4. 同 group 的**道**串行、异 group 并行，判据见第 6 节；除此之外**默认并行**。
 5. **按 PID 杀进程**，不要 `pkill -f`（见第 7 节）。
 6. UI 验证只用 `/tmp` 下的一次性 profile + 一次性工作区，**绝不写真实注册表**（见第 8 节）。
-7. 主智能体**自己重跑验收**（`taskproof verify <id>`）、自己做客观断言，不把 worker 的自述当结论（见第 9 节）。
+7. worker 的自述仍不算结论 —— 但**机器的验收结果是**。taskproof 在 agent 退出后跑注册表里那条命令（第 ⑦ 步）并把结果落进账本，所以习惯性重跑一遍是重复劳动：只有第 9 节那三种例外才重跑。你自己要断言的是机器看不见的那些 —— 真实运行态、diff 的越界范围、删改类「该留的还在不在」。
+8. **绝不把素材复述进卡里。** 原型、口径、设计稿一律给绝对路径 + 行号，附一句让 worker 自己读。复述操作者的素材既丢精度，又要付两次钱。
+9. **闭环返工免费一次。** 验收红 → 找出根因 → 同根因再发一张。其余任何你顺手发现的事只记待办、不发卡；别的卡要操作者点头（见第 9 节）。
+10. 带新行为或修 bug 的卡，验收命令里**按根因点名测试**，worker 的交付要贴出修之前那次失败输出（见第 9 节）。
+11. **只在卡可枚举、机器可判时才降级模型**（`--reasoning none`、便宜模型）；用本地模型的卡还得独占一把 `group`。
+
+铁律 7–11 是派活省钱纪律，它们背后的判据表在 [`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md)。
 
 ## 1. 注册项目与它的任务组
 
@@ -95,6 +101,10 @@ cd /absolute/path/to/repo && python -m pytest -q
 CARD
 ````
 
+**用模板起步。** `templates/card.md`（英文）或 `templates/card.zh-CN.md`（本机实际用的那份）—— 复制过来逐节填满；空着一节是卡的缺陷，不是风格选择。
+
+**素材给路径，不给复述。** 操作者给过原型、截图、设计稿或口径文档时，卡里写它的绝对路径加行号范围，再附一句*自己读，不要我复述* —— 写法的样子见 [`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md) 第 2 节。codex 适配器跑的是 `--sandbox workspace-write`，限的是**写**、不是读：你指得出的东西它都打得开。凭记忆把口径重写一遍，正是精度死掉的地方，而且两边都要付钱。
+
 ## 3. 发车前先看并发现状
 
 ```bash
@@ -112,6 +122,7 @@ taskproof run my-lane --adapter codex --timeout 1800 "$(cat /tmp/cards/tp-card19
 
 - `--adapter`：`codex` / `claude` / `gemini` / `opencode` / `custom:<cmd>`。
 - `--timeout`：秒；覆盖注册表 `[defaults] timeout`。
+- `--reasoning none`：关掉 worker 的思考；`--model <m>` 换模型 —— 只对**可枚举、机器可判**的卡用（铁律 11，见第 9 节）。
 - `--cap N`：只为这一次发车抬高全局上限。
 - `--worktree`：仓边上一棵一次性检出，有改动就保留。**一次性手段**：声明了 `workspace = "worktree"` 的道有长驻工作区，两者同时出现时以道的工作区为准。
 - 卡放文件、`$(cat ...)` 传入：省去转义，也方便备份与重跑。
@@ -182,20 +193,27 @@ taskproof --workspace /tmp/tp-verify-$$ register /absolute/path/to/repo --id ver
 
 **本地 REST 只读，桌面控制台是看板。** `taskproof api` 只提供读接口 —— 没有 `--allow-write`、没有会话令牌、没有任何写端点（写形状的请求一律 404）。派活、停止、放行、删除都在 CLI 里，所以动控制台的卡靠**读它渲染出什么**来验收，而不是靠它去写。
 
-## 9. 主智能体复核清单
+## 9. 主智能体复核：核证据，不重做
 
-worker 报 done、验收显示 PASSED，都不算数。主智能体逐条自己走：
+worker 报 done 不算证据 —— 你自己再跑一遍机器已经跑过的命令也不算。把断言花在机器看不见的地方：
 
-- [ ] **用 `taskproof verify <id>` 重跑验收**并贴真实输出——它会重跑注册表里那条命令并追加一条 `verify` 事件，于是复核是**记在账本里的事实**，不是一句自述。
-- [ ] **自己做客观断言**：真窗口就读 DOM（开调试端口 + CDP 比截图可靠）；真文件用 `ls -l`、`python -c "from PIL import Image; ..."`；不要采信 worker 的文字结论。
-- [ ] 只 `git add` **本卡点名的文件**，不要把无关改动裹进来。
-- [ ] 确认 worker 没有提交（提交由主智能体做）。
+- [ ] **读验收结果与它的事件**：`taskproof show <id>` / `taskproof log <id>` —— 那条命令真跑了（记下来的 `verify_cmd` 不是 `SKIPPED`）、`verify_exit == 0`、`PASSED`，旁边有第 ⑦ 步的事件。
+- [ ] **只在三种情况下重跑验收（`taskproof verify <id>`）**：它是 **SKIPPED**（道里没 `verify`，或发车带了 `--no-verify`）；命令**覆盖面小于**卡里的要求（你自己补那条断言，一条命令、一个数）；或者**绿得可疑**（结构上不可能红的检查，例如 `eslint` 打在 `.eslintignore` 覆盖的路径上、只匹配源码文本的测试、产物其实为空的 build）。
+- [ ] **断言机器看不见的那些**：真窗口 → 读 DOM（开调试端口 + CDP 比截图可靠）；真文件 → `ls -l` 或逐字节/大小比对；删改类 → 该留的还在不在；真起的服务 → 那些字节确实来自这张卡改过的那棵树。
+- [ ] **读 diff 看越界范围** —— 逐行看，而不是再跑一遍测试。
+- [ ] 只 `git add` **本卡点名的文件**，不要把无关改动裹进来；确认 worker 没有提交（提交由主智能体做）。
 - [ ] 复核与提交批量做，别做成每个任务的同步点。
 - [ ] 如果这张卡改了**操作者每天要看的东西**（注册表布局、CLI 表面、这份 skill），提交前把那个面重新读一遍。
+
+默认值得多看一眼的只有**红**：在同一棵树里连跑 2~3 次再定性（机器上并行跑着几条道时，带轮询/等待的测试会假红），然后再决定。
+
+这份清单借重但不必重复的三条习惯 —— 闭环返工免费一次、别的都不免费；改行为的卡要点名测试；便宜模型只给可枚举的卡 —— 就是铁律 9–11。它们背后的判据表（假绿清单、待办格式、够格用便宜模型的卡型）在 [`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md)，写卡前读一遍。
 
 ## 10. 参考
 
 - 注册表字段与硬错误：[`docs/REGISTRY.md`](../../docs/REGISTRY.md)
 - 设计决策：[`docs/DESIGN.md`](../../docs/DESIGN.md)
 - 从零到一次派发的完整走查：[`docs/WALKTHROUGH.md`](../../docs/WALKTHROUGH.md)
+- 派活的省钱纪律 —— 复核、素材、TDD、闭环/待办、模型降级：[`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md)
+- 可直接复制的卡模板：[`templates/card.zh-CN.md`](templates/card.zh-CN.md)（简体中文）/ [`templates/card.md`](templates/card.md)（English）
 - 退出码：0 成功 / 2 注册表问题 / 64 用法错误 / 70 适配器失败 / 71 验收失败 / 75 并发受限

@@ -127,8 +127,10 @@ breaking them:
 - **Never `pkill -f`.** A card is passed as process argv, so its text is in the
   dispatcher's own command line — `pkill -f` matches the dispatcher and kills the
   run (exit -15, no task, empty log). Kill by PID.
-- **Review is not a self-report.** The main agent re-runs the acceptance command
-  and makes its own objective assertion; "the worker said done" is not evidence.
+- **Review is not a self-report.** The main agent reads the acceptance result the
+  machine already produced and asserts the dimensions it cannot see; re-running the
+  command is for the three exceptions only — `SKIPPED`, a coverage gap, a green that
+  smells false. "The worker said done" is not evidence.
 
 ## The problem
 

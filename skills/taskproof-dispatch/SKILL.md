@@ -1,12 +1,12 @@
 ---
 name: taskproof-dispatch
-description: Use when a main agent dispatches coding cards to worker agents through taskproof and must follow the dispatch discipline — register projects and their lanes, fire cards in parallel by default, read status and logs, kill by PID, and re-verify results objectively instead of trusting the worker.
+description: Use when a main agent dispatches coding cards to worker agents through taskproof and must follow the dispatch discipline — register projects and their lanes, write cards from the template, fire them in parallel by default, read status and logs, kill by PID, and review the machine's acceptance evidence instead of re-running it or trusting the worker.
 ---
 
 # Dispatch work with taskproof
 
 `taskproof` does not decide *what* to do; it only guarantees that work it dispatched is **independently verified** and **recorded**.
-This skill is the operating manual for the **main agent** (the one that dispatches): one card at a time, every card carries a root cause and acceptance criteria, and after firing you re-verify yourself instead of trusting the worker's self-report.
+This skill is the operating manual for the **main agent** (the one that dispatches): one card at a time, every card carries a root cause and acceptance criteria, and after firing you review the evidence — the machine's acceptance result plus the dimensions it cannot see — instead of repeating the machine's work or trusting the worker's self-report.
 
 Commands are always a single copy-pasteable line. Example paths are always written `/absolute/path/to/repo`.
 
@@ -18,7 +18,13 @@ Commands are always a single copy-pasteable line. Example paths are always writt
 4. Lanes in the same group are serial, different groups are parallel — the criteria are in section 6; everything else is **parallel by default**.
 5. **Kill by PID**, never `pkill -f` (section 7).
 6. For UI verification use only a one-off profile under `/tmp` plus a one-off workspace; **never write to the real registry** (section 8).
-7. The main agent **re-runs acceptance itself** (`taskproof verify <id>`) and makes its own objective assertions; the worker's self-report is not a conclusion (section 9).
+7. The worker's self-report is still not a conclusion — but **the machine's acceptance result is one**. taskproof runs the registered command after the agent exits (step ⑦) and writes the outcome to the ledger, so re-running it by reflex is duplicate work: do it only for the three exceptions in section 9. What you self-assert is what the machine cannot see — real runtime state, the scope of the diff, whether a delete kept what should have survived.
+8. **Never paraphrase source material into a card.** A prototype, a spec, a design doc goes in by absolute path + line range with one line telling the worker to read it itself. A card that restates the operator's material loses precision, and you pay for it twice.
+9. **One closure rework is free.** Acceptance went red → find the root cause → one more card on that same root cause. Everything else you notice goes into the backlog, not into a new card; any other card needs the operator's nod (section 9).
+10. A card that adds behaviour or fixes a bug **names one test per root cause** in its acceptance command, and the worker's delivery pastes the failing run it saw first (section 9).
+11. **Downgrade the model only where the card is enumerable and machine-checkable** (`--reasoning none`, a cheap model); a card on a local model also needs its own exclusive `group`.
+
+Rules 7–11 are the dispatch-economy rules — the judgement tables behind them are in [`references/token-discipline.md`](references/token-discipline.md).
 
 ## 1. Register a project and its taskgroups
 
@@ -95,6 +101,10 @@ cd /absolute/path/to/repo && python -m pytest -q
 CARD
 ````
 
+**Start from the template.** `templates/card.md` (English) or `templates/card.zh-CN.md` (the one actually used here) — copy it and fill every section; an empty section is a card defect, not a style choice.
+
+**Source material goes in by path, never by paraphrase.** When the operator handed you a prototype, a screenshot, a design doc or a spec, the card carries its absolute path plus the exact line range and one line saying *read it yourself, do not ask me to restate it* — the shape is in [`references/token-discipline.md`](references/token-discipline.md) section 2. The codex adapter runs with `--sandbox workspace-write`, which restricts **writes**, not reads: the worker can open anything you can name. Restating the spec from memory is exactly where precision dies, and it costs tokens on both ends.
+
 ## 3. Look at in-flight state before firing
 
 ```bash
@@ -112,6 +122,7 @@ taskproof run my-lane --adapter codex --timeout 1800 "$(cat /tmp/cards/tp-card19
 
 - `--adapter`: `codex` / `claude` / `gemini` / `opencode` / `custom:<cmd>`.
 - `--timeout`: seconds; overrides `[defaults] timeout` in the registry.
+- `--reasoning none`: turn the worker's reasoning off, and `--model <m>` swap the model — only for cards that are enumerable and machine-checkable (rule 11, section 9).
 - `--cap N`: a one-off global cap for this dispatch only.
 - `--worktree`: a fresh checkout beside the repository, kept when it has changes. A *one-off*: a lane that declares `workspace = "worktree"` has a long-lived checkout instead, and that one wins.
 - Card in a file, passed with `$(cat ...)`: saves escaping, and makes backup and re-runs easy.
@@ -182,20 +193,27 @@ taskproof --workspace /tmp/tp-verify-$$ register /absolute/path/to/repo --id ver
 
 **The local REST API is read-only and the desktop console is a viewer.** `taskproof api` serves reads only — there is no `--allow-write`, no session token and no write endpoint (a write-shaped request is a plain 404). Dispatching, stopping, accepting and deleting all live in the CLI, so a card that changes the console is verified by reading what it renders, not by driving writes through it.
 
-## 9. Main agent review checklist
+## 9. Main agent review: check the evidence, do not re-do the work
 
-A worker reporting done, or verification showing PASSED, does not count. The main agent walks every line itself:
+A worker reporting done is not evidence — and neither is your own second run of a command the machine already ran. Spend your assertions on what the machine cannot see:
 
-- [ ] **Re-run acceptance through `taskproof verify <id>`** and paste the real output — it re-runs the registered command and appends a `verify` event, so the review is a recorded fact and not a claim.
-- [ ] **Make your own objective assertions**: for a real window read the DOM (a debugging port plus CDP beats a screenshot); for a real file use `ls -l`, `python -c "from PIL import Image; ..."`; never accept the worker's written conclusion.
-- [ ] `git add` **only the files this card names**; do not wrap unrelated changes in.
-- [ ] Confirm the worker did not commit (commits are the main agent's job).
+- [ ] **Read the acceptance result and its events**: `taskproof show <id>` / `taskproof log <id>` — the lane's command really ran (the recorded `verify_cmd` is not `SKIPPED`), `verify_exit == 0`, `PASSED`, and a step ⑦ event next to it.
+- [ ] **Re-run acceptance (`taskproof verify <id>`) in exactly three cases**: it was **SKIPPED** (no lane `verify`, or the card was fired with `--no-verify`); the command **covers less** than the card demands (assert the missing dimension yourself — one command, one number); or **green smells false** (a check that cannot fail, e.g. `eslint` over an `.eslintignore`d path, a test that only matches source text, a build that emitted nothing).
+- [ ] **Assert what the machine cannot see**: a real window → read the DOM (a debugging port plus CDP beats a screenshot); a real file → `ls -l` or a byte/size comparison; a delete → what should have survived is still there; a running server → the bytes come from the tree the card changed.
+- [ ] **Read the diff for scope** — line by line, instead of re-running the suite.
+- [ ] `git add` **only the files this card names**; do not wrap unrelated changes in. Confirm the worker did not commit (commits are the main agent's job).
 - [ ] Batch reviews and commits; do not turn them into a synchronisation point per task.
 - [ ] If the card changed something the *operator* will read day to day (a registry layout, a CLI surface, this skill), re-read that surface before you commit it.
+
+A **red** result is the one thing that earns a second look by default: re-run it 2–3 times in the same tree before calling it a defect (a machine running several lanes makes polling tests flaky), then decide.
+
+The three habits this checklist leans on without repeating — closure rework is free once and nothing else is free, behaviour cards name a test, a cheap model only for enumerable cards — are iron rules 9–11. The judgement tables behind them (the false-green catalogue, the backlog format, which cards qualify for a cheap model) are in [`references/token-discipline.md`](references/token-discipline.md); read it once before you write a card.
 
 ## 10. References
 
 - Registry fields and hard errors: [`docs/REGISTRY.md`](../../docs/REGISTRY.md)
 - Design decisions: [`docs/DESIGN.md`](../../docs/DESIGN.md)
 - A full from-zero-to-one-dispatch walkthrough: [`docs/WALKTHROUGH.md`](../../docs/WALKTHROUGH.md)
+- Dispatch economy — review, source material, TDD, closure/backlog, model downgrade: [`references/token-discipline.md`](references/token-discipline.md)
+- Card templates to copy: [`templates/card.md`](templates/card.md) (English) / [`templates/card.zh-CN.md`](templates/card.zh-CN.md) (简体中文)
 - Exit codes: 0 success / 2 registry problem / 64 usage error / 70 adapter failure / 71 verification failure / 75 concurrency limit
