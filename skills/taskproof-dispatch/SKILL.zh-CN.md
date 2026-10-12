@@ -133,8 +133,10 @@ taskproof run my-lane --adapter codex --timeout 1800 "$(cat /tmp/cards/tp-card19
 
 ```bash
 taskproof tasks --all
+taskproof tasks --all --lane my-lane      # 只看这条道，带验收结果
 taskproof --json tasks --all
-taskproof show <task-id>
+taskproof show <task-id>                  # 末尾就是 `changes:` 段
+taskproof wait <task-id>                  # 阻塞到终态，然后打印判决
 taskproof log <task-id>
 taskproof log <task-id> --follow
 taskproof verify <task-id>
@@ -144,6 +146,10 @@ taskproof workspace-rm my-lane --force
 ```
 
 `log` 打印该任务的完整事件流；`--follow` 会一直跟到终态。
+
+`tasks --lane <id>` 只筛一条道，`--id <id,id>` 按 id 挑行。表里带着判决：`VERIFY` 列是 `exit=N`，没记到退出码是 `?`，**验收从没跑过是 `–`**（`SKIPPED` 绝不能看起来像通过）。`FILES` 是改动文件数。
+
+`wait <id>` 轮询账本直到终态，**它就是手写 `while …; do 读账本; sleep N; done` 的整段替代**：`done` 退 `0`、其它终态退 `1`、等待自己超时退 `124`（任务本身一个字节都不动）。`show <id>` 末尾的 `changes:` 段列出这次跑完留下的脏路径，其中**跑前就已经脏**的标 `[跑前已脏]` —— 那正是 `files_changed` 里不属于本卡的那部分。有了 `tasks` / `show` / `log` / `--json`，**没有哪件事需要直读 `sqlite3`**。
 
 `verifying` 是**真会落库的状态**：验收命令在跑的那段时间，卡就记为 `verifying`，所以一次长编译或整套测试在板上看得见，而不是藏在 `running` 里。停在这个状态不是卡住了，是在验收。
 

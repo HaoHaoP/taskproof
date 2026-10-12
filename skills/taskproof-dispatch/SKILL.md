@@ -133,8 +133,10 @@ taskproof run my-lane --adapter codex --timeout 1800 "$(cat /tmp/cards/tp-card19
 
 ```bash
 taskproof tasks --all
+taskproof tasks --all --lane my-lane      # one lane's cards, with their verdict
 taskproof --json tasks --all
-taskproof show <task-id>
+taskproof show <task-id>                  # ends with the `changes:` block
+taskproof wait <task-id>                  # block until the verdict, then print it
 taskproof log <task-id>
 taskproof log <task-id> --follow
 taskproof verify <task-id>
@@ -144,6 +146,10 @@ taskproof workspace-rm my-lane --force
 ```
 
 `log` prints the task's full event stream; `--follow` follows it all the way to the terminal state.
+
+`tasks --lane <id>` narrows to one lane, `--id <id,id>` picks rows out by id. The table carries the verdict: `VERIFY` reads `exit=N`, `?` when no exit was recorded, and an en dash when acceptance never ran (`SKIPPED`) — a skipped check must never look like a pass. `FILES` is the changed-file count.
+
+`wait <id>` polls the ledger until the card is terminal, and **it is the whole replacement for a hand-rolled `while …; do <read the ledger>; sleep N; done` loop**: exits `0` for `done`, `1` for any other terminal state, `124` when the wait itself gives up (the task is never touched). `show <id>` ends with a `changes:` block listing the paths this run left dirty, marking the ones that were **already dirty before the run** with `[跑前已脏]` — that is the part of `files_changed` which is not this card's doing. Between `tasks`, `show`, `log` and `--json`, reading the ledger with `sqlite3` is never necessary.
 
 `verifying` is a **real, persisted state**: while the acceptance command runs, the card is written as `verifying`, so a long build or test suite is visible on the board instead of hiding inside `running`. A card sitting there is not stuck — it is being accepted.
 
