@@ -17,6 +17,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import StatusMark from './StatusMark.vue'
 import { ABNORMAL } from '../contract'
+import { drawerMountKey, shouldRetryDrawerMount } from '../drawer'
 import { duration, eventSummary, isBadEvent, shortTime } from '../format'
 import {
   byteLength,
@@ -280,10 +281,44 @@ watch(
   },
   { immediate: true }
 )
+
+/**
+ * A once-thrown mount never retries by itself: `mountElement` builds the
+ * element before inserting it, so a throw in that window leaves the drawer's
+ * component instance alive (its lockscreen class is still on `<body>`) with no
+ * `.tp-drawer` in the document -- and Vue, believing the subtree is mounted,
+ * never mounts it again. Bumping the key forces a fresh mount, which retries
+ * the whole subtree. The probe is the class element-plus puts on `.el-drawer`;
+ * see `drawer.ts` for the decision this defers to.
+ */
+const mountAttempt = ref(0)
+
+/** Is the drawer's element actually in the document, not merely "mounted"? */
+function drawerIsInDocument(): boolean {
+  return document.querySelector('.tp-drawer') !== null
+}
+
+watch([open, mountAttempt], async () => {
+  if (!open.value) {
+    mountAttempt.value = 0 // closed: the next open starts from a clean attempt
+    return
+  }
+  await nextTick()
+  if (
+    shouldRetryDrawerMount({
+      open: open.value,
+      mounted: drawerIsInDocument(),
+      attempt: mountAttempt.value
+    })
+  ) {
+    mountAttempt.value += 1
+  }
+})
 </script>
 
 <template>
   <el-drawer
+    :key="drawerMountKey(mountAttempt)"
     :model-value="open"
     :size="520"
     direction="rtl"

@@ -14,6 +14,7 @@ import { spawn } from 'child_process'
 import { existsSync, mkdirSync } from 'fs'
 import { dirname, join } from 'path'
 import * as settings from './settings'
+import { appendBounded, formatRendererLine, shouldRecordConsoleLevel } from './logging'
 import { ApiService, type LaunchSpec } from './service'
 import { runDoctor } from './doctor'
 import { launchFlags, resolveLaunchCommand, spawnOnBoot, type ResolvedLaunchCommand } from './launch'
@@ -143,6 +144,16 @@ const notifier = new NotificationTracker()
  */
 function diag(message: string): void {
   if (process.env.TP_DESKTOP_DIAG) process.stdout.write(`[diag] ${message}\n`)
+}
+
+/** Where renderer failures are appended; `userDataDir` is pinned above. */
+function rendererLogPath(): string {
+  return join(app.getPath('userData'), 'renderer-errors.log')
+}
+
+/** Append one renderer-diagnostic record. Best-effort: `appendBounded` never throws. */
+function recordRendererDiagnostic(kind: string, text: string): void {
+  appendBounded(rendererLogPath(), formatRendererLine(kind, text))
 }
 
 /** True while at least one switch needs the API polled for it. */
@@ -603,6 +614,33 @@ function createWindow(): void {
       sandbox: false
     }
   })
+
+  // One place for the renderer failures the main process would otherwise never
+  // see: the preload deliberately exposes no write channel, so a renderer that
+  // throws, hangs, crashes or fails its preload leaves no on-disk trace unless
+  // it is captured here. Only error-level console output is recorded. The
+  // subscription is itself best-effort -- the same "diagnostics must never crash
+  // the app" rule the writer follows -- so a webContents without the emitter
+  // surface cannot turn a diagnostic into a boot failure.
+  const wc = mainWindow.webContents
+  if (typeof wc.on === 'function') {
+    wc.on('console-message', (details) => {
+      if (!shouldRecordConsoleLevel(details.level)) return
+      recordRendererDiagnostic('console', `${details.sourceId}:${details.lineNumber} ${details.message}`)
+    })
+
+    wc.on('render-process-gone', (_event, details) => {
+      recordRendererDiagnostic('gone', `reason=${details.reason} exitCode=${details.exitCode}`)
+    })
+
+    wc.on('unresponsive', () => {
+      recordRendererDiagnostic('unresponsive', 'renderer stopped responding')
+    })
+
+    wc.on('preload-error', (_event, preloadPath, error) => {
+      recordRendererDiagnostic('preload', `${preloadPath} ${error.message}`)
+    })
+  }
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
