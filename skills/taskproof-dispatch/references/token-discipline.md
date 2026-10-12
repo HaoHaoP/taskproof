@@ -12,9 +12,21 @@ The run's own step ⑦ executes the lane's `verify` command with the card's work
 | Was the command run at all? | the machine | `verify_cmd == SKIPPED` → exception 1 below |
 | Does the command cover what the card demands? | you | at card-writing time, see section 1.2 |
 | Did the worker stay inside the card? | you | read the diff |
-| Is it right in a real runtime? | you | DOM, bytes, a running server |
+| Is it right in a real runtime? | you | one command, one number: re-run the card's `check-*.mjs` / read one value / compare bytes |
 | Did a delete keep what should have survived? | you | inventory before and after |
 | Is it what the operator meant? | the operator | ask, once, with a recommendation |
+
+**That row has a ceiling — it is not a licence to explore.** Two tiers:
+
+- **Closing tier (you do it):** re-run the card's script, read one value off the page, compare
+  bytes/fingerprints — the ceiling is "one command, one number", then report.
+- **Exploratory tier (fold it into a card first; do not build it up in-session):** root-causing, hitting the
+  intranet backend, hooking XHR, clicking through pages — the first move is to **freeze the probe into the
+  project's `check-*.mjs` and put it in the card** (the worker shows red→green; you only re-run that one
+  command), or to write a "to-verify list" into the project's progress file before deciding what to fire.
+  When it needs a logged-in session, prefer the operator's test token so the worker can run the script.
+- **Stop gate:** more than ~10 tool calls, or ~15 minutes, on the same question with no verdict → stop:
+  write a card, write a backlog line, or go to the operator (section 4, "don't loop with yourself").
 
 Two facts about the ledger worth knowing before you read it:
 
