@@ -42,7 +42,7 @@ pipx install git+https://github.com/HaoHaoP/taskproof
 或从同一个 Release 下载 wheel，装本地文件：
 
 ```bash
-pipx install ./taskproof-0.2.0-py3-none-any.whl
+pipx install ./taskproof-0.2.1-py3-none-any.whl
 ```
 
 或从源码可编辑安装：

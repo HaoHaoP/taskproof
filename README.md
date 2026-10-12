@@ -49,7 +49,7 @@ pipx install git+https://github.com/HaoHaoP/taskproof
 Or download the wheel from the same Release and install the local file:
 
 ```bash
-pipx install ./taskproof-0.2.0-py3-none-any.whl
+pipx install ./taskproof-0.2.1-py3-none-any.whl
 ```
 
 Or run from a source checkout:
