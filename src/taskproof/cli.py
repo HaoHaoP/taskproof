@@ -793,21 +793,44 @@ def cmd_show(args):
     if detail.get("task") is None:
         raise UsageError(f"no such task: {args.task_id}")
     task = detail["task"]
-    human = "\n".join(
-        [
-            f"id:       {task.get('id')}",
-            f"project:  {task.get('project')}",
-            f"status:   {task.get('status')}",
-            f"adapter:  {task.get('adapter')}",
-            f"brief:    {task.get('brief')}",
-            f"verify:   {task.get('verify_cmd')} (exit {task.get('verify_exit')})",
-            f"created:  {task.get('created_at')}",
-            f"finished: {task.get('finished_at')}",
-            f"workdir:  {task.get('workdir')}",
-        ]
-    )
-    emit(args, detail, human)
+    lines = [
+        f"id:       {task.get('id')}",
+        f"project:  {task.get('project')}",
+        f"status:   {task.get('status')}",
+        f"adapter:  {task.get('adapter')}",
+        f"brief:    {task.get('brief')}",
+        f"verify:   {task.get('verify_cmd')} (exit {task.get('verify_exit')})",
+        f"created:  {task.get('created_at')}",
+        f"finished: {task.get('finished_at')}",
+        f"workdir:  {task.get('workdir')}",
+        f"files:    {task.get('files_changed')} (changed)",
+    ]
+    lines.extend(_change_lines(detail.get("events") or []))
+    emit(args, detail, "\n".join(lines))
     return 0
+
+
+def _change_lines(events) -> list:
+    """The `changes:` block of `show`, read from the `changes` event.
+
+    One indented line per recorded path; a path that was already dirty before
+    the run (the part of ``files_changed`` that is NOT this card's doing) gets a
+    trailing marker so the reader can tell the two apart at a glance.
+    """
+    payload = next(
+        (e.get("payload") for e in events if e.get("event") == "changes"),
+        None,
+    )
+    if not isinstance(payload, dict):
+        return []
+    preexisting = set(payload.get("preexisting") or [])
+    lines = ["changes:"]
+    for path in payload.get("paths") or []:
+        suffix = "  [跑前已脏]" if path in preexisting else ""
+        lines.append(f"  {path}{suffix}")
+    if payload.get("truncated"):
+        lines.append("  … (截断)")
+    return lines
 
 
 def _wait_human(task) -> str:

@@ -77,6 +77,38 @@ _ALL_STATUSES = (
 VERIFY_SKIPPED = "SKIPPED"
 
 
+#: Ceiling on the number of paths a single `changes` event carries. The audit
+#: stream is read by humans (`show`) as well as machines, so a card that sweeps
+#: thousands of files must not bloat the payload. The cut is not silent: the
+#: unchanged `count` still reports the true total and `truncated` marks the cap.
+MAX_RECORDED_CHANGES = 200
+
+
+def change_surface(changed, changed_before) -> dict:
+    """Payload for the `changes` event: what this run left dirty, and what was
+    already dirty before it started.
+
+    `changed` is ``verify.diff_changed_files(...)`` — the paths the run actually
+    touched (created / removed / status-shifted). `changed_before` is the pre-run
+    ``git status`` snapshot the forbidden-path gate already took, so no extra git
+    call is made here.
+
+    ``paths`` is the union of the two, sorted: the full surface a reader would
+    see by running ``git status`` themselves. ``preexisting`` is the intersection
+    with the before-snapshot — the paths that were ALREADY dirty, which is what
+    inflates ``files_changed`` above this card's own work. Marking them is the
+    whole point: without it a reader cannot tell 「本卡改的」 from 「本来就在那儿的」.
+    """
+    preexisting = set(changed_before or {})
+    surface = sorted(set(changed) | preexisting)
+    return {
+        "paths": surface[:MAX_RECORDED_CHANGES],
+        "count": len(surface),
+        "preexisting": sorted(preexisting),
+        "truncated": len(surface) > MAX_RECORDED_CHANGES,
+    }
+
+
 def prepare_workspace(workspace: str) -> None:
     """Create the workspace, database and audit directory if missing.
 
@@ -616,6 +648,16 @@ def _execute(
     # ⑥ change + forbidden-path check, on the PROJECT workdir (or its worktree).
     changed = verify.diff_changed_files(changed_before, changed_after)
     files_changed = verify.detect_changes(run_dir)
+    # Record the change surface in the audit stream (schema untouched: an event,
+    # not a column). `changed` is this run's own work; `changed_before` is the
+    # pre-run snapshot, so the event also flags what was already dirty — the part
+    # of `files_changed` that is not this card's doing.
+    storage.append_event(
+        conn,
+        task_id,
+        "changes",
+        change_surface(changed, changed_before),
+    )
     # Three independent signals:
     #   file       -> git status difference + size:mtime_ns fingerprints
     #   presence   -> before/after file-set membership only

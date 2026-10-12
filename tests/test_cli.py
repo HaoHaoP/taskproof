@@ -176,6 +176,39 @@ class RunCliTest(CliBase):
         self.assertIn("park", err.getvalue())
 
 
+class ShowChangesTest(CliBase):
+    """Card 76: `show` renders the change surface, in text and in `--json`."""
+
+    def test_show_text_lists_paths_and_json_carries_the_event(self):
+        self.run_cli("--workspace", self.ws, "init")
+        subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True)
+        self.write_registry()
+
+        code, out = self.run_cli(
+            "--workspace", self.ws, "--json", "run", "proj", "make a file",
+            "--adapter", "custom:sh -c 'echo hi > made.txt && echo done'",
+        )
+        self.assertEqual(code, 0, out)
+        task_id = json.loads(out)["task_id"]
+
+        # Text form: a `changes:` block with the actual path.
+        code, out = self.run_cli("--workspace", self.ws, "show", task_id)
+        self.assertEqual(code, 0, out)
+        self.assertIn("files:", out)
+        self.assertIn("changes:", out)
+        self.assertIn("made.txt", out)
+        self.assertNotIn("[跑前已脏]", out)  # nothing pre-existing here
+
+        # JSON form: the event is on the stream, no CLI-side shape change.
+        code, out = self.run_cli("--workspace", self.ws, "--json", "show", task_id)
+        self.assertEqual(code, 0, out)
+        detail = json.loads(out)
+        payload = next(
+            e["payload"] for e in detail["events"] if e["event"] == "changes"
+        )
+        self.assertIn("made.txt", payload["paths"])
+
+
 class WaitCliTest(CliBase):
     """Card 75: `taskproof wait` blocks on the ledger and reports the verdict.
 

@@ -181,6 +181,65 @@ class HappyPathTest(DispatchBase):
         self.assertEqual(self.active_claims(), 0)
 
 
+class ChangesEventTest(DispatchBase):
+    """Card 76: the run's change surface lands in the audit stream.
+
+    `files_changed` is a bare count whose value includes paths that were already
+    dirty before the run. The `changes` event carries the paths themselves so a
+    reader never has to guess which tree to `git status` — and flags the
+    pre-existing ones so the count and the card's own work stay distinguishable.
+    """
+
+    def init_repo(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True)
+
+    def changes_payload(self, task_id):
+        for event in task_detail(self.ws, task_id)["events"]:
+            if event["event"] == "changes":
+                return event["payload"]
+        self.fail("no `changes` event in the ledger")
+
+    def test_event_lists_the_run_changes_including_new_files(self):
+        self.init_repo()
+        self.write_registry(verify="exit 0")
+        command = "custom:sh -c 'echo x > a.txt && echo y > b.txt && echo ok'"
+        task_id = dispatch(self.ws, "proj", "x", adapter=command)
+
+        payload = self.changes_payload(task_id)
+        # Sorted, and every path the adapter actually wrote is present.
+        self.assertEqual(payload["paths"], ["a.txt", "b.txt"])
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["count"], len(payload["paths"]))
+        self.assertEqual(payload["preexisting"], [])
+        self.assertFalse(payload["truncated"])
+
+    def test_preexisting_dirty_paths_are_flagged_not_just_listed(self):
+        self.init_repo()
+        # Already dirty before the run and never touched by the adapter.
+        with open(os.path.join(self.proj, "already.txt"), "w", encoding="utf-8") as fh:
+            fh.write("was here first\n")
+        self.write_registry(verify="exit 0")
+        task_id = dispatch(
+            self.ws,
+            "proj",
+            "x",
+            adapter="custom:sh -c 'echo x > made.txt && echo ok'",
+        )
+
+        payload = self.changes_payload(task_id)
+        # The card's own write is on the surface...
+        self.assertIn("made.txt", payload["paths"])
+        # ...and so is the pre-existing dirt, but it is called out separately
+        # rather than merely merged into `paths`.
+        self.assertIn("already.txt", payload["paths"])
+        self.assertIn("already.txt", payload["preexisting"])
+        self.assertNotIn("made.txt", payload["preexisting"])
+        # `files_changed` counts the whole dirty surface (2), not just the card.
+        detail = task_detail(self.ws, task_id)
+        self.assertEqual(detail["task"]["files_changed"], 2)
+        self.assertEqual(payload["count"], 2)
+
+
 class AcceptanceFailureTest(DispatchBase):
     def test_failed_acceptance_marks_failed_and_releases(self):
         self.write_registry(verify="exit 1")
