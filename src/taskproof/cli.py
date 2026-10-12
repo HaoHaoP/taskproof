@@ -23,7 +23,7 @@ from . import (
     storage,
 )
 from .errors import RegistryError, UsageError
-from .models import TERMINAL_STATUSES
+from .models import STATUS_DONE, TERMINAL_STATUSES
 
 DEFAULT_WORKSPACE = os.path.join(os.path.expanduser("~"), ".taskproof")
 
@@ -124,10 +124,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--project", help="project id, alias, or path (overrides cwd)")
     p.add_argument("--all", dest="all_projects", action="store_true",
                    help="every project, ignoring the cwd scope (overrides cwd)")
+    p.add_argument("--id", dest="ids", metavar="ID[,ID...]",
+                   help="only these task ids (comma-separated)")
+    p.add_argument("--lane", metavar="TASKGROUP_ID",
+                   help="only tasks dispatched onto this lane (group_name)")
     p.add_argument("--limit", type=int, default=20)
 
     p = sub.add_parser("show", help="show one task")
     p.add_argument("task_id")
+
+    p = sub.add_parser("wait", help="block until a task reaches a terminal state")
+    p.add_argument("task_id")
+    p.add_argument("--timeout", type=float, default=600.0,
+                   help="give up after this many seconds (default: %(default)s)")
+    p.add_argument("--poll", type=float, default=2.0,
+                   help="seconds between status reads (default: %(default)s)")
 
     p = sub.add_parser("log", help="print a task's event stream")
     p.add_argument("task_id")
@@ -654,6 +665,46 @@ def _row_brief(task) -> str:
     return brief[:45] + "..." if len(brief) > 48 else brief
 
 
+def _row_verify(task) -> str:
+    """One cell for the VERIFY column.
+
+    `SKIPPED` is deliberately rendered as an en dash, not a pass: a card whose
+    acceptance never ran must not look like one that did. Without a recorded
+    exit there is nothing to claim, so that is a `?`; otherwise `exit=N`.
+    """
+    if task.get("verify_cmd") == dispatch.VERIFY_SKIPPED:
+        return "–"
+    exit_code = task.get("verify_exit")
+    if exit_code is None:
+        return "?"
+    return f"exit={exit_code}"
+
+
+def _row_files(task) -> str:
+    files_changed = task.get("files_changed")
+    return "-" if files_changed is None else str(files_changed)
+
+
+def _tasks_header(*, with_project: bool) -> str:
+    # Column order is contractual: ID STATUS [PROJECT] VERIFY FILES BRIEF. The
+    # single-project view drops PROJECT (it is constant there) and keeps its
+    # compact shape; either way BRIEF stays last and keeps its 45-char cap
+    # (`_row_brief`), so the new columns never squeeze it out.
+    cells = [f"{'ID':<18}", f"{'STATUS':<10}"]
+    if with_project:
+        cells.append(f"{'PROJECT':<16}")
+    cells += [f"{'VERIFY':<8}", f"{'FILES':<6}", "BRIEF"]
+    return "    " + " ".join(cells)
+
+
+def _tasks_row(task, *, with_project: bool) -> str:
+    cells = [f"{str(task.get('id') or ''):<18}", f"{str(task.get('status') or ''):<10}"]
+    if with_project:
+        cells.append(f"{str(task.get('project') or ''):<16}")
+    cells += [f"{_row_verify(task):<8}", f"{_row_files(task):<6}", _row_brief(task)]
+    return "    " + " ".join(cells)
+
+
 def _tasks_human(tasks, *, project_id, source, n_projects) -> str:
     """Human rendering of `tasks`, grouped by project for the "全部" scope."""
     lines = [_scope_banner(project_id, source, n_projects)]
@@ -665,24 +716,17 @@ def _tasks_human(tasks, *, project_id, source, n_projects) -> str:
         for pid, items in groups:
             lines.append("")
             lines.append(f"# {pid} ({len(items)} 个任务)")
-            lines.append(f"    {'ID':<18} {'STATUS':<10} {'PROJECT':<16} BRIEF")
+            lines.append(_tasks_header(with_project=True))
             for task in items:
-                lines.append(
-                    f"    {str(task.get('id') or ''):<18} "
-                    f"{str(task.get('status') or ''):<10} "
-                    f"{str(task.get('project') or ''):<16} {_row_brief(task)}"
-                )
+                lines.append(_tasks_row(task, with_project=True))
         return "\n".join(lines)
 
     if not tasks:
         lines.append("no tasks")
         return "\n".join(lines)
-    lines.append(f"    {'ID':<18} {'STATUS':<10} BRIEF")
+    lines.append(_tasks_header(with_project=False))
     for task in tasks:
-        lines.append(
-            f"    {str(task.get('id') or ''):<18} "
-            f"{str(task.get('status') or ''):<10} {_row_brief(task)}"
-        )
+        lines.append(_tasks_row(task, with_project=False))
     return "\n".join(lines)
 
 
@@ -692,15 +736,30 @@ def cmd_tasks(args):
         reg, explicit_project=args.project, force_all=args.all_projects
     )
 
+    # `--id` / `--lane` have no SQL seam (`list_tasks` only knows status /
+    # project), so they are applied here -- but AFTER the status/project
+    # filter and BEFORE `--limit`, so every filter composes. `limit=-1` asks
+    # SQLite for every row (its "no limit"), and the cap is applied below.
+    id_filter = {
+        tid.strip() for tid in (getattr(args, "ids", None) or "").split(",") if tid.strip()
+    }
+    lane = getattr(args, "lane", None)
+
     conn = storage.connect(storage.db_path(args.workspace))
     try:
         storage.migrate(conn)
         rows = storage.list_tasks(
-            conn, status=args.status, project=project_id, limit=args.limit
+            conn, status=args.status, project=project_id, limit=-1
         )
         tasks = [dict(row) for row in rows]
     finally:
         conn.close()
+
+    if id_filter:
+        tasks = [task for task in tasks if task.get("id") in id_filter]
+    if lane:
+        tasks = [task for task in tasks if task.get("group_name") == lane]
+    tasks = tasks[: args.limit]
 
     if project_id is None:
         groups = storage.group_tasks_by_project(tasks)
@@ -749,6 +808,50 @@ def cmd_show(args):
     )
     emit(args, detail, human)
     return 0
+
+
+def _wait_human(task) -> str:
+    """`wait`'s text form: the run-ending line, then the verdict fields."""
+    return "\n".join(
+        [
+            f"{task.get('id')}  {task.get('status') or ''}  {task.get('project') or ''}",
+            f"status:   {task.get('status')}",
+            f"exit:     {task.get('exit_code')}",
+            f"verify:   {task.get('verify_cmd')} (exit {task.get('verify_exit')})",
+            f"files:    {task.get('files_changed')}",
+            f"started:  {task.get('started_at')}",
+            f"finished: {task.get('finished_at')}",
+        ]
+    )
+
+
+def cmd_wait(args):
+    """Poll the ledger until a task is terminal, then report it.
+
+    Read-only by construction: it never forks, daemonises or spawns a thread,
+    it just re-reads the task row on `--poll` seconds like `log --follow`. A
+    wait that runs out returns 124 and leaves the task exactly where it was.
+    """
+    deadline = time.monotonic() + args.timeout
+    while True:
+        status = _task_status(args.workspace, args.task_id)
+        if status is None:
+            raise UsageError(f"no such task: {args.task_id}")
+        if status in TERMINAL_STATUSES:
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(args.poll, remaining))
+
+    detail = dispatch.task_detail(args.workspace, args.task_id)
+    task = detail.get("task") or {}
+    emit(args, detail, _wait_human(task))
+
+    status = task.get("status")
+    if status not in TERMINAL_STATUSES:
+        return 124  # the wait gave up; the task state was never touched
+    return 0 if status == STATUS_DONE else 1
 
 
 #: `log --follow` polls the audit stream instead of blocking on a `tail -f`.
@@ -1339,6 +1442,7 @@ COMMANDS = {
     "run": cmd_run,
     "tasks": cmd_tasks,
     "show": cmd_show,
+    "wait": cmd_wait,
     "log": cmd_log,
     "verify": cmd_verify,
     "accept": cmd_accept,

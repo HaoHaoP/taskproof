@@ -173,6 +173,7 @@ discipline:
 
 ```
 taskproof run <project> "<task>"     # dispatch, then verify, then record
+taskproof wait <id>                  # block until a card reaches a terminal state
 taskproof tasks / show / log         # inspect state
 taskproof board                      # static dashboard snapshot
 taskproof api --port 8787            # local read-only REST API for clients

@@ -176,6 +176,179 @@ class RunCliTest(CliBase):
         self.assertIn("park", err.getvalue())
 
 
+class WaitCliTest(CliBase):
+    """Card 75: `taskproof wait` blocks on the ledger and reports the verdict.
+
+    It polls the task row (like `log --follow`), never forks a helper, and the
+    exit code is the contract: done 0, any other terminal state 1, and a wait
+    that gives up 124 -- without ever touching the task's own state.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.run_cli("--workspace", self.ws, "init")
+        self.write_registry()  # verify = "exit 0"
+
+    def _dispatch(self, brief, *, adapter="custom:echo hi", verify=None):
+        if verify is not None:
+            self.write_registry(verify=verify)
+        code, out = self.run_cli(
+            "--workspace", self.ws, "--json", "run", "proj", brief,
+            "--adapter", adapter,
+        )
+        return code, out
+
+    def test_wait_on_done_exits_zero_and_leads_with_id_and_status(self):
+        _code, out = self._dispatch("done card")
+        task_id = json.loads(out)["task_id"]
+        code, stdout = self.run_cli("--workspace", self.ws, "wait", task_id)
+        self.assertEqual(code, 0)
+        first = stdout.splitlines()[0]
+        self.assertIn(task_id, first)
+        self.assertIn("done", first)
+
+    def test_wait_json_is_the_show_shape(self):
+        _code, out = self._dispatch("done card")
+        task_id = json.loads(out)["task_id"]
+        code, stdout = self.run_cli("--workspace", self.ws, "--json", "wait", task_id)
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)
+        self.assertEqual(set(payload), {"task", "events"})
+        self.assertEqual(payload["task"]["id"], task_id)
+        self.assertEqual(payload["task"]["status"], "done")
+
+    def test_wait_on_failed_exits_one(self):
+        # A verify failure makes `run` exit non-zero, so the card is seeded
+        # directly -- `wait` must read the row, not re-derive the verdict.
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            storage.migrate(conn)
+            storage.insert_task(conn, Task(
+                id="t-failed-001", project="proj", group="proj", brief="red",
+                status="failed", exit_code=0, verify_cmd="exit 3",
+                verify_exit=3, created_at=storage.now_iso(),
+                finished_at=storage.now_iso(),
+            ))
+        finally:
+            conn.close()
+        code, stdout = self.run_cli("--workspace", self.ws, "wait", "t-failed-001")
+        self.assertEqual(code, 1)
+        self.assertIn("failed", stdout.splitlines()[0])
+
+    def test_wait_timing_out_on_running_is_124_and_never_touches_state(self):
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            storage.migrate(conn)
+            storage.insert_task(conn, Task(
+                id="t-hold-001", project="proj", group="proj", brief="x",
+                status=STATUS_RUNNING, adapter="codex",
+                created_at=storage.now_iso(), started_at=storage.now_iso(),
+            ))
+        finally:
+            conn.close()
+
+        code, _ = self.run_cli(
+            "--workspace", self.ws, "wait", "t-hold-001",
+            "--timeout", "1", "--poll", "0.1",
+        )
+        self.assertEqual(code, 124)
+        after = dispatch.task_detail(self.ws, "t-hold-001")["task"]
+        self.assertEqual(after["status"], STATUS_RUNNING)
+        self.assertIsNone(after["finished_at"])
+
+
+class TasksCliTest(CliBase):
+    """Card 75: the `tasks` table grows VERIFY/FILES, and `--id` / `--lane`
+    narrow it without disturbing the JSON shape (only the text table changed).
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.run_cli("--workspace", self.ws, "init")
+        self.write_registry()
+
+    def _seed(self, task_id, *, status="done", group="proj", **fields):
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            storage.migrate(conn)
+            storage.insert_task(conn, Task(
+                id=task_id, project="proj", group=group, brief="x",
+                status=status, created_at=storage.now_iso(), **fields,
+            ))
+        finally:
+            conn.close()
+
+    def test_table_header_carries_verify_and_files(self):
+        self._seed("t-done-001")
+        code, out = self.run_cli("--workspace", self.ws, "tasks")
+        self.assertEqual(code, 0)
+        header = next(
+            line for line in out.splitlines() if "ID" in line and "STATUS" in line
+        )
+        self.assertIn("VERIFY", header)
+        self.assertIn("FILES", header)
+        # New column order: ID STATUS PROJECT VERIFY FILES BRIEF.
+        order = ["ID", "STATUS", "PROJECT", "VERIFY", "FILES", "BRIEF"]
+        positions = [header.index(name) for name in order]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_compact_project_scope_also_gains_verify_and_files(self):
+        self._seed("t-done-001")
+        code, out = self.run_cli(
+            "--workspace", self.ws, "tasks", "--project", "proj"
+        )
+        self.assertEqual(code, 0)
+        header = next(
+            line for line in out.splitlines() if "ID" in line and "STATUS" in line
+        )
+        self.assertIn("VERIFY", header)
+        self.assertIn("FILES", header)
+        self.assertNotIn("PROJECT", header)  # single-project view stays compact
+
+    def test_skipped_verify_is_an_en_dash_not_a_pass(self):
+        _code, out = self.run_cli(
+            "--workspace", self.ws, "--json", "run", "proj", "skip me",
+            "--adapter", "custom:echo hi", "--no-verify",
+        )
+        task_id = json.loads(out)["task_id"]
+        code, text = self.run_cli("--workspace", self.ws, "tasks")
+        self.assertEqual(code, 0)
+        row = next(line for line in text.splitlines() if task_id in line)
+        self.assertIn("\u2013", row)  # the VERIFY cell, never "exit=0"
+
+    def test_id_filter_returns_only_that_row(self):
+        ids = []
+        for i in range(2):
+            _code, out = self.run_cli(
+                "--workspace", self.ws, "--json", "run", "proj", f"task {i}",
+                "--adapter", "custom:echo hi",
+            )
+            ids.append(json.loads(out)["task_id"])
+
+        code, out = self.run_cli(
+            "--workspace", self.ws, "--json", "tasks", "--id", ids[0]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual([t["id"] for t in json.loads(out)["tasks"]], [ids[0]])
+
+    def test_unknown_id_prints_no_tasks_and_exits_zero(self):
+        code, out = self.run_cli(
+            "--workspace", self.ws, "tasks", "--id", "t-00000000-999"
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("no tasks", out)
+
+    def test_lane_filter_matches_group_name(self):
+        self._seed("t-lane-a", group="lane-a")
+        self._seed("t-lane-b", group="lane-b")
+
+        code, out = self.run_cli(
+            "--workspace", self.ws, "--json", "tasks", "--all", "--lane", "lane-a"
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual([t["id"] for t in json.loads(out)["tasks"]], ["t-lane-a"])
+
+
 class ExitCodeTest(CliBase):
     def test_unknown_project_is_2(self):
         self.run_cli("--workspace", self.ws, "init")

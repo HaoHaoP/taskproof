@@ -138,6 +138,7 @@ GitHub 上的编排类项目都在卷同一件事：**能同时跑多少 agent�
 
 ```
 taskproof run <项目> "<任务>"     # 派发 → 验收 → 记账
+taskproof wait <id>              # 阻塞到该卡进入终态
 taskproof tasks / show / log     # 查状态
 taskproof board                  # 静态看板快照
 taskproof api --port 8787        # 给客户端用的本地只读 REST API
