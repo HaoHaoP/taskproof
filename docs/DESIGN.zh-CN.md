@@ -299,7 +299,7 @@ taskproof cancel <task-id>              停任务（对自己那棵进程树 SIG
 taskproof rm <task-id>                  删除终态任务的记录、事件与保留的 worktree
 taskproof workspaces                    列出拥有长驻工作区的道
 taskproof workspace-rm <taskgroup>      删除其中一个（先打印证据；不干净就拒绝）
-taskproof board [--open | --serve PORT | --out FILE]
+taskproof board [--open | --serve PORT]
 taskproof api --port N                  本地只读 REST（stage 2 前端消费）
 taskproof doctor                        环境自检
 taskproof gc                            归档与轮转
@@ -338,8 +338,11 @@ stage 2  Vue 3 + Vite 前端 → Electron 薄壳（不内嵌 Python 运行时）
 
 ### stage 2：桌面应用
 
-静态看板**冻结**：它继续作为 `file://` 快照可用，但不再往下开发。stage 2 在
-`desktop/` 里另做一款 Electron 应用，消费同一个回环 REST API。该 API 是
+看板是**一份渲染层、两处宿主**。`desktop/` 里的 Vue 应用就是整块看板：Electron
+控制台从 `out/renderer` 加载它，`taskproof board` 则把同一份构建（提交在
+`src/taskproof/web/`）通过回环 REST API 服务给浏览器。`npm run build:web` 从渲染层源码
+重新生成被服务的那份产物，一旦提交的构建漂移 CI 就失败 —— 两处宿主因此永不分叉，也不存在
+另需同步的「静态看板」。该 API 是
 **只读**的：项目增 / 改 / 删，以及任务控制（派发 / 放行 / 停止 / 删除）等全部
 写操作都只走 CLI，REST 表面只提供读。`rerun` 也刻意只给 CLI（v1 的「再跑一次」
 是预填表单，不是看板需要拥有的写口）。Python 侧只增加下面这几处小改动，其余

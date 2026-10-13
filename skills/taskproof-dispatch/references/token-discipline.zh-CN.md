@@ -56,7 +56,7 @@
 ## 素材（自己读，不要我复述）
 - 原型：/absolute/path/to/prototype/viewer.html:1710-1735
 - 设计口径：/absolute/path/to/design/taskgroup.md 第 3 节
-- 上次的真实输出：/absolute/path/to/logs/board.html
+- 上次的真实输出：/absolute/path/to/logs/verify.log
 ````
 
 规矩：

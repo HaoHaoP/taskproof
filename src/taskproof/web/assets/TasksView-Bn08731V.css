@@ -1,0 +1,30 @@
+
+.tasks-view[data-v-5700280e] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.tp-table[data-v-5700280e] .el-table__row {
+  cursor: pointer;
+}
+.taken[data-v-5700280e] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 10px;
+  font: 11.5px/1 var(--mono);
+  color: var(--ink-3);
+}
+.taken button[data-v-5700280e] {
+  font: 11.5px/1 var(--sans);
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.taken button[data-v-5700280e]:hover {
+  background: var(--raise);
+}

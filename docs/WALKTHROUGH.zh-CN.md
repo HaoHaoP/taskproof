@@ -31,7 +31,7 @@ next:
   taskproof register <path>         # probe and register a repository
   taskproof run <project> "<task>"  # dispatch, verify, record
   taskproof board --open            # live dashboard (serves + opens a browser)
-  taskproof board --out board.html  # static snapshot (does not auto-refresh)
+  taskproof board --serve          # serve the board without a browser
   registry format                   # examples/projects.example.toml
 ```
 
@@ -178,8 +178,8 @@ t-20261008-002  verify: FAILED  exit=1
 ## 9. 看板与 API
 
 ```bash
-taskproof board --open             # 实时看板，阻塞，服务在 8787
-taskproof board --out board.html   # 独立快照，不自动刷新
+taskproof board                    # 起服务并打开浏览器（阻塞在 8787）
+taskproof board --serve 8788       # 只服务，不开浏览器（阻塞）
 taskproof api --port 8787          # 给客户端用的只读 REST
 taskproof api --port 0             # 绑一个空闲端口并把它打印出来
 ```
@@ -191,6 +191,17 @@ taskproof api listening on http://127.0.0.1:61071
 ```
 
 `desktop/` 里那个桌面应用就是靠这一行知道自己在跟哪个端口说话。
+
+浏览器里看到的就是桌面版那个界面 —— `taskproof board` 服务的就是桌面应用自带的那份构建，
+一份界面两处宿主，不再是另做一块「静态」看板。旧的 `?project=` / `?task=` 链接会被 302
+重定向到渲染层自己的 hash 路由（例如 `/#/matrix/<task>?projects=<id>`）；裸 `/` 原样返回。
+
+手机在同一 tailnet 上要看板，先起服务、再用 Tailscale 暴露端口：
+
+```bash
+taskproof board --serve 8788
+tailscale serve --bg --tcp=8788 tcp://127.0.0.1:8788
+```
 
 ## 让人意外的几点
 

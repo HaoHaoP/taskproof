@@ -9,7 +9,7 @@ It does not decide *what* to do. It guarantees that whatever gets dispatched is
 agent's own claim that it finished.
 
 **Status: stage 1 is usable, and the stage-2 desktop console is here.** The
-engine, CLI, a static board, a local read-only REST API, and an Electron console
+engine, CLI, a browser board, a local read-only REST API, and an Electron console
 in `desktop/` are implemented. See [`docs/DESIGN.md`](docs/DESIGN.md) for the
 full design and the decision log.
 
@@ -175,7 +175,8 @@ discipline:
 taskproof run <project> "<task>"     # dispatch, then verify, then record
 taskproof wait <id>                  # block until a card reaches a terminal state
 taskproof tasks / show / log         # inspect state
-taskproof board                      # static dashboard snapshot
+taskproof board                      # serve the board and open a browser (blocks)
+taskproof board --serve 8788         # serve the board only, no browser (blocks)
 taskproof api --port 8787            # local read-only REST API for clients
 ```
 
@@ -246,8 +247,8 @@ failure column.
 ## The desktop console
 
 `desktop/` is the stage-2 console: an **Electron + Vue 3** app (Element Plus,
-UnoCSS, Pinia, vue-i18n) that renders the same loopback data as the static board,
-but live. It is bilingual — zh-CN and en, following the system locale with an
+UnoCSS, Pinia, vue-i18n). It is the same renderer `taskproof board` serves in a
+browser — one rendering layer with two hosts. It is bilingual — zh-CN and en, following the system locale with an
 English fallback.
 
 The process model is the interesting part. The app spawns the local service
@@ -313,7 +314,7 @@ existing project). See
 commented starting point, and [`docs/REGISTRY.md`](docs/REGISTRY.md) for the
 field reference and the list of hard errors.
 
-The static board's left rail groups by **project** — one row per project,
+The board's left rail groups by **project** — one row per project,
 with the lanes it owns shown on hover — and each task card names the lane it
 ran on.
 

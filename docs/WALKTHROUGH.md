@@ -33,7 +33,7 @@ next:
   taskproof register <path>         # probe and register a repository
   taskproof run <project> "<task>"  # dispatch, verify, record
   taskproof board --open            # live dashboard (serves + opens a browser)
-  taskproof board --out board.html  # static snapshot (does not auto-refresh)
+  taskproof board --serve          # serve the board without a browser
   registry format                   # examples/projects.example.toml
 ```
 
@@ -188,8 +188,8 @@ t-20261008-002  verify: FAILED  exit=1
 ## 9. The dashboard and the API
 
 ```bash
-taskproof board --open             # live board, blocks, serves on 8787
-taskproof board --out board.html   # standalone snapshot, no auto-refresh
+taskproof board                    # serve the board and open a browser (blocks on 8787)
+taskproof board --serve 8788       # serve only, no browser (blocks)
 taskproof api --port 8787          # read-only REST for clients
 taskproof api --port 0             # bind a free port and print it
 ```
@@ -201,6 +201,20 @@ taskproof api listening on http://127.0.0.1:61071
 ```
 
 That line is how the desktop app in `desktop/` learns which port it was given.
+
+The browser shows the same renderer the Electron console does: `taskproof board`
+serves the build the desktop app ships, so there is one interface with two hosts,
+not a second "static" board. Old `?project=` / `?task=` links are 302-redirected
+to the renderer's own hash route (e.g. `/#/matrix/<task>?projects=<ids>`); a bare
+`/` is served as-is.
+
+To reach the board from a phone on the same tailnet, serve it and expose the
+port with Tailscale:
+
+```bash
+taskproof board --serve 8788
+tailscale serve --bg --tcp=8788 tcp://127.0.0.1:8788
+```
 
 ## Things that surprise people
 

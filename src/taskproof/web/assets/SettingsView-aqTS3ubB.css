@@ -1,0 +1,19 @@
+
+.settings-view[data-v-9b13aa18] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+/* The full argv wraps instead of clipping, and stays selectable so the user can
+   copy it and run the service by hand -- the project's checkable style. */
+.argvcopy[data-v-9b13aa18] {
+  text-align: right;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+/* A missing git is a notice, not an alarm: amber, never the failure red. */
+.gitmissing[data-v-9b13aa18] {
+  color: var(--c-timeout);
+}

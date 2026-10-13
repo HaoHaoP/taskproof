@@ -44,3 +44,18 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm run build:web
+
+      # The browser board serves the same renderer the Electron window shows,
+      # so the committed build under src/taskproof/web/ must equal what the
+      # source produces. We just rebuilt it; fail if regenerating it changed
+      # anything -- drift here means the browser board and the desktop
+      # interface are no longer the same code (the enum-contract discipline).
+      - name: web build is in sync with the renderer source
+        run: |
+          if [ -n "$(git -C .. status --porcelain -- src/taskproof/web)" ]; then
+            echo "::error::src/taskproof/web is stale; run 'npm run build:web' in desktop/ and commit the result"
+            git -C .. status --porcelain -- src/taskproof/web
+            git -C .. --no-pager diff --stat -- src/taskproof/web
+            exit 1
+          fi

@@ -7,7 +7,7 @@
 它不决定**该做什么**，只保证派出去的活都被**独立验收**过、**留了痕迹** ——
 你不需要相信 agent 自称"我干完了"。
 
-**状态：stage 1 已可用，stage 2 的桌面看板也来了。** 引擎、CLI、静态看板、本地只读
+**状态：stage 1 已可用，stage 2 的桌面看板也来了。** 引擎、CLI、浏览器看板、本地只读
 REST API，以及 `desktop/` 里的 Electron 看板均已实现。完整设计与决策记录见
 [`docs/DESIGN.zh-CN.md`](docs/DESIGN.zh-CN.md)。
 
@@ -140,7 +140,8 @@ GitHub 上的编排类项目都在卷同一件事：**能同时跑多少 agent�
 taskproof run <项目> "<任务>"     # 派发 → 验收 → 记账
 taskproof wait <id>              # 阻塞到该卡进入终态
 taskproof tasks / show / log     # 查状态
-taskproof board                  # 静态看板快照
+taskproof board                  # 起服务并打开浏览器（阻塞）
+taskproof board --serve 8788     # 只服务，不开浏览器（阻塞）
 taskproof api --port 8787        # 给客户端用的本地只读 REST API
 ```
 
@@ -203,7 +204,8 @@ taskproof accept <id> --note "原因"     # failed：必须带 --note
 ## 桌面看板
 
 `desktop/` 是 stage 2 的看板：一个 **Electron + Vue 3** 应用（Element Plus、UnoCSS、
-Pinia、vue-i18n），渲染的数据和静态看板同源，但是活的。中英双语（跟随系统 locale，回退英文）。
+Pinia、vue-i18n），就是 `taskproof board` 在浏览器里服务的那份渲染层 —— 一份渲染层，
+Electron 与浏览器两处宿主。中英双语（跟随系统 locale，回退英文）。
 
 有意思的是它的进程模型：应用自己拉起本地服务 —— `taskproof api --port 0` —— 从子进程 stdout
 读回绑定的端口，退出时再关掉它。数据全部来自那个回环、**只读**的 REST API，不出 `127.0.0.1`。
@@ -253,7 +255,7 @@ verify_kind = "build"       # check | build | none
 [`examples/projects.example.toml`](examples/projects.example.toml)，字段参考与
 硬错误清单见 [`docs/REGISTRY.zh-CN.md`](docs/REGISTRY.zh-CN.md)。
 
-静态看板的左栏按**项目**聚合：一行一个项目，hover 显示它名下的道；任务卡上
+看板的左栏按**项目**聚合：一行一个项目，hover 显示它名下的道；任务卡上
 也标注它跑在哪条道。
 
 ## 安全与卫生

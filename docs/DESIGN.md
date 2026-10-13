@@ -352,7 +352,7 @@ taskproof cancel <task-id>              stop a task (SIGTERM -> SIGKILL its own 
 taskproof rm <task-id>                  delete a terminal task's record, events and kept worktree
 taskproof workspaces                    list lanes that own a long-lived workspace
 taskproof workspace-rm <taskgroup>      delete one (prints the evidence; refuses unless clean)
-taskproof board [--open | --serve PORT | --out FILE]
+taskproof board [--open | --serve PORT]
 taskproof api --port N                  local read-only REST (consumed by the stage 2 frontend)
 taskproof doctor                        environment self-check
 taskproof gc                            archive and rotate
@@ -398,9 +398,13 @@ process and contributor onboarding are designed for two artifacts.
 
 ### Stage 2: the desktop app
 
-The static dashboard is **frozen**: it keeps working as a `file://` snapshot and
-is not developed further. Stage 2 builds a separate Electron application in
-`desktop/` that consumes the same loopback REST API. That API is **read-only**:
+The dashboard is **one rendering layer with two hosts**. The Vue app in
+`desktop/` is the whole board: the Electron console loads it from
+`out/renderer`, and `taskproof board` serves the exact same build (committed to
+`src/taskproof/web/`) over the loopback REST API to a browser. `npm run
+build:web` regenerates the served copy from the renderer source and CI fails
+when the committed build drifts, so the two hosts can never diverge — there is
+no separate "static board" to keep in sync. That API is **read-only**:
 every mutation — project create / edit / delete, plus task control: dispatch /
 accept / cancel / remove — lives in the CLI, and the REST surface only serves
 reads. `rerun` is CLI-only too (the v1 "run it again" affordance is a prefilled

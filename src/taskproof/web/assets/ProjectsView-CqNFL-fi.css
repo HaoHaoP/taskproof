@@ -1,0 +1,23 @@
+
+.projects-view[data-v-a5cb12d2] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.mono.bad[data-v-a5cb12d2] {
+  color: var(--c-failed);
+  font-weight: 600;
+}
+
+/* The expanded project row. Element Plus pads the expanded cell heavily by
+   default; strip that padding so the nested lane table sits flush and the
+   lanes read as belonging to the row above them. The insets are the row's own,
+   on a sunken tone from the token set (never a colour invented here). */
+.projects-view[data-v-a5cb12d2] .el-table__expanded-cell {
+  padding: 0;
+  background-color: var(--zebra);
+}
+.lanes[data-v-a5cb12d2] {
+  padding: 2px 12px 8px 40px;
+}

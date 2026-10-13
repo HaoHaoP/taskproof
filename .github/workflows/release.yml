@@ -29,6 +29,18 @@ jobs:
         with:
           python-version: '3.13'
 
+      # The wheel carries the browser board from src/taskproof/web/, which is a
+      # generated artefact. Build it from the renderer source first, or the
+      # sdist/wheel ship with no board at all.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - run: npm ci --prefix desktop
+      - run: npm run build:web --prefix desktop
+
       - name: build sdist and wheel
         run: |
           python -m pip install --upgrade build

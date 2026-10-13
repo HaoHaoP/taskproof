@@ -37,6 +37,9 @@ extraResources:
     to: src
     filter:
       - taskproof/**
+      # The browser board is the same renderer the window already loads from
+      # out/renderer, so the installer must not carry a second 3.1 MB copy.
+      - '!taskproof/web/**'
   - from: ../README.md
     to: README.md
   - from: ../README.zh-CN.md

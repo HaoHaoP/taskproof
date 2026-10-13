@@ -1,0 +1,446 @@
+
+.tp-card[data-v-695467c5] {
+  display: block;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  text-align: left;
+  background-color: var(--panel);
+  background-image: linear-gradient(var(--w), var(--w));
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--c);
+  border-radius: var(--r-card);
+  padding: 8px 10px 9px 11px;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+}
+.tp-card + .tp-card[data-v-695467c5] {
+  margin-top: 6px;
+}
+.tp-card[data-v-695467c5]:hover {
+  background-image: linear-gradient(var(--w), var(--w)), linear-gradient(var(--rule-2), var(--rule-2));
+}
+.tp-card[aria-expanded='true'][data-v-695467c5] {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.tp-card[data-v-695467c5]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.line-1[data-v-695467c5] {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.cid[data-v-695467c5] {
+  font: 10px/1 var(--mono);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tail[data-v-695467c5] {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+.stamp[data-v-695467c5] {
+  font: 600 9.5px/1 var(--mono);
+  color: var(--ink-3);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 2px 5px;
+}
+.stamp.good[data-v-695467c5] {
+  color: var(--ok);
+  border-color: transparent;
+  background: var(--w-done);
+}
+.stamp.bad[data-v-695467c5] {
+  color: var(--c-failed);
+  border-color: transparent;
+  background: var(--w-failed);
+}
+/* The chevron is the disclosure affordance: it turns to point down while the
+   drawer is open. */
+.chev[data-v-695467c5] {
+  font: 8px/1 var(--sans);
+  color: var(--ink-4);
+  transition: transform 0.15s;
+}
+.tp-card[aria-expanded='true'] .chev[data-v-695467c5] {
+  transform: rotate(90deg);
+  color: var(--ink-2);
+}
+.line-2[data-v-695467c5] {
+  display: -webkit-box;
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--ink);
+}
+.tp-card[data-status='done'] .line-2[data-v-695467c5] {
+  color: var(--ink-2);
+}
+.meta[data-v-695467c5] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 7px;
+  font: 9.5px/1 var(--mono);
+  color: var(--ink-4);
+}
+@media (prefers-reduced-motion: reduce) {
+.chev[data-v-695467c5] {
+    transition: none;
+}
+}
+
+.matrix-view[data-v-6af3c04d] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+/* The matrix row: the project multi-select and the time range. Both scope the
+   whole board, six status columns (泳道) at once; there is no third control in
+   the normal state. */
+.boardbar[data-v-6af3c04d] {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--rule-2);
+  font: 12px/1 var(--sans);
+  color: var(--ink-3);
+}
+.boardbar .fld[data-v-6af3c04d] {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.boardbar .sel[data-v-6af3c04d] {
+  width: 128px;
+}
+.boardbar .sel-projects[data-v-6af3c04d] {
+  width: 240px;
+}
+/* The right-hand cluster: the hidden-column undo, then the capped warning.
+   Both are notes, not filters, so they ride at the far end of the row rather
+   than sitting inline with the two scoping controls. */
+.boardbar .rest[data-v-6af3c04d] {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+}
+/* The undo for hidden columns: not a filter, an escape hatch. It reads as a
+   button because clicking it brings every hidden column back. */
+.boardbar .hidden-lanes[data-v-6af3c04d] {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  color: var(--ink-2);
+  font: 11.5px/1 var(--sans);
+  cursor: pointer;
+}
+.boardbar .hidden-lanes[data-v-6af3c04d]:hover {
+  background: var(--raise);
+}
+/* The capped warning is a note, not an alarm: the amber of "incomplete", not
+   the red of "failed". While the budget can still rise it carries its own
+   "继续取回" so the reader can pull the older window; once the cap is reached
+   that button would be a dead click, so the note states the limit instead. */
+.boardbar .cap[data-v-6af3c04d] {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font: 11.5px/1.2 var(--sans);
+  color: var(--c-timeout);
+}
+.boardbar .cap .grow[data-v-6af3c04d] {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  color: inherit;
+  font: 11.5px/1 var(--sans);
+  cursor: pointer;
+}
+.boardbar .cap .grow[data-v-6af3c04d]:hover {
+  background: var(--raise);
+}
+.matrix[data-v-6af3c04d] {
+  flex: 1;
+  overflow: auto;
+  min-width: 0;
+  /* No top padding: a scroll container's padding-top is not covered by a
+     `top: 0` sticky header, so cards used to scroll through that strip. The
+     10px breathing room now lives in `.hd`'s own top padding, under its
+     opaque background. */
+  padding: 0 0 24px;
+}
+/* The column count is the *visible* column count -- `grid-template-columns`
+   is written from `lanes` (see `gridTracks`), so it rises and falls with the
+   show/hide switches. This must never be re-pinned to a literal: a track count
+   that disagrees with the header/cell loop pushes each project's lane into the
+   next column and the rows interleave, silently. 列数 = 可见列数. */
+.grid[data-v-6af3c04d] {
+  display: grid;
+  align-content: start;
+  min-height: 100%;
+  padding: 0 10px;
+}
+.hd[data-v-6af3c04d] {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 10px 9px;
+  font: 500 12px/1 var(--sans);
+  color: var(--ink-2);
+  background: var(--bg);
+}
+/* The pinned band has to be opaque all the way down to the first card, not
+   just to the header's own box: a sliver of card scrolling up between the
+   header's lower edge and the first card reads as the header being
+   see-through (the TP-card40 穿透). `::after` extends the band across that
+   seam and -- because a pseudo-element is hit-tested as the box that owns it
+   -- every pixel of the seam answers `.hd` (or the `.fold` it carries) rather
+   than a card. `background: inherit` keeps the zebra columns' tint, and the
+   band's bottom rule moves here so the seam reads as part of the header. */
+.hd[data-v-6af3c04d]::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 10px;
+  background: inherit;
+  border-bottom: 1px solid var(--rule-2);
+}
+.hd .lb[data-v-6af3c04d] {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.hd .rt[data-v-6af3c04d] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The band must answer as the header itself: the label and tally are
+   decoration, so they do not intercept a hit -- only the hide switch does. The
+   chip is a real control in `.hdctl`, not part of this decoration layer. */
+.hd .lb[data-v-6af3c04d],
+.hd .rt[data-v-6af3c04d] {
+  pointer-events: none;
+}
+.hd .rt .lane-hide[data-v-6af3c04d] {
+  pointer-events: auto;
+}
+.hd .rt .lane-hide[data-v-6af3c04d] * {
+  pointer-events: none;
+}
+/* The per-column hide switch. Same shape in every header, so the row reads as
+   one control repeated, not a menu. It is the header's own column it hides. */
+.hd .lane-hide[data-v-6af3c04d] {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+.hd .lane-hide[data-v-6af3c04d]:hover {
+  border-color: var(--rule);
+  background: var(--panel);
+  color: var(--ink-2);
+}
+/* The corner is the lane column's own header, so it is sticky on BOTH axes:
+   it rides with the header row vertically and with the lane column
+   horizontally. It therefore has to outrank both -- z 4 sits above the
+   header's 3 and the lane's 2 -- and carry its own opaque background, so
+   neither the first lane cell nor the first status column can show through
+   the intersection. The background is the prototype's corner colour (--bg). */
+.hd.corner[data-v-6af3c04d] {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  justify-content: flex-start;
+  padding-left: 4px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  background: var(--bg);
+}
+/* Column zebra: every other status column carries a faint tint, on both the
+   header and the cells, so the band runs the full height and neighbouring
+   columns cannot be read into each other. */
+.zcol[data-v-6af3c04d] {
+  background-color: var(--zebra);
+}
+.lane[data-v-6af3c04d] {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  padding: 12px 12px 12px 4px;
+  background-color: var(--bg);
+  border-right: 1px solid var(--rule-2);
+  border-bottom: 1px solid var(--rule);
+}
+.lane .name[data-v-6af3c04d] {
+  font: 600 12.5px/1 var(--mono);
+  color: var(--ink);
+}
+.lane .pth[data-v-6af3c04d] {
+  margin-top: 5px;
+  font: 10.5px/1.35 var(--mono);
+  color: var(--ink-4);
+  overflow-wrap: anywhere;
+}
+.lane .tally[data-v-6af3c04d] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 7px;
+  font: 10.5px/1 var(--mono);
+  color: var(--ink-3);
+}
+.lane .tally .bad[data-v-6af3c04d] {
+  color: var(--c-failed);
+  font-weight: 600;
+}
+/* Row separator: the lane and the cells each draw their own bottom border, and
+   because they share a grid row the two lines meet into one. */
+.mcell[data-v-6af3c04d] {
+  min-height: 26px;
+  padding: 10px 6px;
+  border-bottom: 1px solid var(--rule);
+}
+.mcell .dash[data-v-6af3c04d] {
+  padding-top: 2px;
+  font: 11px/1 var(--mono);
+  color: var(--ink-4);
+  opacity: 0.4;
+}
+/* The per-column control band: the chip is the only thing on this full-width
+   line under the label row, so the header keeps one self-describing number. */
+.hdctl[data-v-6af3c04d] {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+/* Do not style Element Plus's internal `.el-tooltip__trigger` to lay out this
+   control: that class also lands on .cap-chip, and its extra class selector
+   outranks .cap-chip's own display rule. Own the full-width layout here. */
+.cap-dd[data-v-6af3c04d] {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+/* Every column's chip. Its own click stops, but the Element Plus trigger still
+   sees the same click and opens the menu. */
+.cap-chip[data-v-6af3c04d] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  color: var(--ink-2);
+  font: 11.5px/1 var(--sans);
+  text-align: left;
+  cursor: pointer;
+}
+.cap-chip[data-v-6af3c04d]:hover,
+.cap-chip[data-v-6af3c04d]:focus-visible {
+  border-color: var(--rule-2);
+  background: var(--raise);
+  color: var(--ink);
+}
+.cap-chip-label[data-v-6af3c04d] {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cap-caret[data-v-6af3c04d] {
+  flex: none;
+  color: var(--ink-4);
+  display: inline-flex;
+  align-items: center;
+}
+
+.cap-menu-popper {
+  min-width: 176px;
+}
+.cap-menu-popper .el-dropdown-menu__item {
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 30px;
+  padding: 7px 10px;
+  font: 12px/1.2 var(--sans);
+}
+.cap-menu-popper .el-dropdown-menu__item.cap-menu-title {
+  color: var(--ink-4);
+  font-size: 10.5px;
+  cursor: default;
+}
+.cap-menu-popper .cap-check {
+  flex: none;
+  color: var(--accent);
+  font-weight: 700;
+}
+.sel-projects-popper .sel-head {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--rule-2);
+}
+.sel-projects-popper .sel-head button {
+  flex: 1;
+  font: 11.5px/1 var(--sans);
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.sel-projects-popper .sel-head button:hover:not(:disabled) {
+  background: var(--raise);
+}
+.sel-projects-popper .sel-head button:disabled {
+  color: var(--ink-4);
+  opacity: 0.6;
+  cursor: default;
+}
