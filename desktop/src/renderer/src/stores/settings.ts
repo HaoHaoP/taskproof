@@ -1,9 +1,14 @@
 /**
  * Renderer-side view of the desktop settings.
  *
- * The main process owns `settings.json` and is the source of truth; this store
- * only mirrors it and re-applies the two things the renderer owns the effects
- * of (the theme attribute and the locale).
+ * Under the desktop host the main process owns `settings.json` and is the
+ * source of truth; this store only mirrors it and re-applies the two things the
+ * renderer owns the effects of (the theme attribute and the locale).
+ *
+ * A plain browser has no main process, so the same store keeps the four
+ * settings the browser can honour -- theme, language, polling and the
+ * per-column caps -- in `localStorage` via `platform.ts`. The desktop-only
+ * fields stay at their defaults there and never reach a screen.
  */
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
@@ -16,26 +21,20 @@ import type {
   ThemeChoice
 } from '../../../preload/types'
 import { setLocale } from '../i18n'
-import { DEFAULT_COLUMN_CAPS } from '../../../preload/types'
+import { FALLBACK, mergeSettings, readSettings, type SettingsStorage } from '../platform'
 
 /** The booleans that back the desktop-integration switches. */
 type FlagKey = 'notifyFail' | 'notifyDone' | 'dockBadge' | 'tray' | 'autostart'
 
-const FALLBACK: DesktopSettings = {
-  theme: 'dark',
-  language: 'system',
-  poll: '2s',
-  workspace: '',
-  taskproofPath: '',
-  portMode: 'auto',
-  port: 8787,
-  launch: 'auto',
-  notifyFail: false,
-  notifyDone: false,
-  dockBadge: false,
-  tray: false,
-  autostart: false,
-  columnCaps: { ...DEFAULT_COLUMN_CAPS }
+/** `localStorage` when the browser exposes it, else null -- no storage means
+ *  the browser host simply runs on the code defaults. */
+function settingsStorage(): SettingsStorage | null {
+  try {
+    return typeof window !== 'undefined' && window.localStorage ? window.localStorage : null
+  } catch {
+    // A blocked storage (private mode, sandboxed frame) degrades to defaults.
+    return null
+  }
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -55,6 +54,8 @@ export const useSettingsStore = defineStore('settings', () => {
     if (tp) {
       settings.value = await tp.settings.get()
       version.value = await tp.app.version()
+    } else {
+      settings.value = readSettings(settingsStorage())
     }
     applyTheme(settings.value.theme)
     setLocale(settings.value.language)
@@ -68,6 +69,9 @@ export const useSettingsStore = defineStore('settings', () => {
    * screen (click "light" and then "off", and the theme can snap back to dark
    * while the file says light). The sequence number makes the newest write the
    * only one allowed to repaint.
+   *
+   * Without a bridge the same write goes to the browser's own storage: the
+   * merge keeps the mirror whole, so a reload reads back what was set.
    */
   let writeSeq = 0
 
@@ -77,7 +81,10 @@ export const useSettingsStore = defineStore('settings', () => {
     applyTheme(settings.value.theme)
     setLocale(settings.value.language)
     const tp = window.tp
-    if (!tp) return
+    if (!tp) {
+      settings.value = mergeSettings(settingsStorage(), patch)
+      return
+    }
     const saved = await tp.settings.set(patch)
     if (seq !== writeSeq) return
     settings.value = saved

@@ -28,8 +28,8 @@ import {
   type RangeChoice
 } from '../matrix'
 import type { PollChoice, ServiceStatus } from '../../../preload/types'
+import { resolveApiBase } from '../platform'
 
-const DEFAULT_PORT = 8787
 const POLL_MS = 2000
 /** The log tab tails its file once a second -- faster than the board pump,
  *  because a reader watching a running task expects the tail to keep up. */
@@ -44,22 +44,30 @@ function initialService(): ServiceStatus {
   return { state: 'starting', port: null, workspace: '', detail: '' }
 }
 
-/** Renderer-only fallback so the UI can also be opened in a plain browser. */
+/**
+ * Who the board talks to. The desktop host's child port is authoritative; a
+ * browser host falls back to the page's own origin (the service served it) or,
+ * offline / from disk, the `?port=` / 8787 loopback. The rule lives in
+ * `platform.ts` so it is testable without a DOM.
+ */
 async function resolveBaseUrl(): Promise<string> {
   const tp = window.tp
   if (tp) {
     const status = await tp.service.status()
-    if (status.port) return `http://127.0.0.1:${status.port}`
+    if (status.port) return resolveApiBase({ tpStatus: status, location })
     throw new Error(status.detail || 'the local service is not up yet')
   }
-  const override = new URLSearchParams(location.search).get('port')
-  return `http://127.0.0.1:${override ?? DEFAULT_PORT}`
+  return resolveApiBase({ tpStatus: null, location })
 }
 
 export const useBoardStore = defineStore('board', () => {
   const service = ref<ServiceStatus>(initialService())
   const connected = ref(false)
   const lastError = ref<string | null>(null)
+  /** The API's own version. A browser host has no `tp.app.version()`, so the
+   *  About sheet reads it here instead; under the desktop host it stays empty
+   *  and the app version from the main process wins. */
+  const version = ref('')
 
   const tasks = ref<Task[]>([])
   /** The flat, one-row-per-lane registry overview. The projects page and the
@@ -149,6 +157,7 @@ export const useBoardStore = defineStore('board', () => {
     const baseUrl = await resolveBaseUrl()
     client = createClient(baseUrl)
     const health = await client.health()
+    if (!window.tp) version.value = health.version
     service.value = {
       state: 'ready',
       port: Number(new URL(baseUrl).port),
@@ -388,11 +397,16 @@ export const useBoardStore = defineStore('board', () => {
    */
   async function retry(): Promise<void> {
     client = null
-    try {
-      await window.tp?.service.restart()
-    } catch {
-      // A refused spawn (a fixed port already taken) surfaces through the
-      // status channel; the reconnect below then reports it readably.
+    const tp = window.tp
+    // Only the desktop host owns a child process to restart; in a browser the
+    // "retry" is just a fresh connect to the same origin.
+    if (tp) {
+      try {
+        await tp.service.restart()
+      } catch {
+        // A refused spawn (a fixed port already taken) surfaces through the
+        // status channel; the reconnect below then reports it readably.
+      }
     }
     start()
   }
@@ -417,6 +431,7 @@ export const useBoardStore = defineStore('board', () => {
     service,
     connected,
     lastError,
+    version,
     tasks,
     projects,
     projectGroups,

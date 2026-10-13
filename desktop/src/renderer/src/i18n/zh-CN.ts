@@ -110,6 +110,7 @@ export default {
   settings: {
     title: '设置',
     sub: '设置存在 App 本地 userData/settings.json，主进程持有；这里不写 taskproof 的注册表。',
+    browserNote: '在浏览器里打开时，只保留外观与交互这类能生效的设置；服务、诊断与桌面集成的开关只在桌面 App 里出现。',
     appearance: '外观与交互',
     service: '服务与进程',
     desktop: '桌面集成',

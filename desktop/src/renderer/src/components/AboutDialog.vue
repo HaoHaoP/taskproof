@@ -43,7 +43,12 @@ const info = ref<AboutInfo | null>(null)
 const copied = ref(false)
 let unsubscribe: (() => void) | null = null
 
-const appVersion = computed(() => info.value?.version || settings.version || EM_DASH)
+/** A browser host has no main process, so `info` stays null and the API's own
+ *  version (read by the board store from `/api/health`) stands in for the app
+ *  version. Desktop keeps the app version from the main process / settings. */
+const appVersion = computed(
+  () => info.value?.version || settings.version || board.version || EM_DASH
+)
 const cliVersion = computed(() => cliVersionLabel(info.value?.cliVersion))
 const runtime = computed(() => runtimeLabel(info.value?.runtime ?? emptyRuntime()))
 
@@ -80,8 +85,16 @@ async function copy(): Promise<void> {
   copied.value = true
 }
 
+const REPO_URL = 'https://github.com/HaoHaoP/taskproof'
+
 function openRepo(): void {
-  void window.tp?.shell.openExternal('https://github.com/HaoHaoP/taskproof')
+  const tp = window.tp
+  if (tp) {
+    void tp.shell.openExternal(REPO_URL)
+    return
+  }
+  // No IPC shell in a browser host: a new tab is the closest honest fallback.
+  window.open(REPO_URL, '_blank', 'noopener,noreferrer')
 }
 
 function reveal(target: string): void {
@@ -90,7 +103,7 @@ function reveal(target: string): void {
 }
 
 onMounted(() => {
-  unsubscribe = window.tp?.app.onShowAbout(() => openAbout()) ?? null
+  unsubscribe = window.tp?.app?.onShowAbout?.(() => openAbout()) ?? null
   if (aboutOpen.value) void load()
 })
 

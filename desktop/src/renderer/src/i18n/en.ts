@@ -118,6 +118,7 @@ export default {
   settings: {
     title: 'Settings',
     sub: 'Settings live in the app userData/settings.json, owned by the main process. Nothing here writes the taskproof registry.',
+    browserNote: 'Opened in a browser, only the settings that can take effect here (appearance and interaction) are kept; the service, diagnostics and desktop-integration switches appear in the desktop app only.',
     appearance: 'Appearance',
     service: 'Service and process',
     desktop: 'Desktop integration',

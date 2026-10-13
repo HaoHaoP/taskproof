@@ -16,6 +16,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { openAbout } from '../components/about'
 import { STATUS_IDS, VERIFY_KINDS } from '../contract'
+import { hasDesktopHost } from '../platform'
 import { useBoardStore } from '../stores/board'
 import { useSettingsStore } from '../stores/settings'
 import type {
@@ -31,6 +32,14 @@ import type {
 const board = useBoardStore()
 const settings = useSettingsStore()
 const { t } = useI18n()
+
+/**
+ * The service / diagnostics / desktop-integration groups all read the main
+ * process. In a browser there is no IPC bridge, so they are hidden rather than
+ * shown with dead controls; the appearance group (theme, language, polling) and
+ * the about group keep working, and the column caps live in the matrix header.
+ */
+const hasHost = hasDesktopHost()
 
 const contractLine = computed(() =>
   board.unknownWords.length ? t('settings.contractDrift') : t('settings.contractSynced')
@@ -204,6 +213,7 @@ function openRegistry(): void {
       <div class="setwrap">
         <h3>{{ t('settings.title') }}</h3>
         <p class="sub">{{ t('settings.sub') }}</p>
+        <p v-if="!hasHost" class="sub browser-note">{{ t('settings.browserNote') }}</p>
 
         <section class="setgroup">
           <h4>{{ t('settings.appearance') }}</h4>
@@ -252,7 +262,7 @@ function openRegistry(): void {
           </div>
         </section>
 
-        <section class="setgroup">
+        <section v-if="hasHost" class="setgroup">
           <h4>{{ t('settings.service') }}</h4>
           <div class="setcard">
             <div class="setrow">
@@ -323,7 +333,7 @@ function openRegistry(): void {
           </div>
         </section>
 
-        <section class="setgroup">
+        <section v-if="hasHost" class="setgroup">
           <h4>{{ t('settings.diagnostics') }}</h4>
           <div class="setcard">
             <div class="setrow">
@@ -353,7 +363,7 @@ function openRegistry(): void {
           </div>
         </section>
 
-        <section class="setgroup">
+        <section v-if="hasHost" class="setgroup">
           <h4>{{ t('settings.desktop') }}</h4>
           <div class="setcard">
             <div class="setrow">
@@ -435,7 +445,7 @@ function openRegistry(): void {
                 <div class="t">{{ t('settings.version') }}</div>
               </div>
               <div class="ctl">
-                <span class="ro">{{ settings.version || '0.1.0' }}</span>
+                <span class="ro">{{ settings.version || board.version || '0.1.0' }}</span>
               </div>
             </div>
             <div class="setrow">
