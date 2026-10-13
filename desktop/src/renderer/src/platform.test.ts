@@ -49,7 +49,7 @@ describe('hasDesktopHost', () => {
   })
 })
 
-const HTTP = { protocol: 'http:', origin: 'http://192.168.1.9:9100', search: '' }
+const HTTP = { protocol: 'http:', origin: 'http://board.test:9100', search: '' }
 const HTTPS = { protocol: 'https:', origin: 'https://board.example.test', search: '' }
 
 describe('resolveApiBase', () => {
