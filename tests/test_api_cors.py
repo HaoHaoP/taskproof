@@ -1,10 +1,11 @@
 """Cross-origin read from the desktop renderer: CORS + preflight contract.
 
-The desktop renderer is never same-origin with this API:
-
-* dev builds fetch from the Vite dev server (``http://localhost:5173``);
-* packaged builds fetch from a ``file://`` page, whose Origin is the literal
-  string ``null``.
+CORS is for the Electron shell, not the browser host: ``taskproof board``
+serves the renderer's web build and this API from the *same* origin, so a
+browser never trips the same-origin policy there. The packaged Electron window
+loads the renderer from a ``file://`` page, whose Origin is the literal string
+``null``; the dev window fetches from the Vite dev server
+(``http://localhost:5173``). Both are cross-origin to this API.
 
 So the browser refuses to hand the renderer ``/api/health`` unless the response
 carries ``Access-Control-Allow-Origin`` *for the caller's own origin*, and the

@@ -177,16 +177,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("rm", help="delete a terminal task's record and events")
     p.add_argument("task_id")
 
-    p = sub.add_parser("board", help="dashboard: static snapshot or live server")
+    p = sub.add_parser(
+        "board",
+        help="dashboard: serve the desktop web build over the local REST API",
+    )
     p.add_argument("--open", action="store_true",
-                   help="serve the live board and open it in a browser (blocks)")
+                   help="serve the board and open it in a browser (the default)")
     p.add_argument("--serve", type=int, nargs="?", const=DEFAULT_PORT, metavar="PORT",
-                   help="serve the live board only, do not open a browser (blocks)")
-    p.add_argument("--snapshot", action="store_true",
-                   help="write a standalone static snapshot (does not auto-refresh)")
-    p.add_argument("--out", metavar="FILE",
-                   help="write a standalone static snapshot to FILE (no browser, does not block)")
-    p.add_argument("--project", help="render only this project id")
+                   help="serve the board without opening a browser (blocks)")
 
     p = sub.add_parser("api", help="serve the local read-only REST API (consumed by the desktop frontend)")
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -253,7 +251,7 @@ def cmd_init(args):
         "  taskproof register <path>         # probe and register a repository\n"
         '  taskproof run <project> "<task>"  # dispatch, verify, record\n'
         "  taskproof board --open            # live dashboard (serves + opens a browser)\n"
-        "  taskproof board --out board.html  # static snapshot (does not auto-refresh)\n"
+        "  taskproof board --serve          # serve the board without a browser\n"
         "  registry format                   # examples/projects.example.toml"
     )
     emit(args, payload, human)
@@ -629,18 +627,6 @@ def cmd_run(args):
     return 0
 
 
-def _resolve_project_key(workspace, key):
-    """Map an id/alias/path to the canonical project id, best effort."""
-    if not key:
-        return key
-    try:
-        reg = registry.load(registry.workspace_registry_path(workspace))
-    except errors.TaskproofError:
-        return key
-    project = reg.by_id(key)
-    return project.id if project is not None else key
-
-
 def _load_registry_best_effort(workspace):
     """Load the workspace registry, or ``None`` when it is missing/broken.
 
@@ -982,79 +968,18 @@ def cmd_rm(args):
     return 0
 
 
-def board_handler_class(workspace):
-    """HTTP handler for ``board --serve``: server-rendered board + events API.
+def _board_static_root():
+    """Where the desktop renderer's web build lives inside the package.
 
-    ``?project=<id>`` may be repeated to narrow the page to a multi-select
-    subset; no/blank ``?project=`` is the full board. Unknown ids are a 404
-    rather than a silently empty page (a link that leads nowhere is a bug, not
-    a scope). ``?task=<id>`` renders that task's drawer already open. The same
-    handler also answers ``GET /api/tasks/<id>/events`` with JSON, so the live
-    board polls its own origin instead of the separate REST service (which may
-    be on a different port, i.e. a different origin). Exposed as a factory so
-    the tests can bind it to an ephemeral port instead of the blocking server.
+    A function, not a constant, so tests can point it at a temporary directory:
+    the real ``src/taskproof/web/`` is produced by the desktop build and is
+    absent from a source checkout until ``npm run build:web`` runs.
     """
-    import http.server
-    from urllib.parse import parse_qs, unquote, urlsplit
-
-    from .board import render
-
-    prefix = "/api/tasks/"
-    suffix = "/events"
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def _write(self, status, body, content_type):
-            payload = body.encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
-        def _json(self, status, payload):
-            self._write(status, json.dumps(payload, ensure_ascii=False, default=str),
-                        "application/json; charset=utf-8")
-
-        def _events(self, path):
-            task_id = unquote(path[len(prefix):-len(suffix)])
-            detail = dispatch.task_detail(workspace, task_id)
-            if detail.get("task") is None:
-                self._json(404, {"error": "unknown task", "task_id": task_id})
-                return
-            self._json(200, {"task_id": task_id, "events": detail.get("events") or []})
-
-        def do_GET(self):  # noqa: N802
-            parsed = urlsplit(self.path)
-            if parsed.path.startswith(prefix) and parsed.path.endswith(suffix):
-                self._events(parsed.path)
-                return
-            if parsed.path not in ("/", "/index.html"):
-                self.send_error(404, "not found")
-                return
-            query = parse_qs(parsed.query)
-            projects = [pid for pid in query.get("project", []) if pid]
-            known = set(render.known_project_ids(workspace))
-            for pid in projects:
-                if pid not in known:
-                    self.send_error(404, f"unknown project: {pid}")
-                    return
-            task = (query.get("task") or [None])[0] or None
-            if task is not None and dispatch.task_detail(workspace, task).get("task") is None:
-                self.send_error(404, f"unknown task: {task}")
-                return
-            body = render.render_board(
-                workspace, projects=projects, task=task, serve=True
-            )
-            self._write(200, body, "text/html; charset=utf-8")
-
-        def log_message(self, *args):
-            pass
-
-    return Handler
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
 
 def _board_serve(workspace, port, *, open_browser=False, httpd_factory=None):
-    """Bind 127.0.0.1:port, then optionally open a browser and serve forever.
+    """Bind 127.0.0.1:port serving the real REST API + the desktop web build.
 
     Binding happens *before* the browser is opened, so a busy port surfaces as a
     UsageError instead of a tab that never loads. ``httpd_factory`` and
@@ -1065,9 +990,18 @@ def _board_serve(workspace, port, *, open_browser=False, httpd_factory=None):
     """
     import http.server
 
+    from .api import server as api_server
+
+    static_root = _board_static_root()
+    if not os.path.isdir(static_root):
+        raise UsageError(
+            f"the board's web assets are missing: {static_root}",
+            hint="run `npm run build:web` in desktop/",
+        )
+
     factory = httpd_factory or http.server.ThreadingHTTPServer
     try:
-        httpd = factory(("127.0.0.1", port), board_handler_class(workspace))
+        httpd = factory(("127.0.0.1", port), api_server.build_handler(workspace, static_root))
     except OSError as exc:
         raise UsageError(
             f"cannot serve the board on 127.0.0.1:{port}: {exc}",
@@ -1085,50 +1019,14 @@ def _board_serve(workspace, port, *, open_browser=False, httpd_factory=None):
 
 def cmd_board(args):
     from .api.server import DEFAULT_PORT
-    from .board import render
 
-    # Two mutually exclusive modes: a live server (--open/--serve, blocks) or a
-    # static snapshot (--out/--snapshot, writes a file and returns). Never
-    # silently drop one: mixing them is a usage error, not a coin flip.
-    live = args.open or args.serve is not None
-    snapshot = args.snapshot or args.out is not None
-    if live and snapshot:
-        raise UsageError(
-            "--open/--serve (live view) cannot be combined with "
-            "--out/--snapshot (static snapshot)",
-            hint="pick one: `taskproof board --open` for the live view, or "
-                 "`taskproof board --out FILE` for a static snapshot",
-        )
-
-    # The board is a "global view": it never consults the cwd. Choosing a subset
-    # is explicit (--project here, or ?project= in serve mode).
-    if live:
-        port = args.serve if args.serve is not None else DEFAULT_PORT
-        return _board_serve(args.workspace, port, open_browser=args.open)
-
-    project = args.project
-    if project is not None:
-        project = _resolve_project_key(args.workspace, project)
-        if project not in render.known_project_ids(args.workspace):
-            raise UsageError(f"unknown project: {args.project}")
-
-    out = args.out or os.path.join(args.workspace, "board.html")
-    document = render.render_board(
-        args.workspace, projects=[project] if project is not None else None
-    )
-    directory = os.path.dirname(os.path.abspath(out))
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    with open(out, "w", encoding="utf-8") as handle:
-        handle.write(document)
-
-    payload = {"path": os.path.abspath(out), "bytes": len(document)}
-    human = (
-        f"board written: {os.path.abspath(out)} — static snapshot "
-        "(does not auto-refresh); use `taskproof board --open` for the live view"
-    )
-    emit(args, payload, human)
-    return 0
+    # One mode now: serve the same REST API the desktop app uses, plus the
+    # desktop renderer's web build. A bare `board` (and the explicit `--open`
+    # synonym) serves and opens a browser; `--serve [PORT]` serves only. The
+    # server blocks either way. The old snapshot flags are gone.
+    open_browser = args.open or args.serve is None
+    port = args.serve if args.serve is not None else DEFAULT_PORT
+    return _board_serve(args.workspace, port, open_browser=open_browser)
 
 
 def cmd_api(args):

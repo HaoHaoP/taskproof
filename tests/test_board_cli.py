@@ -1,16 +1,17 @@
-"""`taskproof board` parameter semantics: static snapshot vs live server.
+"""`taskproof board` parameter semantics: one mode, serve the desktop build.
 
-The board has two modes and they must never be silently confused:
+`board` binds a loopback HTTP server that answers the real REST API *and* the
+desktop renderer's web build; the browser sees the desktop UI. There is no
+snapshot mode any more, so the only question these tests pin is *how* the live
+server is wired:
 
-  * snapshot (`board`, `--snapshot`, `--out FILE`) writes a standalone HTML file
-    to disk, returns immediately, and never starts a server or a browser;
-  * live (`--open`, `--serve [PORT]`) binds a loopback HTTP server and blocks;
-    only `--open` also opens a browser, and it does so *after* a successful bind,
-    pointing at ``http://127.0.0.1:<port>/`` rather than a ``file://`` snapshot.
+  * a bare `board` and `--open` both serve and open a browser;
+  * `--serve [PORT]` serves only (no browser), and blocks either way;
+  * the browser is opened *after* a successful bind, pointing at
+    ``http://127.0.0.1:<port>/`` with the port the socket actually bound.
 
-Pinned here: the URL handed to ``webbrowser.open``, the bind-before-open ordering,
-the port actually bound, the occupied-port UsageError, the live/snapshot mutual
-exclusion, and the "does not block" property of `--out`.
+``_board_static_root`` is patched to a temp directory so `_board_serve` reaches
+the bind instead of failing on the (build-time) ``src/taskproof/web/`` directory.
 """
 
 import contextlib
@@ -53,6 +54,15 @@ class BoardCliBase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.ws = os.path.join(self._tmp.name, "workspace")
         dispatch.prepare_workspace(self.ws)
+        # `_board_serve` refuses to start without built web assets; give it a
+        # throwaway one so these tests exercise the bind/open wiring instead.
+        self.web = os.path.join(self._tmp.name, "web")
+        os.makedirs(self.web, exist_ok=True)
+        with open(os.path.join(self.web, "index.html"), "w", encoding="utf-8") as fh:
+            fh.write("<!doctype html><title>board</title>")
+        patcher = mock.patch.object(cli, "_board_static_root", return_value=self.web)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -67,40 +77,15 @@ class BoardCliBase(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
 
-class SnapshotModeTest(BoardCliBase):
-    def test_bare_board_writes_default_snapshot_and_hints_open(self):
-        code, out, _ = self.run_cli("board")
-        self.assertEqual(code, 0)
-        self.assertTrue(os.path.isfile(os.path.join(self.ws, "board.html")))
-        # The message must say it is static *and* advertise the live view.
-        self.assertIn("does not auto-refresh", out)
-        self.assertIn("--open", out)
-
-    def test_snapshot_flag_writes_default_path(self):
-        code, out, _ = self.run_cli("board", "--snapshot")
-        self.assertEqual(code, 0)
-        self.assertTrue(os.path.isfile(os.path.join(self.ws, "board.html")))
-        self.assertIn("--open", out)
-
-    def test_bare_board_never_opens_a_browser(self):
-        with mock.patch.object(cli.webbrowser, "open") as opener:
-            code, _, _ = self.run_cli("board")
-        self.assertEqual(code, 0)
-        opener.assert_not_called()
-
-    def test_out_writes_file_and_does_not_block(self):
-        target = os.path.join(self._tmp.name, "custom.html")
-        with mock.patch.object(cli.webbrowser, "open") as opener:
-            # If --out fell into live/serve mode this call would never return.
-            code, _, _ = self.run_cli("board", "--out", target)
-        self.assertEqual(code, 0)
-        self.assertTrue(os.path.isfile(target))
-        self.assertFalse(os.path.isfile(os.path.join(self.ws, "board.html")))
-        opener.assert_not_called()
-
-
 class OpenWiringTest(BoardCliBase):
     """`cmd_board` must delegate the live flags to `_board_serve` correctly."""
+
+    def test_bare_board_serves_default_port_and_opens_browser(self):
+        with mock.patch.object(cli, "_board_serve", return_value=0) as serve:
+            code, _, _ = self.run_cli("board")
+        self.assertEqual(code, 0)
+        self.assertEqual(serve.call_args.args[1], DEFAULT_PORT)
+        self.assertTrue(serve.call_args.kwargs["open_browser"])
 
     def test_open_uses_default_port_and_opens_browser(self):
         with mock.patch.object(cli, "_board_serve", return_value=0) as serve:
@@ -108,8 +93,6 @@ class OpenWiringTest(BoardCliBase):
         self.assertEqual(code, 0)
         self.assertEqual(serve.call_args.args[1], DEFAULT_PORT)
         self.assertTrue(serve.call_args.kwargs["open_browser"])
-        # Live mode writes no snapshot.
-        self.assertFalse(os.path.isfile(os.path.join(self.ws, "board.html")))
 
     def test_open_serve_forwards_the_explicit_port(self):
         with mock.patch.object(cli, "_board_serve", return_value=0) as serve:
@@ -123,6 +106,13 @@ class OpenWiringTest(BoardCliBase):
             code, _, _ = self.run_cli("board", "--serve")
         self.assertEqual(code, 0)
         self.assertEqual(serve.call_args.args[1], DEFAULT_PORT)
+        self.assertFalse(serve.call_args.kwargs["open_browser"])
+
+    def test_serve_explicit_port_does_not_open_a_browser(self):
+        with mock.patch.object(cli, "_board_serve", return_value=0) as serve:
+            code, _, _ = self.run_cli("board", "--serve", "8899")
+        self.assertEqual(code, 0)
+        self.assertEqual(serve.call_args.args[1], 8899)
         self.assertFalse(serve.call_args.kwargs["open_browser"])
 
 
@@ -209,68 +199,16 @@ class PortInUseTest(BoardCliBase):
         opener.assert_not_called()
 
 
-class ModeConflictTest(BoardCliBase):
-    """Live flags (--open/--serve) and snapshot flags (--out/--snapshot) clash."""
-
-    def _conflict(self, *argv):
-        target = os.path.join(self._tmp.name, "conflict.html")
-        # --out gets a real target so a silent snapshot would be observable.
-        expanded = []
-        for token in argv:
-            if token == "--out":
-                expanded += ["--out", target]
-            else:
-                expanded.append(token)
-        args = self.args("board", *expanded)
-        with mock.patch.object(cli.webbrowser, "open") as opener:
-            with mock.patch.object(cli, "_board_serve") as serve:
-                with self.assertRaises(errors.UsageError):
-                    cli.cmd_board(args)
-        opener.assert_not_called()
-        serve.assert_not_called()
-        self.assertFalse(os.path.exists(target))
-
-    def test_out_plus_serve_is_a_usage_error(self):
-        self._conflict("--out", "--serve")
-
-    def test_out_plus_open_is_a_usage_error(self):
-        self._conflict("--out", "--open")
-
-    def test_snapshot_plus_serve_is_a_usage_error(self):
-        self._conflict("--snapshot", "--serve")
-
-    def test_snapshot_plus_open_is_a_usage_error(self):
-        self._conflict("--snapshot", "--open")
-
-    def test_conflict_exits_usage_via_main(self):
-        code, _, err = self.run_cli("board", "--out", "x.html", "--open")
-        self.assertEqual(code, errors.EXIT_USAGE)
-        self.assertIn("cannot be combined", err)
-
-    def test_out_and_snapshot_agree_on_snapshot_mode(self):
-        target = os.path.join(self._tmp.name, "both.html")
-        args = self.args("board", "--snapshot", "--out", target)
-        sink = io.StringIO()
-        with mock.patch.object(cli, "_board_serve") as serve, \
-                contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-            code = cli.cmd_board(args)
-        self.assertEqual(code, 0)
-        serve.assert_not_called()
-        self.assertTrue(os.path.isfile(target))
-
-
 class HelpTextTest(BoardCliBase):
-    def test_board_help_distinguishes_live_from_snapshot(self):
+    def test_board_help_lists_live_flags_and_no_snapshot_flags(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
             cli.build_parser().parse_args(["board", "--help"])
         text = out.getvalue()
         self.assertIn("--open", text)
         self.assertIn("--serve", text)
-        self.assertIn("--snapshot", text)
-        self.assertIn("--out", text)
-        self.assertIn("block", text.lower())
-        self.assertIn("snapshot", text.lower())
+        self.assertNotIn("--snapshot", text)
+        self.assertNotIn("--out", text)
 
 
 if __name__ == "__main__":

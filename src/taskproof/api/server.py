@@ -28,7 +28,7 @@ import os
 import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from .. import __version__, concurrency, dispatch, registry, storage, verify
 from ..errors import RegistryError, UsageError
@@ -281,21 +281,76 @@ def _with_live_files_many(rows):
     return [_with_live_files(row) for row in rows]
 
 
+#: Static-asset content types for the served web build. Anything not listed is
+#: ``application/octet-stream`` -- an unknown extension must never be guessed.
+_CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".htm": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".json": "application/json; charset=utf-8",
+    ".map": "application/json; charset=utf-8",
+    ".woff2": "font/woff2",
+    ".woff": "font/woff",
+    ".ttf": "font/ttf",
+    ".webp": "image/webp",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+}
+_DEFAULT_CONTENT_TYPE = "application/octet-stream"
+
+
+def _redirect_location(query):
+    """Map the retired ``?project=``/``?task=`` query onto a hash route.
+
+    The desktop renderer owns navigation through its hash router; the old
+    server-rendered board encoded the same filters straight into the query. Only
+    ``/`` speaks this dialect -- a bare ``/`` (no filters) returns ``None`` so it
+    serves ``index.html`` unchanged. Returns the ``Location`` value to use.
+    """
+    projects = [pid for pid in query.get("project", []) if pid]
+    task = next((tid for tid in query.get("task", []) if tid), None)
+    if not projects and task is None:
+        return None
+    route = "/#/matrix"
+    if task is not None:
+        route += "/" + quote(task, safe="")
+    if projects:
+        route += "?projects=" + quote(",".join(projects), safe=",")
+    return route
+
+
 class _Handler(BaseHTTPRequestHandler):
     """One request handler per server; ``workspace`` is set per instance class."""
 
     server_version = "taskproof/" + __version__
     workspace = None
+    #: When set, non-``/api/`` GETs are served from this directory (the desktop
+    #: renderer's web build). ``None`` keeps the long-standing API-only shape:
+    #: every non-``/api/`` path is a 404 JSON, byte for byte.
+    static_root = None
 
     # -- verbs ------------------------------------------------------------
 
     def do_GET(self):  # noqa: N802 (stdlib naming)
+        if self.static_root is not None and not self._is_api_path():
+            self._serve_static()
+            return
         try:
             status, payload = self._route()
         except Exception:
             # Never leak a traceback (or internals) to the client.
             status, payload = 500, {"error": "internal server error"}
         self._send(status, payload)
+
+    def _is_api_path(self):
+        path = urlsplit(self.path).path
+        return path == "/api" or path.startswith("/api/")
 
     def do_POST(self):  # noqa: N802
         # The write surface is gone, so these requests no longer correspond to
@@ -594,6 +649,88 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- plumbing ---------------------------------------------------------
 
+    def _serve_static(self):
+        """Serve the desktop web build for any non-``/api/`` GET.
+
+        Only reached when ``static_root`` is set. The decoded path is resolved
+        with ``os.path.realpath`` and must stay inside the root: ``..``, an
+        encoded ``%2e%2e``, an absolute path, or a symlink that leaves the tree
+        is refused. A genuine miss with a file extension is a 404 -- never the
+        SPA ``index.html`` -- so a missing script cannot be fed HTML. Everything
+        else (``/``, extension-less paths, directories) falls back to
+        ``index.html``.
+        """
+        parsed = urlsplit(self.path)
+        decoded = unquote(parsed.path)
+
+        if decoded == "/":
+            location = _redirect_location(parse_qs(parsed.query))
+            if location is not None:
+                self._send_redirect(location)
+                return
+
+        root = os.path.realpath(self.static_root)
+        rel = decoded.lstrip("/")
+        target = os.path.realpath(os.path.join(root, rel))
+        if target != root and not target.startswith(root + os.sep):
+            self._send_static_error(403, "forbidden")
+            return
+
+        if os.path.isfile(target):
+            self._send_file(target)
+            return
+
+        if os.path.splitext(rel)[1]:
+            self._send_static_error(404, "not found")
+            return
+
+        index = os.path.join(root, "index.html")
+        if not os.path.isfile(index):
+            self._send_static_error(500, "the board's index.html is missing")
+            return
+        self._send_file(index)
+
+    def _send_file(self, path):
+        """Send one file, preferring a sibling ``<file>.gz`` when offered."""
+        content_type = _CONTENT_TYPES.get(
+            os.path.splitext(path)[1].lower(), _DEFAULT_CONTENT_TYPE
+        )
+        body_path = path
+        gzipped = False
+        if "gzip" in (self.headers.get("Accept-Encoding") or "").lower():
+            candidate = path + ".gz"
+            if os.path.isfile(candidate):
+                body_path = candidate
+                gzipped = True
+        with open(body_path, "rb") as handle:
+            body = handle.read()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-cache")
+        if gzipped:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _send_static_error(self, status, message):
+        body = json.dumps({"error": message}).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _send_redirect(self, location):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _send_cors_headers(self):
         """Emit the CORS headers, echoing the caller's origin only if allowed.
 
@@ -624,13 +761,33 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
-def make_server(workspace: str, port: int = DEFAULT_PORT, host: str = HOST):
-    """Build (but do not start) the API server. ``port=0`` picks a free port."""
-    handler = type(
+def build_handler(workspace: str, static_root=None):
+    """Build the request-handler class bound to ``workspace`` and ``static_root``.
+
+    Shared by :func:`make_server` (``taskproof api``) and the CLI's
+    ``_board_serve``, which needs the class so a test can inject its own
+    ``httpd_factory`` around the bind.
+    """
+    return type(
         "TaskproofAPIHandler",
         (_Handler,),
-        {"workspace": workspace},
+        {"workspace": workspace, "static_root": static_root},
     )
+
+
+def make_server(
+    workspace: str,
+    port: int = DEFAULT_PORT,
+    host: str = HOST,
+    static_root=None,
+):
+    """Build (but do not start) the API server. ``port=0`` picks a free port.
+
+    ``static_root`` is passed straight through to the handler: when set, the
+    same server also serves the desktop renderer's web build for non-``/api/``
+    paths.
+    """
+    handler = build_handler(workspace, static_root)
     try:
         httpd = ThreadingHTTPServer((host, port), handler)
     except OSError as exc:
