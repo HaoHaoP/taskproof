@@ -1,5 +1,7 @@
 # Project registry
 
+**English** · [简体中文](REGISTRY.zh-CN.md)
+
 The registry is the only configuration file taskproof reads. It is TOML, it
 describes *which repositories may be dispatched and how each is verified*, and
 it lives in the workspace:

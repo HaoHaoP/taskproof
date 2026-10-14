@@ -1,5 +1,7 @@
 # Design
 
+**English** · [简体中文](DESIGN.zh-CN.md)
+
 > Output of the initial design session: 11 decisions plus hard constraints.
 > Status: **design settled, not implemented.**
 

@@ -1,5 +1,7 @@
 # 从零开始
 
+[English](WALKTHROUGH.md) · **简体中文**
+
 一次在临时示例上的完整走查。下面的命令都是照原样跑过的，输出是从那次运行里直接抄下来的。
 
 这个示例刻意不依赖 LLM：用一段 shell 脚本充当智能体，所以全程不需要 API key，也不需要任何编码
@@ -232,7 +234,3 @@ custom:sh -c printf '...' > x    # 那个 > 会当成普通参数传进去
 
 **`verify_kind = "none"` 记为「跳过」，绝不是「通过」** —— 见
 [`REGISTRY.zh-CN.md`](REGISTRY.zh-CN.md)。
-
----
-
-<sub>也可读 [English](WALKTHROUGH.md)。</sub>

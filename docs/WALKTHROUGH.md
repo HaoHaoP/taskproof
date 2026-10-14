@@ -1,5 +1,7 @@
 # From zero
 
+**English** · [简体中文](WALKTHROUGH.zh-CN.md)
+
 A complete pass over taskproof on a throwaway example. Every command below was
 run as written and the output is copied from that run.
 
@@ -253,7 +255,3 @@ with the task's record and events.
 
 **`verify_kind = "none"` records SKIPPED, never "passed"** — see
 [`REGISTRY.md`](REGISTRY.md).
-
----
-
-<sub>Also available in [中文](WALKTHROUGH.zh-CN.md).</sub>
