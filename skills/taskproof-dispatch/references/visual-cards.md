@@ -31,6 +31,8 @@ Check 3 is the one that looks pedantic and is not. The real failure is not a mis
 
 Check 4 covers the case where the store has **more than one writer**. Once a second session is working the same feature — of course it is, that is why there are lanes — the store can move while you are writing a card, and mtime cannot tell "I forgot to write the decision back" from "someone else just wrote it". Only a committed state can: a dirty store means stop and find out whose change it is before you cite anything. This is also the reason to put the store under version control in the first place; where it is not, the check says so and passes.
 
+**Check 3 is vacuous until cards actually carry `region:` headers.** "This region's previous card" is read out of the *fired* cards' `brief`, and every card fired before this rule existed has no such header — so check 3 passes trivially and says "no previous card to compare against". That is not a working staleness gate, and green there must not be read as one. It starts meaning something from the first `region:`-headed card that lands.
+
 Run them mechanically rather than by eye:
 
 ```bash
