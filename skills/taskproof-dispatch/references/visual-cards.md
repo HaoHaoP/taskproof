@@ -18,15 +18,18 @@ region: header-buttons
 - `region:` — a stable slug for **one file plus one visual area**, not per element and not per project (`header-buttons`, `grid-toolbar`). It is the unit the convergence budget counts and the unit the staleness check keys on, so "this region's previous card" has to have exactly one answer.
 - `口径:` — a pointer into the store: absolute path, plus an anchor or a line range. Anchor by heading where the store is markdown; line range where it is code.
 
-## 3. The three checks before firing
+## 3. The four checks before firing
 
 Any one failing means **do not fire** — fix the store and the card first.
 
 1. The file named by `口径:` exists.
 2. The anchor or line range resolves, and the text there is what the card claims it is.
 3. The store has been **written since this region's previous card**.
+4. The store's **directory is clean in git** — no uncommitted change sitting in it.
 
 Check 3 is the one that looks pedantic and is not. The real failure is not a missing store — it is a store that stopped being maintained. Once it goes stale, the next card stops citing it and starts describing symptoms again, and every card after that is built on the previous card's render instead of on a spec. A store nobody writes to is worse than no store.
+
+Check 4 covers the case where the store has **more than one writer**. Once a second session is working the same feature — of course it is, that is why there are lanes — the store can move while you are writing a card, and mtime cannot tell "I forgot to write the decision back" from "someone else just wrote it". Only a committed state can: a dirty store means stop and find out whose change it is before you cite anything. This is also the reason to put the store under version control in the first place; where it is not, the check says so and passes.
 
 Run them mechanically rather than by eye:
 

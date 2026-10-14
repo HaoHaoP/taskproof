@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""发车前给「观感卡」跑三查（铁律 12 的机判部分）。
+"""发车前给「观感卡」跑四查（铁律 12 的机判部分）。
 
-观感卡 = 卡文头部有 `region:` 与 `口径:` 两个头的卡。三查：
+观感卡 = 卡文头部有 `region:` 与 `口径:` 两个头的卡。四查：
 
   1. `口径:` 指的文件存在；
   2. 锚点（`#标题`）或行号范围（`:a-b`）在那个文件里解析得出来；
   3. store 在**本区域上一张卡之后被写过**（防停更——停更的 store 比没有 store 更坏，
-     因为卡会不再引它、改回去描述现象）。
+     因为卡会不再引它、改回去描述现象）；
+  4. store 所在目录**在 git 里没有未提交改动**（防并发写入：同一功能可能有第二个会话在写
+     同一份 store，mtime 分不清「我忘了回写」与「别人刚写过」。store 不在 git 里时这条跳过并说明）。
 
 第 2 条只判「解析得出来」，**判不了「那里的文字就是卡里说的那些」** —— 那一条仍是主智能体读的活。
 第 3 条的「本区域上一张卡」从 taskproof 账本里取（卡文的 `region:` 头就在 `brief` 里，不必改库）。
@@ -14,7 +16,7 @@
 用法:
     check-card.py <卡文件> [--tasks-json FILE] [--quiet] [--json]
 
-退出码: 0 三查全过（或非观感卡）/ 1 有查不过 / 2 用法错误或卡文件读不到。
+退出码: 0 四查全过（或非观感卡）/ 1 有查不过 / 2 用法错误或卡文件读不到。
 """
 from __future__ import annotations
 
@@ -148,8 +150,42 @@ def check_freshness(store_path: str, region: str, tasks: list) -> tuple:
     return True, detail
 
 
+def check_store_clean(store_path: str) -> tuple:
+    """store 所在目录在 git 里必须没有未提交改动 —— 挡并发写入方。
+
+    范围取 store 文件所在**目录**（不是单个文件）：同一份 store 里别的文件也可能被引，
+    半途被改的状态比单文件更值得停一下。不在 git 仓里就跳过并说明。
+    """
+    directory = os.path.realpath(os.path.dirname(os.path.abspath(store_path)))
+    try:
+        root = subprocess.run(["git", "-C", directory, "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return True, f"跑不动 git 判断并发写入（{exc}），跳过"
+    if root.returncode != 0:
+        return True, "store 不在 git 仓里 → 判不了并发写入（建议给 store 建仓）"
+    # realpath 两边都要做：/tmp 在 macOS 是 /private/tmp 的软链，不归一的话 relpath 会算出
+    # `../../../tmp/...` 这种越界相对路径，git status 收到它什么都不报，看着像「干净」（实测）。
+    repo = os.path.realpath(root.stdout.strip())
+    rel = os.path.relpath(directory, repo)
+    if rel.startswith(".."):
+        return True, f"store 目录与仓根算不出包含关系（{directory} vs {repo}），跳过"
+    try:
+        st = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--", rel],
+                            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return True, f"跑不动 git status（{exc}），跳过"
+    dirty = [line for line in st.stdout.splitlines() if line.strip()]
+    if dirty:
+        shown = "; ".join(line.strip()[:80] for line in dirty[:5])
+        more = "" if len(dirty) <= 5 else f"（共 {len(dirty)} 条）"
+        return False, (f"store 目录有未提交改动 {shown}{more} → 先弄清那份改动是谁的、"
+                       "要不要留，再写卡")
+    return True, f"store 目录在 git 里干净（{repo}/{rel}）"
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="观感卡发车前查（铁律 12）")
+    ap = argparse.ArgumentParser(description="观感卡发车前四查（铁律 12）")
     ap.add_argument("card")
     ap.add_argument("--tasks-json", help="离线用：自定义的 taskproof tasks JSON")
     ap.add_argument("--quiet", action="store_true", help="只打印结论行")
@@ -161,13 +197,13 @@ def main() -> int:
 
     skipped = (not region and not header)
     if skipped:
-        results.append(("skip", "卡文没有 `region:` / `口径:` 头 → 非观感卡，三查跳过"))
+        results.append(("skip", "卡文没有 `region:` / `口径:` 头 → 非观感卡，四查跳过"))
     else:
         if not region:
             ok = False
             results.append(("fail", "有 `口径:` 但缺 `region:` 头（收敛预算要靠它计数）"))
         elif region.lower() == "none":
-            results.append(("skip", "`region: none` → 非观感卡，三查跳过"))
+            results.append(("skip", "`region: none` → 非观感卡，四查跳过"))
             skipped = True
         if not skipped:
             if not header or header.lower() == "none":
@@ -188,6 +224,9 @@ def main() -> int:
                     fine3, detail3 = check_freshness(store_path, region, load_tasks(args.tasks_json))
                     ok = ok and fine3
                     results.append(("pass" if fine3 else "fail", "查3 停更：" + detail3))
+                    fine4, detail4 = check_store_clean(store_path)
+                    ok = ok and fine4
+                    results.append(("pass" if fine4 else "fail", "查4 并发写入：" + detail4))
 
     if args.json:
         print(json.dumps({"card": args.card, "region": region, "口径": header,
@@ -200,7 +239,7 @@ def main() -> int:
             print(f"  region={region!r}  口径={header!r}")
         for r, d in results:
             print(f"  [{r.upper()}] {d}")
-        print("  结论：" + ("非观感卡，三查跳过" if skipped else ("三查全过 → 可以发车" if ok else "有查不过 → 不许发车")))
+        print("  结论：" + ("非观感卡，四查跳过" if skipped else ("四查全过 → 可以发车" if ok else "有查不过 → 不许发车")))
     return 0 if (ok or skipped) else 1
 
 

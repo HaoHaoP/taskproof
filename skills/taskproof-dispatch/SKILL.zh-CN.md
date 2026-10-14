@@ -26,7 +26,7 @@ description: Use when a main agent dispatches coding cards to worker agents thro
 
 铁律 7–11 是派活省钱纪律，它们背后的判据表在 [`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md)。
 
-12. **结果要人用眼睛看的卡，带的是参照物，不是描述。** 它必填 `region:` 与 `口径:` 两个头，发车前跑三查 —— store 文件存在、锚点解析得出来、store 在本区域上一张卡之后被写过。任一条不过就**不许发车**（见第 2.1 节）。
+12. **结果要人用眼睛看的卡，带的是参照物，不是描述。** 它必填 `region:` 与 `口径:` 两个头，发车前跑四查 —— store 文件存在、锚点解析得出来、store 在本区域上一张卡之后被写过、store 所在目录在 git 里干净。任一条不过就**不许发车**（见第 2.1 节）。
 13. **store 是观感内容的唯一来源。** 卡里只有路径与行号；配色、尺寸、显隐规则、文案都住在 store 里。操作者改主意时先写 store —— 与 store 矛盾的卡就是缺陷卡。
 14. **同一区域连续 3 张卡被判「退回上一版产出」→ 停止发车，先出对拍页**（见第 2.1 节）。
 
@@ -89,7 +89,7 @@ taskproof --json register /absolute/path/to/repo --dry-run
 
 **两个头。** `region:`（一个文件 + 一个视觉区域，如 `header-buttons`）与 `口径:`（store 的绝对路径 + 锚点或行号）。
 
-**发车前三条检查，任一条不过就不发车。** store 文件存在；锚点解析出来的就是卡里说的那些；store 在**本区域上一张卡之后被写过**。第三条是重点 —— 停更的 store 比没有 store 更坏，因为卡会不再引它，改回去描述现象。
+**发车前四条检查，任一条不过就不发车。** store 文件存在；锚点解析出来的就是卡里说的那些；store 在**本区域上一张卡之后被写过**；store 所在**目录在 git 里干净**。第三条是重点 —— 停更的 store 比没有 store 更坏，因为卡会不再引它，改回去描述现象。第四条挡的是另一个写入方：同一功能一旦有第二个会话在干，store 就有不止一个写者，mtime 分不清「我忘了回写」与「别人刚写过」—— 只有已提交的状态分得清。
 
 **一卡一参照物。** 只有四类算：原型行号范围、既有实现的行号范围、已圈定的对拍页、操作者圈过的截图 + 量出来的取值。操作者的原话不算。当一张卡想引多个互相打架的来源，**写卡之前**就对完、把结论写进 store，卡里只引一个。
 
@@ -97,7 +97,7 @@ taskproof --json register /absolute/path/to/repo --dry-run
 
 指不出参照物，或操作者答的是「参考 XX 那样」「说不太清」「你看着来」，或本区域已经有卡被退回 —— 下一个动作**不是发卡**：手做一份覆盖整个区域的对拍页，拿到圈定，放进 store。
 
-细则全文：[`references/visual-cards.zh-CN.md`](references/visual-cards.zh-CN.md)。三查机制化跑：`python3 tools/check-card.py <卡号>.md` —— 退出 `0` 发车、`1` 不许发车、`2` 卡读不到。
+细则全文：[`references/visual-cards.zh-CN.md`](references/visual-cards.zh-CN.md)。四查机制化跑：`python3 tools/check-card.py <卡号>.md` —— 退出 `0` 发车、`1` 不许发车、`2` 卡读不到。
 
 ````bash
 mkdir -p /tmp/cards
