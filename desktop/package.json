@@ -36,6 +36,7 @@
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
+    "fflate": "0.8.2",
     "typescript": "^5.9.3",
     "unocss": "^66.10.5",
     "vite": "^7.2.6",

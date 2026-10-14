@@ -23,8 +23,19 @@
  *   node scripts/build-web.mjs
  *
  * Everything is deterministic: no timestamps in file contents, sorted copies,
- * and a fixed gzip header, so building the same source twice is byte-identical
- * and the CI diff is empty.
+ * and `.gz` siblings produced by the pinned pure-JS compressor `fflate` (see
+ * package.json), which writes a fixed gzip header (mtime 0, no filename), so the
+ * compressed bytes depend only on the input.
+ *
+ * Determinism has to hold across machines, not just within one build tree, and
+ * the built-in `zlib` cannot give that: Node bundles a different zlib release in
+ * every version, and even the same version can compress differently on different
+ * platforms. Compressing with the built-in `zlib` therefore produced different
+ * `.gz` bytes on the CI runner than on a developer's machine, which made the
+ * "committed board equals a fresh rebuild" check below go red on any machine
+ * whose zlib differed from the one that produced the committed assets. `fflate`
+ * is pure JavaScript and version-locked, so the same input compresses to the
+ * same bytes everywhere.
  */
 import { spawnSync } from 'node:child_process'
 import {
@@ -39,7 +50,7 @@ import {
 } from 'node:fs'
 import { extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { gzipSync } from 'node:zlib'
+import { gzipSync } from 'fflate'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const desktopDir = resolve(here, '..')
@@ -137,9 +148,10 @@ function gzipTextAssets() {
     const full = join(webDir, rel)
     if (!TEXT_EXTENSIONS.has(extname(rel).toLowerCase())) continue
     if (statSync(full).size <= GZIP_THRESHOLD) continue
-    // gzipSync writes a fixed (zero) mtime and no filename, so the bytes depend
-    // only on the input -- important for the CI diff.
-    writeFileSync(`${full}.gz`, gzipSync(readFileSync(full), { level: 9 }))
+    // fflate writes a fixed (zero) mtime and no filename and is pure JS, so the
+    // bytes depend only on the input and stay identical on every machine --
+    // important for the CI diff. (the built-in `zlib` would vary by version/platform.)
+    writeFileSync(`${full}.gz`, gzipSync(readFileSync(full), { level: 9, mtime: 0 }))
     written += 1
   }
   log(`wrote ${written} gzip sibling(s) for text assets over ${GZIP_THRESHOLD} B`)
