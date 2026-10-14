@@ -28,6 +28,14 @@ Any one failing means **do not fire** — fix the store and the card first.
 
 Check 3 is the one that looks pedantic and is not. The real failure is not a missing store — it is a store that stopped being maintained. Once it goes stale, the next card stops citing it and starts describing symptoms again, and every card after that is built on the previous card's render instead of on a spec. A store nobody writes to is worse than no store.
 
+Run them mechanically rather than by eye:
+
+```bash
+python3 /absolute/path/to/taskproof/tools/check-card.py /tmp/cards/<card>.md
+```
+
+Exit `0` = fire, `1` = do not fire, `2` = the card file itself is unreadable. The script reads `region:` and `口径:` out of the card body, resolves the anchor against the store, and takes "this region's previous card" from the taskproof ledger (the card's own `region:` header is already inside `brief`, so nothing needs to change in the database). A card carrying no `region:` / `口径:` headers is skipped as a non-visual card. It cannot check the second half of check 2 — "the text there is what the card claims it is" — which stays yours.
+
 ## 4. What counts as a reference
 
 Exactly four kinds:

@@ -97,7 +97,7 @@ Plus a **status truth table** (rows = every state that can exist, columns = elem
 
 When no reference can be named, or the operator answers "like X" / "hard to say" / "your call", or this region already had a card rejected — the next action is **not a card**: build a hand-made comparison page for the whole region, get it circled, and put it in the store.
 
-Full detail: [`references/visual-cards.md`](references/visual-cards.md).
+Full detail: [`references/visual-cards.md`](references/visual-cards.md). The three checks run mechanically: `python3 tools/check-card.py <card.md>` — exit `0` fire, `1` do not fire, `2` unreadable card.
 
 ````bash
 mkdir -p /tmp/cards

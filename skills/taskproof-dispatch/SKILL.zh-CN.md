@@ -97,7 +97,7 @@ taskproof --json register /absolute/path/to/repo --dry-run
 
 指不出参照物，或操作者答的是「参考 XX 那样」「说不太清」「你看着来」，或本区域已经有卡被退回 —— 下一个动作**不是发卡**：手做一份覆盖整个区域的对拍页，拿到圈定，放进 store。
 
-细则全文：[`references/visual-cards.zh-CN.md`](references/visual-cards.zh-CN.md)。
+细则全文：[`references/visual-cards.zh-CN.md`](references/visual-cards.zh-CN.md)。三查机制化跑：`python3 tools/check-card.py <卡号>.md` —— 退出 `0` 发车、`1` 不许发车、`2` 卡读不到。
 
 ````bash
 mkdir -p /tmp/cards
