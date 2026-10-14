@@ -111,6 +111,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-verify", action="store_true", help="skip acceptance (recorded as SKIPPED, not passed)")
     p.add_argument("--timeout", type=int, help="override the registry timeout (seconds)")
     p.add_argument(
+        "--idle-timeout",
+        type=int,
+        metavar="N",
+        help=(
+            "stop a card whose log AND working tree are both quiet for N "
+            "seconds (0 = off, the default)"
+        ),
+    )
+    p.add_argument(
         "--cap",
         type=int,
         metavar="N",
@@ -618,6 +627,7 @@ def cmd_run(args):
         worktree=args.worktree,
         skip_verify=args.no_verify,
         timeout=args.timeout,
+        idle_timeout=args.idle_timeout,
         cap=cap,
     )
     task = dispatch.task_detail(args.workspace, task_id).get("task") or {}

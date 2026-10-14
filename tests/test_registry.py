@@ -591,5 +591,54 @@ class LaneTimeoutFieldTest(unittest.TestCase):
                 self.assertIn("solo", message)
 
 
+class IdleTimeoutFieldTest(unittest.TestCase):
+    """Card 83: a lane's `idle_timeout`, when written, must be a non-negative
+    integer. Unlike `timeout`, ``0`` is LEGAL — it is the shipped default and
+    means "off". A negative number or a non-integer is a hard error naming the
+    offending lane, never a silently dropped key.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, body, name="projects.toml"):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(textwrap.dedent(body))
+        return path
+
+    def test_idle_timeout_rejects_negative_and_non_integer(self):
+        for bad in ("-1", '"x"'):
+            with self.subTest(bad=bad):
+                path = self.write(
+                    f"""
+                    [[taskgroup]]
+                    id = "solo"
+                    path = "/tmp/solo"
+                    idle_timeout = {bad}
+                    """
+                )
+                with self.assertRaises(RegistryError) as ctx:
+                    registry.load(path)
+                message = str(ctx.exception)
+                self.assertIn("idle_timeout", message)
+                self.assertIn("solo", message)
+
+    def test_idle_timeout_zero_is_legal(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "solo"
+            path = "/tmp/solo"
+            idle_timeout = 0
+            """
+        )
+        lane = registry.load(path).require("solo")
+        self.assertEqual(lane.idle_timeout, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

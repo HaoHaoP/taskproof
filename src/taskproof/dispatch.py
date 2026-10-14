@@ -171,6 +171,7 @@ def dispatch(
     worktree: bool = False,
     skip_verify: bool = False,
     timeout: Optional[int] = None,
+    idle_timeout: Optional[int] = None,
     rerun_of: Optional[str] = None,
     cap: Optional[int] = None,
 ) -> str:
@@ -203,6 +204,12 @@ def dispatch(
     # `[defaults] timeout`, which wins over the built-in fallback.
     timeout_setting = registry.resolve_timeout(taskgroup, reg.defaults, timeout)
     effective_timeout = timeout_setting.value
+
+    # The effective no-progress watchdog budget and where it came from (card 83):
+    # a `--idle-timeout` wins over the lane's own `idle_timeout`, which wins over
+    # the built-in fallback (`0` == off, the shipped default).
+    idle_setting = registry.resolve_idle_timeout(taskgroup, idle_timeout)
+    effective_idle_timeout = idle_setting.value
 
     # The effective global cap for this dispatch, with its source (card 42). A
     # `--cap N` is a one-off override: it rides the event stream but is never
@@ -272,6 +279,12 @@ def dispatch(
                     # `cap_source` beside it — cli / lane / toml / default.
                     "timeout": effective_timeout,
                     "timeout_source": timeout_setting.source,
+                    # The no-progress watchdog budget this run enforces and
+                    # where it came from (card 83). `idle_timeout_source` is
+                    # shaped like `timeout_source` beside it — cli / lane /
+                    # default — and `0` means the watchdog is off for this run.
+                    "idle_timeout": effective_idle_timeout,
+                    "idle_timeout_source": idle_setting.source,
                     # The effective global cap *and its source* (card 42), so the
                     # event stream can explain why a card was admitted — e.g. a
                     # one-off `--cap 5` that let a fourth card run.
@@ -295,6 +308,7 @@ def dispatch(
                 worktree=worktree,
                 skip_verify=skip_verify,
                 timeout=effective_timeout,
+                idle_timeout=effective_idle_timeout,
             )
             return task_id
         finally:
@@ -316,6 +330,7 @@ def _execute_claimed(
     worktree: bool,
     skip_verify: bool,
     timeout: int,
+    idle_timeout: int,
 ) -> None:
     """Steps 5-8 for a task that is already `running` and holds a slot.
 
@@ -365,6 +380,7 @@ def _execute_claimed(
             read_only=read_only,
             skip_verify=skip_verify,
             timeout=timeout,
+            idle_timeout=idle_timeout,
         )
     finally:
         # Decide the worktree's fate on every exit path. A run that left changes
@@ -421,14 +437,15 @@ def _link_rerun(conn, new_id: str, old_id: str) -> None:
 def _run_options(conn, task_id: str) -> dict:
     """Recover the run flags a task carried, for `rerun` to reuse.
 
-    A card born running records read_only / worktree / skip_verify / timeout on
-    its `started` event. The events are read oldest-first and merged, so the
-    newest value of each key wins.
+    A card born running records read_only / worktree / skip_verify / timeout /
+    idle_timeout on its `started` event. The events are read oldest-first and
+    merged, so the newest value of each key wins.
 
     A flag missing from every event is simply absent; `rerun` then applies the
     documented default (read_only / worktree / skip_verify false; timeout =
-    the registry timeout). A row written by an older build that recorded no
-    flags yields `{}` and reruns with those same defaults.
+    the registry timeout; idle_timeout = the lane's budget, or off). A row
+    written by an older build that recorded no flags yields `{}` and reruns
+    with those same defaults.
     """
     options: dict = {}
     rows = conn.execute(
@@ -444,7 +461,7 @@ def _run_options(conn, task_id: str) -> dict:
             continue
         if not isinstance(payload, dict):
             continue
-        for key in ("read_only", "worktree", "skip_verify", "timeout"):
+        for key in ("read_only", "worktree", "skip_verify", "timeout", "idle_timeout"):
             if payload.get(key) is not None:
                 options[key] = payload[key]
     return options
@@ -464,6 +481,7 @@ def _execute(
     read_only: bool,
     skip_verify: bool,
     timeout: int,
+    idle_timeout: int = 0,
 ) -> None:
     """Steps ⑤-⑧: run the adapter, gate on forbidden paths, verify, then record.
 
@@ -555,6 +573,7 @@ def _execute(
             log_path=log_path,
             schema_path=schema_path,
             read_only=read_only,
+            idle_timeout=idle_timeout,
             on_spawn=_record_pgid,
         )
     except VerifyError as exc:
@@ -562,13 +581,21 @@ def _execute(
             # A concurrent `cancel` already recorded the terminal state; do not
             # overwrite it or append a contradictory event.
             return
-        # timeout: `timeout` terminal state, exit code carries EXIT_VERIFY meaning.
+        # timeout: `timeout` terminal state, exit code carries EXIT_VERIFY
+        # meaning. The event names WHY the clock ran out — the hard wall clock
+        # or the no-progress watchdog (card 83) — and carries the budget that
+        # fired, so a card that stopped itself early is never mistaken for one
+        # that burned the whole wall clock.
         _finish_task(
             conn, task_id, status=STATUS_TIMEOUT, exit_code=EXIT_VERIFY, workdir=run_dir
         )
-        storage.append_event(
-            conn, task_id, "timeout", {"adapter": adapter_name, "detail": str(exc)}
-        )
+        reason = getattr(exc, "reason", "wall-clock")
+        payload = {"adapter": adapter_name, "detail": str(exc), "reason": reason}
+        if reason == "idle":
+            payload["idle_timeout"] = getattr(exc, "idle_timeout", idle_timeout)
+        else:
+            payload["timeout"] = getattr(exc, "timeout", timeout)
+        storage.append_event(conn, task_id, "timeout", payload)
         raise
     except AdapterError as exc:
         if _task_cancelled(conn, task_id):
@@ -1051,9 +1078,119 @@ def _ensure_localhost_no_proxy(env: dict) -> dict:
     return env
 
 
+#: Sentinel meaning "no work-tree baseline has been taken yet this wait".
+_UNSET = object()
+
+
+def _log_bytes(log_path: str) -> int:
+    """The current size of the run's log, or 0 if it is not there yet.
+
+    The cheapest possible liveness probe: one ``os.stat``. When it grows the
+    card is doing something visible and the watchdog never has to look at git.
+    """
+    try:
+        return os.stat(log_path).st_size
+    except OSError:
+        return 0
+
+
+def _tree_digest(workdir: str):
+    """A cheap "is the working tree still moving?" summary, or ``None``.
+
+    Reuses the gate's own probes (card 83 must not invent a second one):
+    ``verify.changed_files_snapshot`` gives the porcelain path -> status map,
+    and ``verify._fingerprint`` gives each path a ``size:mtime_ns`` string. The
+    digest is the component-wise MAX of size and mtime over those paths.
+
+    A bare porcelain diff cannot see a rewrite of an already-dirty file — the
+    two status columns are identical — but that rewrite always pushes the
+    file's ``mtime_ns`` above every earlier changed path, so the max still
+    moves. ``None`` means "this directory is not a git work tree", and the
+    caller then watches the log alone instead of erroring.
+    """
+    snapshot = verify.changed_files_snapshot(workdir)
+    if snapshot is None:
+        return None
+    max_size = None
+    max_mtime = None
+    for rel in snapshot:
+        fingerprint = verify._fingerprint(os.path.join(workdir, rel))
+        try:
+            size_text, mtime_text = fingerprint.split(":", 1)
+            size, mtime = int(size_text), int(mtime_text)
+        except (ValueError, AttributeError):
+            # `_fingerprint` returns "gone" for a vanished path; ignore it.
+            continue
+        if max_size is None or size > max_size:
+            max_size = size
+        if max_mtime is None or mtime > max_mtime:
+            max_mtime = mtime
+    return (max_size, max_mtime)
+
+
+def _idle_watch(proc, *, log_path, workdir, wall_clock, idle_timeout):
+    """Wait for `proc`, stopping early when the card goes quiet.
+
+    "Quiet" means BOTH the log file and the working tree have shown no change
+    for `idle_timeout` seconds. Returns ``None`` when the child exits on its
+    own, otherwise the reason the wait gave up: ``"idle"`` or ``"wall-clock"``.
+
+    It never terminates the process — the caller does — so the idle and the
+    hard wall-clock endings converge on ONE code path (a single ``timeout``
+    terminal state). Cost is deliberately asymmetric: the cheap ``os.stat`` of
+    the log runs every tick, but the (potentially costly on a huge repo) ``git
+    status`` digest runs ONLY on a tick where the log was silent, and a
+    non-git ``workdir`` is noticed once and then never probed again. The tick
+    length is ``max(1, min(30, idle_timeout // 2))``.
+    """
+    poll = max(1, min(30, idle_timeout // 2))
+    start = time.monotonic()
+    last_progress = start
+    last_log = _log_bytes(log_path)
+    tree_live = True
+    last_tree = _UNSET
+
+    while True:
+        remaining = wall_clock - (time.monotonic() - start)
+        if remaining <= 0:
+            return "wall-clock"
+        try:
+            proc.wait(timeout=min(poll, remaining))
+            return None  # the child exited on its own
+        except subprocess.TimeoutExpired:
+            pass
+
+        now = time.monotonic()
+        # Cheap path first: the log grew, so the card is alive — never touch git.
+        size = _log_bytes(log_path)
+        if size != last_log:
+            last_log = size
+            last_progress = now
+            continue
+
+        # The log is silent. Only now pay for the tree probe.
+        if tree_live:
+            tree = _tree_digest(workdir)
+            if tree is None:
+                # Not a git work tree: degrade to the log as the only signal.
+                tree_live = False
+            elif last_tree is _UNSET:
+                last_tree = tree  # first silent tick just sets the baseline
+            elif tree != last_tree:
+                last_tree = tree
+                last_progress = now
+                continue
+
+        idle_deadline = last_progress + idle_timeout
+        wall_deadline = start + wall_clock
+        if now >= idle_deadline or now >= wall_deadline:
+            # Whichever budget ran out first wins; a tie is the wall clock's.
+            return "idle" if idle_deadline < wall_deadline else "wall-clock"
+
+
 def _run_adapter(adapter_obj, *, brief: str, workdir: str, log_path: str,
                  schema_path: Optional[str] = None, read_only: bool = False,
-                 on_spawn=None):
+                 idle_timeout: int = 0, on_spawn=None):
     """Spawn the agent CLI, tee output to `log_path`, return (exit_code, out, err).
 
     * argv is a list and the shell is never used.
@@ -1063,6 +1200,13 @@ def _run_adapter(adapter_obj, *, brief: str, workdir: str, log_path: str,
     * `adapter_obj.timeout` is enforced; on expiry the process group this call
       created is terminated (SIGTERM then SIGKILL) and a `VerifyError` is raised
       (exit code 71 semantics).
+    * when ``idle_timeout`` > 0 a no-progress watchdog waits alongside the wall
+      clock (card 83): the card is stopped only when BOTH its log and its tree
+      have been quiet for that long. ``idle_timeout == 0`` (the shipped default)
+      keeps the plain ``proc.wait(timeout=...)`` with no polling at all.
+    * a wall-clock or idle stop raises the SAME ``VerifyError`` — a single
+      ``timeout`` terminal state — but the exception carries ``reason`` /
+      ``idle_timeout`` / ``timeout`` so the caller can record why it fired.
     * ``on_spawn(proc)`` (optional) runs immediately after the child exists and
       before we wait on it — the hook the dispatcher uses to persist the child's
       process-group id for a later ``cancel``.
@@ -1132,12 +1276,33 @@ def _run_adapter(adapter_obj, *, brief: str, workdir: str, log_path: str,
             reader.start()
 
         timed_out = False
-        try:
-            exit_code = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            _terminate_tree(proc)
+        timeout_reason = None
+        if idle_timeout and idle_timeout > 0:
+            # The watchdog and the wall clock race; the FIRST to fire wins.
+            # `_idle_watch` returns the reason (or None when the child left on
+            # its own). Either termination below is the SAME path the plain
+            # wall-clock wait uses, so both end in one `timeout` state.
+            timeout_reason = _idle_watch(
+                proc,
+                log_path=log_path,
+                workdir=workdir,
+                wall_clock=timeout,
+                idle_timeout=idle_timeout,
+            )
+            timed_out = timeout_reason is not None
+            if timed_out:
+                _terminate_tree(proc)
             exit_code = proc.wait()
+        else:
+            # Off (the shipped default): wait on the wall clock exactly as
+            # before — no polling, no extra probes.
+            try:
+                exit_code = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                timeout_reason = "wall-clock"
+                _terminate_tree(proc)
+                exit_code = proc.wait()
         for reader in readers:
             reader.join()
     finally:
@@ -1146,11 +1311,21 @@ def _run_adapter(adapter_obj, *, brief: str, workdir: str, log_path: str,
     out = "".join(out_chunks)
     err = "".join(err_chunks)
     if timed_out:
-        raise VerifyError(
-            f"adapter '{adapter_obj.name}': timeout after {timeout}s "
-            "(process tree terminated)",
-            hint=f"see {log_path}",
-        )
+        if timeout_reason == "idle":
+            message = (
+                f"adapter '{adapter_obj.name}': idle timeout after {idle_timeout}s "
+                "(log and work tree both quiet; process tree terminated)"
+            )
+        else:
+            message = (
+                f"adapter '{adapter_obj.name}': timeout after {timeout}s "
+                "(process tree terminated)"
+            )
+        exc = VerifyError(message, hint=f"see {log_path}")
+        exc.reason = timeout_reason
+        exc.idle_timeout = idle_timeout
+        exc.timeout = timeout
+        raise exc
     return exit_code, out, err
 
 
@@ -1990,9 +2165,10 @@ def rerun_task(workspace: str, task_id: str) -> str:
     """Start a fresh card from a terminal one, linked both ways in the ledger.
 
     The new card reuses the old card's brief and run flags (adapter / model /
-    reasoning / timeout / read_only / worktree / skip_verify), recovered from
-    its row and its events by :func:`_run_options`. A flag the ledger never
-    captured falls back to the documented default (see `_run_options`).
+    reasoning / timeout / idle_timeout / read_only / worktree / skip_verify),
+    recovered from its row and its events by :func:`_run_options`. A flag the
+    ledger never captured falls back to the documented default (see
+    `_run_options`).
 
     Only a terminal card may be rerun, `blocked` included; a non-terminal card
     is refused so two attempts of the same work can never overlap. The new card
@@ -2026,6 +2202,7 @@ def rerun_task(workspace: str, task_id: str) -> str:
         worktree=bool(options.get("worktree")),
         skip_verify=bool(options.get("skip_verify")),
         timeout=options.get("timeout"),
+        idle_timeout=options.get("idle_timeout"),
         rerun_of=task_id,
     )
 

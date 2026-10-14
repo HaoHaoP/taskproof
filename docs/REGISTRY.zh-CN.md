@@ -109,6 +109,7 @@ link      = ["desktop/node_modules"]              # 从主树软链依赖
 | `workspace` | 否 | `"none"` | `"none"` 就地跑 —— 缺省值，与今天逐字一致。`"worktree"` 让 taskproof 为这条道惰性建一份**长驻** git worktree 并永久复用。其它取值是硬错误。 |
 | `link` | 否 | `[]` | **相对工作区根**的相对路径（例如 `desktop/node_modules`），从主树软链进工作区。只在 `workspace = "worktree"` 时有意义；绝对路径或含 `..` 段是硬错误。 |
 | `timeout` | 否 | — | 这条道的硬超时，单位秒。取值是三段链：`--timeout N` > 道上的 `timeout` > `[defaults] timeout`；三者都没给时落到内置的 `1800`。必须是正整数；`0`、负数或非整数都是硬错误。 |
+| `idle_timeout` | 否 | `0`（关闭） | 无进展看门狗预算，单位秒。取值是三段链：`--idle-timeout N` > 道上的 `idle_timeout` > 内置的 `0`（关闭）。只有日志**与**工作树都静默满这么久才判停摆，且记录为 `timeout` 事件并带 `reason = "idle"`。必须是非负整数；负数或非整数是硬错误，`0` 表示关闭。首期默认关闭，先观察误报再谈开启。 |
 | `auto_registered` | 否 | `false` | 由 `taskproof register` 写入，不打算手改。 |
 
 ## 读旧格式：零迁移

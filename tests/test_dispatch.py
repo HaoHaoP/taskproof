@@ -67,13 +67,15 @@ def registry_toml(
     cap=3,
     timeout=60,
     lane_timeout=None,
+    idle_timeout=None,
 ) -> str:
     """A one-lane registry, tuned for the dispatch tests.
 
     ``timeout`` is the ``[defaults]`` timeout; pass ``None`` to omit it (so the
     built-in fallback is what applies). ``lane_timeout`` writes a ``timeout`` on
     the lane itself — any lane field on a ``[[project]]`` block makes it a
-    same-named taskgroup (zero migration).
+    same-named taskgroup (zero migration). ``idle_timeout`` writes the lane's
+    no-progress budget the same way (``0`` is the shipped default: off).
     """
     lines = [
         "[defaults]",
@@ -97,6 +99,8 @@ def registry_toml(
         lines.append('verify_kind = "none"')
     if lane_timeout is not None:
         lines.append(f"timeout = {lane_timeout}")
+    if idle_timeout is not None:
+        lines.append(f"idle_timeout = {idle_timeout}")
     if forbidden:
         joined = ", ".join(_q(f) for f in forbidden)
         lines.append(f"forbidden_paths = [{joined}]")
@@ -1033,6 +1037,101 @@ class LaneTimeoutTest(DispatchBase):
                 started = self._started_payload(task_id)
                 self.assertEqual(started["timeout"], value)
                 self.assertEqual(started["timeout_source"], source)
+
+
+class IdleWatchdogTest(DispatchBase):
+    """Card 83: a card with no log growth and no tree movement is stopped early.
+
+    The wall clock alone cannot tell "busy" from "spinning": a card that reads
+    files and grows its log without changing anything burns the whole budget.
+    The watchdog is the second signal — an "idle" terminal state reuses the
+    existing `timeout` state and exit code 71, and the `timeout` event names the
+    reason. The shipped default is off (``idle_timeout = 0``); a lane opts in.
+    """
+
+    def _timeout_event(self, task_id):
+        events = task_detail(self.ws, task_id)["events"]
+        return next(e for e in events if e["event"] == "timeout")
+
+    def _started_payload(self, task_id):
+        events = task_detail(self.ws, task_id)["events"]
+        return next(e["payload"] for e in events if e["event"] == "started")
+
+    def test_idle_watchdog_kills_a_silent_card(self):
+        # A 30s sleep prints nothing and touches nothing: the wall clock (60s)
+        # would never fire, but a 2s idle budget must.
+        self.write_registry(verify="exit 0", timeout=60, idle_timeout=2)
+        started = time.monotonic()
+        with self.assertRaises(VerifyError):
+            dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter="custom:sh -c 'sleep 30'",
+            )
+        elapsed = time.monotonic() - started
+
+        # Killed well before the 30s sleep and the 60s wall clock. The lower
+        # bound proves it is the idle budget, not an instantaneous abort.
+        self.assertGreaterEqual(elapsed, 2)
+        self.assertLess(elapsed, 15)
+
+        task_id = self.latest_task_id()
+        row = task_detail(self.ws, task_id)["task"]
+        self.assertEqual(row["status"], STATUS_TIMEOUT)
+        self.assertEqual(row["exit_code"], 71)
+        payload = self._timeout_event(task_id)["payload"]
+        self.assertEqual(payload["reason"], "idle")
+        self.assertEqual(payload["idle_timeout"], 2)
+
+    def test_idle_watchdog_spares_a_noisy_card(self):
+        # Its log grows every second; the cheap path keeps it alive.
+        self.write_registry(verify="exit 0", timeout=60, idle_timeout=2)
+        task_id = dispatch(
+            self.ws,
+            "proj",
+            "x",
+            adapter=(
+                "custom:sh -c 'for i in 1 2 3 4 5; do echo tick; sleep 1; "
+                "done; echo ok'"
+            ),
+        )
+        row = task_detail(self.ws, task_id)["task"]
+        self.assertEqual(row["status"], STATUS_DONE)
+
+    def test_idle_watchdog_spares_a_quiet_writer(self):
+        # Silent on the log, but it rewrites a file every second: the (slower)
+        # work-tree fingerprint has to notice that and keep the card alive. The
+        # tree probe only works in a repo, so this project is one.
+        subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True)
+        self.write_registry(verify="exit 0", timeout=60, idle_timeout=2)
+        task_id = dispatch(
+            self.ws,
+            "proj",
+            "x",
+            adapter=(
+                "custom:sh -c 'for i in 1 2 3 4 5; do date > .tp-idle-probe.txt; "
+                "sleep 1; done; echo ok'"
+            ),
+        )
+        row = task_detail(self.ws, task_id)["task"]
+        self.assertEqual(row["status"], STATUS_DONE)
+
+    def test_idle_watchdog_defaults_to_off(self):
+        # No `idle_timeout` in the registry and no `--idle-timeout`: the shipped
+        # default is 0, so a 3s quiet sleep finishes normally.
+        self.write_registry(verify="exit 0", timeout=60)
+        task_id = dispatch(
+            self.ws,
+            "proj",
+            "x",
+            adapter="custom:sh -c 'sleep 3; echo ok'",
+        )
+        row = task_detail(self.ws, task_id)["task"]
+        self.assertEqual(row["status"], STATUS_DONE)
+        started = self._started_payload(task_id)
+        self.assertEqual(started["idle_timeout"], 0)
+        self.assertEqual(started["idle_timeout_source"], "default")
 
 
 class WorktreeTest(DispatchBase):

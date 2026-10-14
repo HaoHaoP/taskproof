@@ -76,6 +76,13 @@ class Taskgroup:
     #: timeout`` and finally the built-in fallback. A ``--timeout`` on the
     #: command line overrides it for that one run. See `registry.resolve_timeout`.
     timeout: Optional[int] = None
+    #: Per-lane no-progress watchdog budget in seconds (card 83). ``0`` — the
+    #: shipped default — disables it; a positive value stops a card whose log
+    #: AND working tree have both been quiet for that long. ``None`` means the
+    #: lane did not name one, so the chain falls through to the built-in default
+    #: (also off). A ``--idle-timeout`` on the command line overrides it for that
+    #: one run. See `registry.resolve_idle_timeout`.
+    idle_timeout: Optional[int] = None
 
     def __post_init__(self):
         if not isinstance(self.group, str) or not self.group.strip():

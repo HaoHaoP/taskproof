@@ -432,6 +432,67 @@ def resolve_timeout(
     return TimeoutSetting(DEFAULT_TIMEOUT, SOURCE_TIMEOUT_DEFAULT)
 
 
+# ---------------------------------------------------------------------------
+# The effective no-progress watchdog budget: a value *and* where it came from.
+# ---------------------------------------------------------------------------
+#
+# Card 83. The idle watchdog stops a card whose log AND working tree have both
+# been quiet for `idle_timeout` seconds. It is a *separate* signal from the hard
+# wall clock above, and it is off by default so the shipped behaviour is
+# unchanged while operators watch it for false positives.
+#
+# Three sources, in precedence order:
+#
+#   1. ``cli``     — a one-off ``run --idle-timeout N`` for this dispatch only;
+#   2. ``lane``    — the ``idle_timeout`` on the ``[[taskgroup]]`` being run;
+#   3. ``default`` — the built-in fallback below (``0`` == off).
+#
+# Unlike ``timeout`` there is deliberately no ``[defaults]`` rung: the budget
+# is a per-lane opt-in, never a workspace-wide default someone inherits blindly.
+SOURCE_IDLE_TIMEOUT_CLI = concurrency.SOURCE_CLI
+SOURCE_IDLE_TIMEOUT_LANE = "lane"
+SOURCE_IDLE_TIMEOUT_DEFAULT = "default"
+
+#: Seconds of "log quiet AND tree quiet" before a run is judged stuck. ``0``
+#: disables the watchdog; this is the shipped default (card 83).
+DEFAULT_IDLE_TIMEOUT = 0
+
+
+def _require_idle_int(value, label: str, source: str) -> int:
+    """A non-negative integer, or a RegistryError naming where it came from.
+
+    ``0`` is legal and means "off". Rejects bools (TOML ``true`` is an int in
+    Python) and floats so a truthy ``true`` can never masquerade as the budget.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RegistryError(
+            f"{source}: {label} field 'idle_timeout' must be a non-negative "
+            f"integer (got {value!r})"
+        )
+    return value
+
+
+def resolve_idle_timeout(
+    taskgroup: Optional[Taskgroup], cli: Optional[int] = None
+) -> TimeoutSetting:
+    """The effective idle watchdog budget for one dispatch, with its source.
+
+    ``cli`` (the run's ``--idle-timeout``) wins over ``taskgroup.idle_timeout``,
+    which wins over the built-in fallback (``0``, i.e. off). ``taskgroup`` may
+    be ``None``. The returned ``source`` is one of :data:`SOURCE_IDLE_TIMEOUT_CLI`
+    / :data:`SOURCE_IDLE_TIMEOUT_LANE` / :data:`SOURCE_IDLE_TIMEOUT_DEFAULT`.
+    """
+    if cli is not None:
+        return TimeoutSetting(
+            _require_idle_int(cli, "run --idle-timeout", "cli"),
+            SOURCE_IDLE_TIMEOUT_CLI,
+        )
+    lane = getattr(taskgroup, "idle_timeout", None)
+    if lane is not None:
+        return TimeoutSetting(int(lane), SOURCE_IDLE_TIMEOUT_LANE)
+    return TimeoutSetting(DEFAULT_IDLE_TIMEOUT, SOURCE_IDLE_TIMEOUT_DEFAULT)
+
+
 #: Scope-source labels. The CLI prints these verbatim, so they are part of the
 #: human contract (see docs: the scope must always be visible).
 SCOPE_FROM_PROJECT = "来自 --project"
@@ -626,6 +687,14 @@ def _load_lane_fields(
                 f"integer (got {timeout!r})"
             )
 
+    # Card 83: a lane idle budget, when written, must be a non-negative integer.
+    # Unlike `timeout`, `0` is LEGAL and means "off" (the shipped default); a
+    # negative number or a non-integer is refused, naming the offending lane,
+    # rather than silently dropped.
+    idle_timeout = entry.get("idle_timeout")
+    if idle_timeout is not None:
+        idle_timeout = _require_idle_int(idle_timeout, label, source)
+
     return {
         "group": _load_group(entry, default_group, label, source),
         "verify": verify_value,
@@ -636,6 +705,7 @@ def _load_lane_fields(
         "workspace": workspace,
         "link": link,
         "timeout": timeout,
+        "idle_timeout": idle_timeout,
     }
 
 
@@ -846,6 +916,7 @@ def taskgroup_record(taskgroup: Taskgroup, probe_flags: Optional[dict] = None) -
         "forbidden_paths": list(taskgroup.forbidden_paths),
         "result_schema": taskgroup.result_schema,
         "timeout": taskgroup.timeout,
+        "idle_timeout": taskgroup.idle_timeout,
         "auto_registered": bool(taskgroup.auto_registered),
         "probe": probe,
         "probe_exit": probe_exit,
