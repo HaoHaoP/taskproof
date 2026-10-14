@@ -363,6 +363,20 @@ is skipped** — `verify_exit` stays NULL.
 Task and acceptance share that one budget: the acceptance command is given the same
 `effective_timeout` (`dispatch.py:754`).
 
+A wall clock cannot tell "working" from "spinning", so a run can also carry an
+optional no-progress watchdog beside it (`_idle_watch`, `dispatch.py:1131`). It judges
+a card stalled only when **both** the log file and the working tree have been silent
+for the idle budget: it `os.stat`s the log every tick — the cheap path, which never
+touches git — and fingerprints the tree (`verify.changed_files_snapshot` plus
+`verify._fingerprint`'s `size:mtime_ns`) only on a tick where the log was quiet; a
+non-git work directory degrades to watching the log alone. The budget is
+`idle_timeout`, resolved by `registry.resolve_idle_timeout` from a lane field or a
+one-off `run --idle-timeout N`, then the built-in fallback — a shorter chain than
+`timeout` with deliberately no `[defaults]` rung, so it stays a per-lane opt-in.
+**0 means off — the built-in default**. A stall and the wall clock converge on the
+same `timeout` terminal state (exit code 71); only the `timeout` event's `reason`
+(`idle` vs `wall-clock`) tells them apart, and whichever budget runs out first wins.
+
 A second timeout with the same name is unrelated: `taskproof wait --timeout`
 (default 600s, `cli.py:138`) only bounds the waiting command.
 
@@ -476,7 +490,8 @@ the fix `taskproof --json taskgroups` reports a non-null `timeout` for all 22.
 
 ## 6 Proposed design
 
-Except where marked as landed, none of the following is implemented.
+Except where marked as landed — §6.1 (`e346213`) and §6.3 (`46ad07ad`) — none of the
+following is implemented.
 
 ### 6.1 A per-lane timeout and a three-step lookup   — landed in `e346213`
 
@@ -500,19 +515,31 @@ Give acceptance its own key, defaulting to the task's budget so nothing changes 
 existing lanes. Then "the task used its whole budget" and "acceptance used its whole
 budget" stop eating each other, and both are recorded with their own meaning.
 
-### 6.3 An idle watchdog
+### 6.3 An idle watchdog   — landed in `46ad07ad`
 
-Add a second stop condition beside the wall clock, as in figure 6C:
+This one shipped. Beside the wall clock a run now carries an optional no-progress
+watchdog, as in figure 6C:
 
     stalled ⟺ the log file and the working tree have both been silent for longer
-               than the idle budget (480s suggested)
+               than the idle budget
 
-It applies to `running` only, can be switched off per lane, and should ship
-disabled to observe its false-positive rate first. Why not the log alone: a cold
+It judges a card stalled only when the log AND the tree are both silent: the log is
+`os.stat`-ed every tick (the cheap path), and the working tree is fingerprinted only
+on a tick where the log was silent, reusing the gate's own probes
+(`verify.changed_files_snapshot` and `verify._fingerprint`'s `size:mtime_ns`); a
+non-git work directory degrades to the log alone. The budget is `idle_timeout`, a
+lane field or `run --idle-timeout N`, resolved by `registry.resolve_idle_timeout`
+in a chain of its own (cli > lane > built-in) — deliberately without a `[defaults]`
+rung, so turning it on is a per-lane choice rather than a workspace-wide default —
+and the `started` event records it with `idle_timeout_source`. It ships **off**: the
+built-in default is `0`, and only an explicit lane field or flag turns it on, so the
+shipped behaviour is unchanged while operators watch it for false positives. Why not
+the log alone: a cold
 build or a large download can run for minutes without output, so the check has to
-include activity in the working tree, and only both being silent is a stall. The
-wall clock stays as the backstop. Against the sample in 5.3, this would have cut a
-1800s waste to roughly eight minutes.
+include activity in the working tree, and only both being silent is a stall. A stall
+and the wall clock converge on the same `timeout` terminal state (exit 71),
+distinguished only by the `timeout` event's `reason`. Against the sample in 5.3, this
+would have cut a 1800s waste to roughly eight minutes.
 
 ### 6.4 Letting a timeout be signed off
 
@@ -550,7 +577,8 @@ already uses:
                        [defaults] value
     acceptance budget  unit: task and acceptance timing out separately, asserting
                        each terminal state and verify_exit semantics
-    idle watchdog      false negative: a probe that simulates a silent build must not
+    idle watchdog      already verified with the checks below (used for 46ad07ad):
+                       false negative: a probe that simulates a silent build must not
                        be judged stalled
                        true positive: log and tree silent together must be judged
                        stalled and recorded

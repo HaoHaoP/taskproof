@@ -223,10 +223,10 @@ TRANS = {
     "修复后（e346213）": "after e346213",
     "三段链 + 内置兜底，值随来源落账": "the three-step chain plus the fallback, source recorded with the value",
     "started 事件 / taskgroups 投影都带": "both the started event and the taskgroups record now carry it",
-    "C 止损判据": "C  When to stop",
+    "C 止损判据（46ad07ad 已落地）": "C  When to stop (46ad07ad, landed)",
     "现行：只看墙钟": "today: wall clock only",
     "1800s：墙钟到点才杀进程树": "1800s: the process tree dies on the clock",
-    "建议：无进展看门狗 + 墙钟兜底": "proposed: idle watchdog + the wall clock",
+    "已落地：无进展看门狗 + 墙钟兜底": "landed: idle watchdog + the wall clock",
     "480s：日志与工作树都静默": "480s: log and tree both silent",
     "1800s：兜底墙钟": "1800s: backstop",
     "为什么不能只看日志": "Why the log alone will not do",
@@ -712,7 +712,7 @@ def fig6(path):
     f.arrow(522, 464, 558, 464, GREEN)
 
     # panel C: when to stop (still a proposal)
-    f.text(40, 550, "C 止损判据", 13, NAVY, "start", "600")
+    f.text(40, 550, "C 止损判据（46ad07ad 已落地）", 13, NAVY, "start", "600")
 
     def axis(y, label, marks):
         x0, x1 = 200, 660
@@ -737,7 +737,7 @@ def fig6(path):
         (0.5, "900s", GREY, "5 4", "start", "below"),
         (1.0, "1800s：墙钟到点才杀进程树", RED, None, "end", "above"),
     ])
-    axis(710, "建议：无进展看门狗 + 墙钟兜底", [
+    axis(710, "已落地：无进展看门狗 + 墙钟兜底", [
         (0.27, "480s：日志与工作树都静默", GREEN, None, "start", "above"),
         (1.0, "1800s：兜底墙钟", GREY, "5 4", "end", "above"),
     ])
