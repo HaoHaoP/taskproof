@@ -1,5 +1,7 @@
 # taskproof
 
+**English** · [简体中文](README.zh-CN.md)
+
 <p align="center"><img src="docs/assets/icon.png" width="128" alt="taskproof"></p>
 
 A conveyor belt for AI coding agents.
@@ -429,7 +431,3 @@ you *why* a run ended without parsing stdout.
 ## License
 
 Apache-2.0. See [`LICENSE`](LICENSE).
-
----
-
-<sub>Also available in [中文](README.zh-CN.md).</sub>

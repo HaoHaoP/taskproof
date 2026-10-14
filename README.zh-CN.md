@@ -1,5 +1,7 @@
 # taskproof
 
+[English](README.md) · **简体中文**
+
 <p align="center"><img src="docs/assets/icon.png" width="128" alt="taskproof"></p>
 
 给 AI 编码 agent 用的传送带。
@@ -355,7 +357,3 @@ CI 跑三个检查：资产扫描（`tools/scan_assets.py`）、枚举契约一�
 ## 许可证
 
 Apache-2.0，见 [`LICENSE`](LICENSE)。
-
----
-
-<sub>English: [README.md](README.md)</sub>
