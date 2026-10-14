@@ -8,24 +8,39 @@ The failure this file exists to prevent: a card that describes a **symptom**, ge
 
 A card is a **visual card** when its result is something a human reads with their eyes. Structural or logic work (a parser, a query, an IO layer) is not, even when it lives in a `.vue` file. When a card is both — a grid component that must also look right — split it: the logic card first, the visual card after.
 
-## 2. Two mandatory headers
+This applies to **every project**, not just the one that happened to have a store first. What a card needs is a reference, and a prototype line range or an existing implementation line range is a reference. A project with no store still fires visual cards.
+
+## 2. One reference header
+
+A visual card carries exactly one **reference header**, in one of two forms:
 
 ```
-region: header-buttons
-口径: /absolute/path/to/docs/prototype/prototype-口径.md#按钮规格
+region:   header-buttons                  # the convergence-budget unit
+口径:     /abs/path/store.md#section-heading           # the reference is a store — mutable
+参照物:   /abs/path/prototype.html:1028-1066   # the reference is an immutable source
 ```
 
-- `region:` — a stable slug for **one file plus one visual area**, not per element and not per project (`header-buttons`, `grid-toolbar`). It is the unit the convergence budget counts and the unit the staleness check keys on, so "this region's previous card" has to have exactly one answer.
-- `口径:` — a pointer into the store: absolute path, plus an anchor or a line range. Anchor by heading where the store is markdown; line range where it is code.
+- **`口径:`** — the reference lives in a **store**: a file you are expected to write back to, because it records decisions. Requires `region:`.
+- **`参照物:`** — the reference is a prototype, an existing implementation, or a signed-off screenshot (`参照物: screenshot:/abs/path.png`). Nothing is expected to write back to it, so `region:` is optional.
 
-## 3. The four checks before firing
+Both take an absolute path plus an anchor or a line range (except `screenshot:`, which is a path). Anchor by heading where the file is markdown; line range where it is code. A path may contain spaces — the value runs to the end of the line, so put any explanation on the next line.
 
-Any one failing means **do not fire** — fix the store and the card first.
+`region:` is a stable slug for **one file plus one visual area** (`header-buttons`, `grid-toolbar`) — not per element, not per project. It is the unit the convergence budget counts and the unit the staleness check keys on, so "this region's previous card" has to have exactly one answer.
 
-1. The file named by `口径:` exists.
-2. The anchor or line range resolves, and the text there is what the card claims it is.
-3. The store has been **written since this region's previous card**.
-4. The store's **directory is clean in git** — no uncommitted change sitting in it.
+**A store is not an entry requirement.** A project can fire visual cards on prototype line ranges forever without ever having one. Create a store when the region needs decisions written down — in practice when the same region comes back a second time, or when the operator changes their mind about something a prototype cannot express. When it exists it lives beside the project's other working material, a sibling of the delivery repository, never inside it.
+
+## 3. The checks before firing
+
+Any one failing means **do not fire**. Which checks apply depends on which reference header the card carries:
+
+| # | check | `口径:` (store) | `参照物:` (immutable) |
+|---|---|---|---|
+| 1 | the file exists | yes | yes |
+| 2 | the anchor or line range resolves | yes | yes |
+| 3 | it has been **written since this region's previous card** | yes | **n/a** |
+| 4 | its directory is **clean in git** | yes | **n/a** |
+
+Checks 3 and 4 are reported **n/a**, not passed, for an immutable reference: a prototype does not change and nobody owes it a write-back, so a "pass" there would be a green light that means nothing. An inapplicable check that claims to pass is the same defect as a check that cannot fail.
 
 Check 3 is the one that looks pedantic and is not. The real failure is not a missing store — it is a store that stopped being maintained. Once it goes stale, the next card stops citing it and starts describing symptoms again, and every card after that is built on the previous card's render instead of on a spec. A store nobody writes to is worse than no store.
 
@@ -39,7 +54,7 @@ Run them mechanically rather than by eye:
 python3 /absolute/path/to/taskproof/tools/check-card.py /tmp/cards/<card>.md
 ```
 
-Exit `0` = fire, `1` = do not fire, `2` = the card file itself is unreadable. The script reads `region:` and `口径:` out of the card body, resolves the anchor against the store, and takes "this region's previous card" from the taskproof ledger (the card's own `region:` header is already inside `brief`, so nothing needs to change in the database). A card carrying no `region:` / `口径:` headers is skipped as a non-visual card. It cannot check the second half of check 2 — "the text there is what the card claims it is" — which stays yours.
+Exit `0` = fire, `1` = do not fire, `2` = the card file itself is unreadable. The script reads the reference header out of the card body (`口径:` → store, `参照物:` → immutable, `screenshot:` → path only), resolves the anchor against that file, and takes "this region's previous card" from the taskproof ledger (the card's own `region:` header is already inside `brief`, so nothing needs to change in the database). A card carrying no `region:` / `口径:` / `参照物:` header is skipped as a non-visual card. It cannot check the second half of check 2 — "the text there is what the card claims it is" — which stays yours.
 
 ## 4. What counts as a reference
 
@@ -85,6 +100,8 @@ A **look-and-feel question** is one the operator cannot answer in words — they
 On any signal, the next action is **not a card**. Build a comparison page: one self-contained HTML file for the whole region (not one per question), the project's real colours and sizes at 1:1, toggles for every row of the status truth table, and two to four candidates side by side where they differ. The operator circles what is right; the page, a screenshot, and a measured-values table go into the store; cards then cite it.
 
 Build it by hand, in the main agent. One page per region is cheaper than one card round trip, and it converts a text channel into a shared one: the operator's eyes and the worker's code read the same file instead of a description of it.
+
+The page then **becomes the region's reference**: cite it through the store if the region has one (`口径: <store>#<section>`), otherwise cite the page itself (`参照物: <path to the page>`).
 
 ## 8. The convergence budget
 

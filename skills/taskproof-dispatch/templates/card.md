@@ -5,11 +5,14 @@
      line sends the worker guessing, a missing constraint invites it to wander.
      Keep the card under one root cause, one file range, one acceptance command.
      A card whose result a human will look at is a VISUAL CARD — see
-     ../references/visual-cards.md. It must fill region/口径, the status truth table
-     and the red-to-green probe, and it may not fire without a valid reference. -->
+     ../references/visual-cards.md. It fills region, ONE reference header, the status
+     truth table and the red-to-green probe, and it may not fire without a valid
+     reference. A card that is not visual fills no headers at all. -->
 
-region: <region slug, e.g. header-buttons; `none` for a non-visual card>
-口径: <absolute path#anchor; `none` for a non-visual card>
+region:   <region slug, e.g. header-buttons; optional with 参照物:, `none` = not counted>
+口径:     <reference is a STORE (mutable — you owe it a write-back): /abs/path.md#anchor>
+参照物:   <reference is IMMUTABLE: /abs/prototype.html:1028-1066, or screenshot:/abs/shot.png>
+<!-- 口径: and 参照物: are alternatives — fill exactly ONE of the two, delete the other. -->
 
 ## Root cause
 - `path/to/file.py:88` — the one defect this card closes, stated as a fact.

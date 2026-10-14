@@ -26,7 +26,7 @@ Commands are always a single copy-pasteable line. Example paths are always writt
 
 Rules 7–11 are the dispatch-economy rules — the judgement tables behind them are in [`references/token-discipline.md`](references/token-discipline.md).
 
-12. **A card whose result a human will look at carries a reference, not a description.** `region:` and `口径:` are mandatory headers on it, and four checks run before firing — the store file exists, the anchor resolves, the store has been written since this region's previous card, and the store's directory is clean in git. Any one failing means **do not fire** (section 2.1).
+12. **A card whose result a human will look at carries a reference, not a description.** It declares exactly one reference header — `口径:` (the reference is a **store** you owe a write-back to) or `参照物:` (an immutable source: prototype, existing implementation, circled screenshot) — and the checks that apply to that kind run before it fires. Any one failing means **do not fire** (section 2.1).
 13. **The store is the only source of visual content.** A card names paths and line ranges; colours, sizes, visibility rules and copy live in the store. When the operator changes their mind, the store is written first — a card that contradicts the store is a card defect.
 14. **Same region, three consecutive cards rejected as "the previous card's output" → stop firing and build a comparison page** (section 2.1).
 
@@ -87,9 +87,9 @@ The card body lives in a file and is passed with `$(cat ...)` at fire time — t
 
 A **visual card** — layout, colour, size, position, visibility, copy — carries three things a logic card does not, because the ordinary acceptance command cannot see a look and will happily rubber-stamp sixteen rejections:
 
-**Two headers.** `region:` (one file plus one visual area, e.g. `header-buttons`) and `口径:` (absolute path into the store, plus an anchor or line range).
+**One reference header.** `口径: <store path>#<anchor>` when the reference is a **store** — a file you owe a write-back to — and then `region:` is required too: the convergence-budget slug for one file plus one visual area. Or `参照物: <prototype or existing implementation>:<lines>` when the reference is an **immutable source**. A store is not an entry requirement — a project that has none still fires visual cards on prototype line ranges.
 
-**Four checks before firing, any one failing = do not fire.** The store file exists; the anchor resolves to what the card claims; the store has been written **since this region's previous card**; and the store's **directory is clean in git**. The third one is the point — a store that stopped being maintained is worse than no store, because cards stop citing it and start describing symptoms again. The fourth catches the other writer: once a second session is working the same feature the store has more than one writer, and mtime cannot tell "I forgot to write back" from "someone else just wrote it" — only a committed state can.
+**The checks that apply, any one failing = do not fire.** For a store reference: the file exists, the anchor resolves to what the card claims, it has been written **since this region's previous card**, and its directory is **clean in git**. For an immutable reference only the first two apply — the other two are reported **n/a, not passed**, because a prototype does not change and nobody owes it a write-back. The staleness check is the point: a store that stopped being maintained is worse than no store, because cards stop citing it and start describing symptoms again. The git check catches the other writer: once a second session is working the same feature the store has more than one writer, and mtime cannot tell "I forgot to write back" from "someone else just wrote it" — only a committed state can.
 
 **A reference, one per card.** Exactly four kinds count: a prototype line range, an existing implementation's line range, a signed-off comparison page, or a screenshot the operator circled plus its measured values. The operator's words are not a reference. Where a card would cite several sources that disagree, reconcile them **before** writing the card, write the resolution into the store, and let the card cite one.
 
@@ -97,7 +97,7 @@ Plus a **status truth table** (rows = every state that can exist, columns = elem
 
 When no reference can be named, or the operator answers "like X" / "hard to say" / "your call", or this region already had a card rejected — the next action is **not a card**: build a hand-made comparison page for the whole region, get it circled, and put it in the store.
 
-Full detail: [`references/visual-cards.md`](references/visual-cards.md). The four checks run mechanically: `python3 tools/check-card.py <card.md>` — exit `0` fire, `1` do not fire, `2` unreadable card.
+Full detail: [`references/visual-cards.md`](references/visual-cards.md). The checks run mechanically: `python3 tools/check-card.py <card.md>` — exit `0` fire, `1` do not fire, `2` unreadable card.
 
 ````bash
 mkdir -p /tmp/cards

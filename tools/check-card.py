@@ -1,22 +1,30 @@
 #!/usr/bin/env python3
-"""发车前给「观感卡」跑四查（铁律 12 的机判部分）。
+"""发车前给「观感卡」跑适用项检查（铁律 12 的机判部分）。
 
-观感卡 = 卡文头部有 `region:` 与 `口径:` 两个头的卡。四查：
+观感卡 = 卡文头部带**参照物头**的卡。两个头，取其一：
 
-  1. `口径:` 指的文件存在；
-  2. 锚点（`#标题`）或行号范围（`:a-b`）在那个文件里解析得出来；
-  3. store 在**本区域上一张卡之后被写过**（防停更——停更的 store 比没有 store 更坏，
-     因为卡会不再引它、改回去描述现象）；
-  4. store 所在目录**在 git 里没有未提交改动**（防并发写入：同一功能可能有第二个会话在写
-     同一份 store，mtime 分不清「我忘了回写」与「别人刚写过」。store 不在 git 里时这条跳过并说明）。
+    region:  <区域 slug>          # 收敛预算的计数单位；用 `口径:` 时必填
+    口径:    <store 文件>#<锚点>   # 参照物是 store（会变、要回写）
+    参照物:  <原型/既有实现>:a-b    # 参照物是不可变来源（不会变、没有回写义务）
+
+四条检查，**按参照物种类决定跑哪几条**：
+
+  1. 存在：参照物那个文件在不在；                       ← 两类都跑
+  2. 锚点：`#标题` 或行号范围 `:a-b` 在那个文件里解析得出； ← 两类都跑
+  3. 停更：store 在**本区域上一张卡之后被写过**；          ← 只对 `口径:` 有意义
+     （原型不会变，也没人欠它一次回写，所以对 `参照物:` 标 n/a，
+     不标 pass——不适用 ≠ 通过。）
+  4. 并发：参照物所在目录**在 git 里没有未提交改动**。      ← 只对 `口径:` 有意义
 
 第 2 条只判「解析得出来」，**判不了「那里的文字就是卡里说的那些」** —— 那一条仍是主智能体读的活。
 第 3 条的「本区域上一张卡」从 taskproof 账本里取（卡文的 `region:` 头就在 `brief` 里，不必改库）。
 
+`region: none` 表示这条卡不纳管收敛预算：查 3 标 n/a，其余照跑。
+
 用法:
     check-card.py <卡文件> [--tasks-json FILE] [--quiet] [--json]
 
-退出码: 0 四查全过（或非观感卡）/ 1 有查不过 / 2 用法错误或卡文件读不到。
+退出码: 0 适用项全过（或非观感卡）/ 1 有查不过 / 2 用法错误或卡文件读不到。
 """
 from __future__ import annotations
 
@@ -27,36 +35,58 @@ import os
 import re
 import subprocess
 import sys
+from typing import NoReturn
 
 REGION_RE = re.compile(r"^region:[ \t]*(\S+)[ \t]*$", re.M)
-HEADER_RE = re.compile(r"^(?:口径|spec):[ \t]*(.+?)[ \t]*$", re.M)
+STORE_RE = re.compile(r"^(?:口径|spec):[ \t]*(.+?)[ \t]*$", re.M)
+REF_RE = re.compile(r"^(?:参照物|reference):[ \t]*(.+?)[ \t]*$", re.M)
 HEADING_RE = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t]*$", re.M)
 TASK_REGION_RE = r"^region:[ \t]*%s[ \t]*$"
 
 
-def _fail(msg: str, code: int = 2) -> "None":
+def _fail(msg: str, code: int = 2) -> NoReturn:
     print(f"check-card: {msg}", file=sys.stderr)
     sys.exit(code)
 
 
+def _clean_value(value: str) -> str:
+    """把头的值收拾干净：去首尾空白、去行尾 HTML 注释、去包裹的反引号/引号。
+
+    **不按空格切** —— 参照物路径里可能有空格（本项目原型就在 `3.0 原型页面/` 下，
+    实测按第一个空格切会把 `/…/c需求分析/3.0` 当成路径，报「文件不存在」）。
+    要写说明就另起一行。
+    """
+    v = re.sub(r"\s*<!--.*?-->\s*$", "", value.strip(), flags=re.S).strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "`\"'":
+        v = v[1:-1]
+    return v
+
+
 def parse_card(path: str) -> tuple:
+    """→ (region, 参照物指针, 参照物是不是 store, 卡文原文)"""
     try:
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
     except OSError as exc:
         _fail(f"读不到卡文件 {path}: {exc}")
+    store_m = STORE_RE.search(text)
+    ref_m = REF_RE.search(text)
     region_m = REGION_RE.search(text)
-    header_m = HEADER_RE.search(text)
     region = region_m.group(1) if region_m else None
-    header = header_m.group(1) if header_m else None
-    # 支持 `口径: <path> # 说明` —— 只取第一个空格前的那个 token
-    if header and " " in header:
-        header = header.split(" ", 1)[0]
-    return region, header, text
+    if store_m:
+        value = _clean_value(store_m.group(1))
+        return region, (None if value.lower() in ("none", "-", "") else value), True, text
+    if ref_m:
+        value = _clean_value(ref_m.group(1))
+        return region, (None if value.lower() in ("none", "-", "") else value), False, text
+    return region, None, False, text
 
 
 def split_pointer(pointer: str) -> tuple:
-    """`<path>#<anchor>` 或 `<path>:<a>` / `<path>:<a>-<b>` → (path, kind, payload)."""
+    """`<path>#<anchor>` / `<path>:<a>` / `<path>:<a>-<b>` / `screenshot:<path>`
+    → (path, kind, payload)"""
+    if pointer.startswith("screenshot:"):
+        return pointer[len("screenshot:"):], "screenshot", None
     if "#" in pointer:
         path, anchor = pointer.split("#", 1)
         return path, "anchor", anchor
@@ -75,11 +105,15 @@ def check_file(store_path: str) -> tuple:
 
 
 def check_anchor(store_path: str, kind: str, payload) -> tuple:
+    """→ (True/False/None, 说明)；None 表示这一类不适用。"""
+    if kind == "screenshot":
+        return None, (f"截图类参照物只查存在性（{os.path.basename(store_path)}）；"
+                      "观感请人工目视，并照卡文给的取值表核对")
     with open(store_path, encoding="utf-8") as fh:
         lines = fh.readlines()
     if kind == "anchor":
         if not payload:
-            return False, "`口径:` 的锚点是空的（`#` 后面没写标题）"
+            return False, "参照物的锚点是空的（`#` 后面没写标题）"
         heads = [(i + 1, m.group(1)) for i, ln in enumerate(lines)
                  for m in [HEADING_RE.match(ln)] if m]
         for num, head in heads:
@@ -96,7 +130,7 @@ def check_anchor(store_path: str, kind: str, payload) -> tuple:
             return False, f"行号范围 {a}-{b} 超出文件边界（共 {len(lines)} 行）"
         snippet = "".join(lines[a - 1:b]).strip().replace("\n", " ⏎ ")[:120]
         return True, f"行号 {a}-{b} 落在文件内（共 {len(lines)} 行）：{snippet}"
-    return False, "`口径:` 没带锚点也没带行号范围（写成 `<path>#<标题>` 或 `<path>:<a>-<b>`）"
+    return False, "参照物没带锚点也没带行号范围（写成 `<path>#<标题>` 或 `<path>:<a>-<b>`）"
 
 
 def load_tasks(tasks_json: str) -> list:
@@ -129,6 +163,7 @@ def _when(task: dict) -> str:
 
 
 def check_freshness(store_path: str, region: str, tasks: list) -> tuple:
+    """→ (True/False, 说明)。store 在本区域上一张卡之后必须被写过。"""
     pat = re.compile(TASK_REGION_RE % re.escape(region), re.M)
     hits = [t for t in tasks if pat.search(t.get("brief") or "")]
     if not hits:
@@ -151,9 +186,9 @@ def check_freshness(store_path: str, region: str, tasks: list) -> tuple:
 
 
 def check_store_clean(store_path: str) -> tuple:
-    """store 所在目录在 git 里必须没有未提交改动 —— 挡并发写入方。
+    """参照物所在目录在 git 里必须没有未提交改动 —— 挡并发写入方。
 
-    范围取 store 文件所在**目录**（不是单个文件）：同一份 store 里别的文件也可能被引，
+    范围取文件所在**目录**（不是单个文件）：同一份 store 里别的文件也可能被引，
     半途被改的状态比单文件更值得停一下。不在 git 仓里就跳过并说明。
     """
     directory = os.path.realpath(os.path.dirname(os.path.abspath(store_path)))
@@ -163,13 +198,13 @@ def check_store_clean(store_path: str) -> tuple:
     except (OSError, subprocess.SubprocessError) as exc:
         return True, f"跑不动 git 判断并发写入（{exc}），跳过"
     if root.returncode != 0:
-        return True, "store 不在 git 仓里 → 判不了并发写入（建议给 store 建仓）"
+        return True, "参照物不在 git 仓里 → 判不了并发写入（建议给 store 建仓）"
     # realpath 两边都要做：/tmp 在 macOS 是 /private/tmp 的软链，不归一的话 relpath 会算出
     # `../../../tmp/...` 这种越界相对路径，git status 收到它什么都不报，看着像「干净」（实测）。
     repo = os.path.realpath(root.stdout.strip())
     rel = os.path.relpath(directory, repo)
     if rel.startswith(".."):
-        return True, f"store 目录与仓根算不出包含关系（{directory} vs {repo}），跳过"
+        return True, f"参照物目录与仓根算不出包含关系（{directory} vs {repo}），跳过"
     try:
         st = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--", rel],
                             capture_output=True, text=True, timeout=30)
@@ -179,67 +214,85 @@ def check_store_clean(store_path: str) -> tuple:
     if dirty:
         shown = "; ".join(line.strip()[:80] for line in dirty[:5])
         more = "" if len(dirty) <= 5 else f"（共 {len(dirty)} 条）"
-        return False, (f"store 目录有未提交改动 {shown}{more} → 先弄清那份改动是谁的、"
+        return False, (f"参照物目录有未提交改动 {shown}{more} → 先弄清那份改动是谁的、"
                        "要不要留，再写卡")
-    return True, f"store 目录在 git 里干净（{repo}/{rel}）"
+    return True, f"参照物目录在 git 里干净（{repo}/{rel}）"
+
+
+def _judge(ok_flag) -> str:
+    """True → PASS、False → FAIL、None → N/A（不适用，不等于通过）。"""
+    return "n/a" if ok_flag is None else ("pass" if ok_flag else "fail")
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="观感卡发车前四查（铁律 12）")
+    ap = argparse.ArgumentParser(description="观感卡发车前检查（铁律 12）")
     ap.add_argument("card")
     ap.add_argument("--tasks-json", help="离线用：自定义的 taskproof tasks JSON")
     ap.add_argument("--quiet", action="store_true", help="只打印结论行")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     args = ap.parse_args()
 
-    region, header, _ = parse_card(args.card)
+    region, pointer, is_store, _ = parse_card(args.card)
     results, ok = [], True
+    skipped = (not region and not pointer)
 
-    skipped = (not region and not header)
-    if skipped:
-        results.append(("skip", "卡文没有 `region:` / `口径:` 头 → 非观感卡，四查跳过"))
-    else:
-        if not region:
+    def add(flag, label, detail):
+        nonlocal ok
+        if flag is False:
             ok = False
-            results.append(("fail", "有 `口径:` 但缺 `region:` 头（收敛预算要靠它计数）"))
-        elif region.lower() == "none":
-            results.append(("skip", "`region: none` → 非观感卡，四查跳过"))
-            skipped = True
-        if not skipped:
-            if not header or header.lower() == "none":
-                ok = False
-                results.append(("fail", "观感卡必须有 `口径:` 指针（`<绝对路径>#<标题>` 或 `:a-b`）"))
-            else:
-                store_path, kind, payload = split_pointer(header)
-                if not os.path.isabs(store_path):
-                    store_path = os.path.normpath(
-                        os.path.join(os.path.dirname(os.path.abspath(args.card)), store_path))
-                fine, detail = check_file(store_path)
-                ok = ok and fine
-                results.append(("pass" if fine else "fail", "查1 存在：" + detail))
-                if fine:
-                    fine2, detail2 = check_anchor(store_path, kind, payload)
-                    ok = ok and fine2
-                    results.append(("pass" if fine2 else "fail", "查2 锚点：" + detail2))
-                    fine3, detail3 = check_freshness(store_path, region, load_tasks(args.tasks_json))
-                    ok = ok and fine3
-                    results.append(("pass" if fine3 else "fail", "查3 停更：" + detail3))
-                    fine4, detail4 = check_store_clean(store_path)
-                    ok = ok and fine4
-                    results.append(("pass" if fine4 else "fail", "查4 并发写入：" + detail4))
+        results.append((_judge(flag), label + detail))
 
+    if skipped:
+        add(None, "", "卡文没有 `region:` / `口径:` / `参照物:` 头 → 非观感卡，检查跳过")
+    elif not pointer:
+        add(False, "", "观感卡至少要有一个参照物头：`口径: <store>#<锚点>`（会变的 store）"
+                       "或 `参照物: <原型/既有实现>:a-b`（不可变来源）。"
+                       "**不是观感卡就不要写这些头** —— 写了 `none` 也算观感卡而无参照物")
+    elif region is None and is_store:
+        add(False, "", "用了 `口径:` 就必须有 `region:` 头（收敛预算按区域计数）")
+    else:
+        unnamed_region = region is None or region.lower() == "none"
+        if unnamed_region and not is_store:
+            add(None, "", f"`region` 缺席或为 none → 不纳管收敛预算（查 3 不适用）")
+        path, kind, payload = split_pointer(pointer)
+        if not os.path.isabs(path):
+            path = os.path.normpath(
+                os.path.join(os.path.dirname(os.path.abspath(args.card)), path))
+        exist, detail = check_file(path)
+        add(exist, "查1 存在：", detail)
+        if exist:
+            anchor, detail2 = check_anchor(path, kind, payload)
+            add(anchor, "查2 锚点：", detail2)
+        if not is_store:
+            add(None, "查3 停更：", "参照物是不可变来源（原型/既有实现），没有回写义务 → 不适用")
+            add(None, "查4 并发：", "同上：这一条只对会被回写的 store 有意义 → 不适用")
+        else:
+            if unnamed_region:
+                add(None, "查3 停更：", "`region` 为 none，不纳管收敛预算 → 不适用")
+            elif exist:
+                fresh, detail3 = check_freshness(path, region or "", load_tasks(args.tasks_json))
+                add(fresh, "查3 停更：", detail3)
+            if exist:
+                clean, detail4 = check_store_clean(path)
+                add(clean, "查4 并发：", detail4)
+
+    applied = [r for r in results if r[0] in ("pass", "fail")]
     if args.json:
-        print(json.dumps({"card": args.card, "region": region, "口径": header,
-                          "ok": ok and not skipped, "skipped": skipped,
+        print(json.dumps({"card": args.card, "region": region, "参照物": pointer,
+                          "参照物种类": "store" if is_store else "不可变来源",
+                          "ok": bool(ok) and not skipped, "skipped": skipped,
                           "checks": [{"result": r, "detail": d} for r, d in results]},
                          ensure_ascii=False, indent=2))
     else:
         if not args.quiet:
             print(f"check-card: {args.card}")
-            print(f"  region={region!r}  口径={header!r}")
+            print(f"  region={region!r}  "
+                  f"{'口径' if is_store else '参照物'}={pointer!r}")
         for r, d in results:
             print(f"  [{r.upper()}] {d}")
-        print("  结论：" + ("非观感卡，四查跳过" if skipped else ("四查全过 → 可以发车" if ok else "有查不过 → 不许发车")))
+        tail = ("非观感卡，检查跳过" if skipped
+                else (f"适用项 {len(applied)} 条全过 → 可以发车" if ok else "有查不过 → 不许发车"))
+        print("  结论：" + tail)
     return 0 if (ok or skipped) else 1
 
 
