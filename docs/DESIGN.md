@@ -3,8 +3,9 @@
 **English** · [简体中文](DESIGN.zh-CN.md)
 
 > Output of the initial design session: 11 decisions plus hard constraints.
-> Status: **design settled, not implemented.**
-> How each mechanism works today, with diagrams: [`ARCHITECTURE.md`](ARCHITECTURE.md).
+> Status: **stage 1 is implemented and in use, and the stage-2 desktop console is
+> here.** The mechanisms as they are actually built, with diagrams:
+> [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## One line
 

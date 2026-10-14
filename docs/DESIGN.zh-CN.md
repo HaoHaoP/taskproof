@@ -3,8 +3,8 @@
 [English](DESIGN.md) · **简体中文**
 
 > 初次设计会话的产出：11 项决策 + 硬约束。
-> 状态：**设计已定，未实现。**
-> 各机制的现行实现与配图见 [`ARCHITECTURE.zh-CN.md`](ARCHITECTURE.zh-CN.md)。
+> 状态：**stage 1 已实现并在用，stage 2 的桌面看板也已落地。** 各机制的真实实现与配图见
+> [`ARCHITECTURE.zh-CN.md`](ARCHITECTURE.zh-CN.md)。
 
 ## 一句话
 
