@@ -1,70 +1,72 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="730" viewBox="0 0 1080 730">
-  <rect width="1080" height="730" fill="white"/>
-  <text x="24" y="34" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="16" fill="#1f2328" text-anchor="start" font-weight="600">Figure 6  Timeouts: where the value comes from, and when to stop</text>
-  <text x="40" y="78" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="start" font-weight="600">A  Where the value comes from today</text>
-  <rect x="40" y="92" width="300" height="54" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
-  <text x="190.0" y="114.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">[defaults] timeout = 1800</text>
-  <text x="190.0" y="130.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">the registry default</text>
-  <rect x="40" y="162" width="300" height="54" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
-  <text x="190.0" y="184.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">run --timeout N</text>
-  <text x="190.0" y="200.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">one-off override, recorded in started</text>
-  <rect x="40" y="232" width="300" height="66" rx="6" fill="#ffebe9" stroke="#cf222e" stroke-width="1.2" stroke-dasharray="6 4"/>
-  <text x="190.0" y="253.22" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#cf222e" text-anchor="middle" font-weight="600">[[taskgroup]] timeout = 2700 / 5400</text>
-  <text x="190.0" y="268.94" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#cf222e" text-anchor="middle" font-weight="400">22 declarations in one workspace</text>
-  <text x="190.0" y="283.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#cf222e" text-anchor="middle" font-weight="400">no such field on Taskgroup: dropped silently</text>
-  <rect x="470" y="140" width="190" height="90" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
-  <text x="565.0" y="172.22" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="600">dispatch.py:201</text>
-  <text x="565.0" y="189.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">the only place it is read</text>
-  <text x="565.0" y="204.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">reg.timeout</text>
-  <rect x="750" y="140" width="290" height="90" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
-  <text x="895.0" y="172.22" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="600">adapter.timeout → proc.wait(timeout)</text>
-  <text x="895.0" y="189.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">on expiry killpg: SIGTERM → 5s → SIGKILL</text>
-  <text x="895.0" y="204.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">only this run's own process group</text>
-  <line x1="342" y1="119" x2="468" y2="165" stroke="#0969da" stroke-width="1.3"/>
-  <polygon points="468,165 458.10543623122777,165.85884097812126 460.9861320120096,157.96823949163203" fill="#0969da"/>
-  <line x1="342" y1="189" x2="468" y2="185" stroke="#0969da" stroke-width="1.3"/>
-  <polygon points="468,185 459.1377979190478,189.48345561775352 458.87126552563564,181.08768522527242" fill="#0969da"/>
-  <line x1="342" y1="265" x2="468" y2="215" stroke="#cf222e" stroke-width="1.3" stroke-dasharray="6 4"/>
-  <polygon points="468,215 461.183734784756,222.22347066966117 458.08543241419056,214.41574869583624" fill="#cf222e"/>
-  <rect x="389.5" y="220.5" width="31.0" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
-  <text x="405.0" y="232.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#cf222e" text-anchor="middle" font-weight="400">broken link</text>
-  <line x1="662" y1="185" x2="748" y2="185" stroke="#0969da" stroke-width="1.3"/>
-  <polygon points="748,185 739.0,189.2 739.0,180.8" fill="#0969da"/>
-  <rect x="647.2375" y="165.5" width="115.52500000000003" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
-  <text x="705.0" y="177.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">effective_timeout</text>
-  <text x="40" y="350" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="start" font-weight="600">B  Where the value should come from</text>
-  <rect x="40" y="364" width="300" height="54" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
-  <text x="190.0" y="386.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">--timeout N</text>
-  <text x="190.0" y="402.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">one-off, wins over everything</text>
-  <rect x="370" y="364" width="300" height="54" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
-  <text x="520.0" y="386.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">lane.timeout (a new field)</text>
-  <text x="520.0" y="402.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">a per-lane budget that makes the 22 real</text>
-  <rect x="700" y="364" width="340" height="54" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
-  <text x="870.0" y="386.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">[defaults] timeout = 1800</text>
-  <text x="870.0" y="402.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">the fallback, recorded with its source</text>
-  <line x1="342" y1="391" x2="368" y2="391" stroke="#1a7f37" stroke-width="1.3"/>
-  <polygon points="368,391 359.0,395.2 359.0,386.8" fill="#1a7f37"/>
-  <line x1="672" y1="391" x2="698" y2="391" stroke="#1a7f37" stroke-width="1.3"/>
-  <polygon points="698,391 689.0,395.2 689.0,386.8" fill="#1a7f37"/>
-  <text x="40" y="444" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#6e7781" text-anchor="start" font-weight="400">The event stream gains timeout_source, shaped like cap_source: a value is always shown with where it came from</text>
-  <text x="40" y="492" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="start" font-weight="600">C  When to stop</text>
-  <line x1="200" y1="590" x2="660" y2="590" stroke="#8c959f" stroke-width="1.2"/>
-  <text x="200" y="624" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="start" font-weight="600">today: wall clock only</text>
-  <text x="200" y="610" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="start" font-weight="400">t=0</text>
-  <line x1="430.0" y1="568" x2="430.0" y2="612" stroke="#6e7781" stroke-width="1.4" stroke-dasharray="5 4"/>
-  <text x="436.0" y="634" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="start" font-weight="600">900s</text>
-  <line x1="660.0" y1="568" x2="660.0" y2="612" stroke="#cf222e" stroke-width="1.4"/>
-  <text x="654.0" y="560" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#cf222e" text-anchor="end" font-weight="600">1800s: the process tree dies on the clock</text>
-  <line x1="200" y1="680" x2="660" y2="680" stroke="#8c959f" stroke-width="1.2"/>
-  <text x="200" y="714" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="start" font-weight="600">proposed: idle watchdog + the wall clock</text>
-  <text x="200" y="700" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="start" font-weight="400">t=0</text>
-  <line x1="324.2" y1="658" x2="324.2" y2="702" stroke="#1a7f37" stroke-width="1.4"/>
-  <text x="330.2" y="650" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1a7f37" text-anchor="start" font-weight="600">480s: log and tree both silent</text>
-  <line x1="660.0" y1="658" x2="660.0" y2="702" stroke="#6e7781" stroke-width="1.4" stroke-dasharray="5 4"/>
-  <text x="654.0" y="650" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="end" font-weight="600">1800s: backstop</text>
-  <rect x="700" y="545" width="340" height="110" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
-  <text x="870.0" y="580.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">Why the log alone will not do</text>
-  <text x="870.0" y="597.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">a cold build or a large download can run</text>
-  <text x="870.0" y="611.94" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">for minutes without output, so the check has to</text>
-  <text x="870.0" y="626.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">include the tree: only both silent is a stall</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="800" viewBox="0 0 1080 800">
+  <rect width="1080" height="800" fill="white"/>
+  <text x="24" y="34" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="16" fill="#1f2328" text-anchor="start" font-weight="600">Figure 6  Timeouts: the three-step value chain, and when to stop</text>
+  <text x="40" y="78" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="start" font-weight="600">A  The three-step chain as landed (e346213)</text>
+  <rect x="40" y="92" width="330" height="48" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
+  <text x="205.0" y="111.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">run --timeout N</text>
+  <text x="205.0" y="127.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">one-off override · source cli</text>
+  <rect x="40" y="148" width="330" height="48" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
+  <text x="205.0" y="167.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">[[taskgroup]] timeout</text>
+  <text x="205.0" y="183.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">the lane's own budget · source lane</text>
+  <rect x="40" y="204" width="330" height="48" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
+  <text x="205.0" y="223.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">[defaults] timeout</text>
+  <text x="205.0" y="239.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">the registry default (1800s here) · source toml</text>
+  <rect x="40" y="260" width="330" height="48" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="205.0" y="279.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">built-in fallback 1800</text>
+  <text x="205.0" y="295.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">when nothing names one · source default</text>
+  <rect x="480" y="148" width="220" height="120" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="590.0" y="188.72" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="600">registry.resolve_timeout()</text>
+  <text x="590.0" y="205.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">the one place the value is read</text>
+  <text x="590.0" y="220.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">cli &gt; lane</text>
+  <text x="590.0" y="233.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">&gt; toml &gt; default</text>
+  <rect x="770" y="148" width="270" height="120" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="905.0" y="187.97" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="600">adapter.timeout</text>
+  <text x="905.0" y="201.47" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="600">→ proc.wait(timeout)</text>
+  <text x="905.0" y="220.19" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">on expiry killpg: SIGTERM → 5s → SIGKILL</text>
+  <text x="905.0" y="234.69" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">only this run's own process group</text>
+  <line x1="372" y1="116" x2="478" y2="175" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="478,175 468.0934472877141,174.29274236752028 472.17872564035923,166.9530897339545" fill="#0969da"/>
+  <line x1="372" y1="172" x2="478" y2="195" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="478,195 468.3140676665655,197.19606803904824 470.09526139093214,188.9870882658805" fill="#0969da"/>
+  <line x1="372" y1="228" x2="478" y2="220" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="478,220 469.3416051273974,224.86540833127995 468.70944070384354,216.48922971919242" fill="#0969da"/>
+  <line x1="372" y1="284" x2="478" y2="240" stroke="#0969da" stroke-width="1.3" stroke-dasharray="4 3"/>
+  <polygon points="478,240 471.2978612493942,247.32948403147373 468.07748880760545,239.5713140580736" fill="#0969da"/>
+  <line x1="702" y1="208" x2="768" y2="208" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="768,208 759.0,212.2 759.0,203.8" fill="#0969da"/>
+  <rect x="677.2375" y="188.5" width="115.52500000000003" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="735.0" y="200.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">effective_timeout</text>
+  <rect x="40" y="322" width="1000" height="40" rx="6" fill="#ffffff" stroke="#8c959f" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="540.0" y="345.22" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#6e7781" text-anchor="middle" font-weight="400">the started event gains timeout_source (shaped like cap_source); the taskgroups record gains timeout</text>
+  <text x="40" y="408" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="start" font-weight="600">B  What landed</text>
+  <rect x="40" y="422" width="480" height="84" rx="6" fill="#ffebe9" stroke="#cf222e" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="280.0" y="450.86" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#cf222e" text-anchor="middle" font-weight="600">before e346213</text>
+  <text x="280.0" y="469.08" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">only --timeout and [defaults] were read</text>
+  <text x="280.0" y="484.08" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">the lane had no such field, so its word did not count</text>
+  <rect x="560" y="422" width="480" height="84" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
+  <text x="800.0" y="450.86" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1a7f37" text-anchor="middle" font-weight="600">after e346213</text>
+  <text x="800.0" y="469.08" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">the three-step chain plus the fallback, source recorded with the value</text>
+  <text x="800.0" y="484.08" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">both the started event and the taskgroups record now carry it</text>
+  <line x1="522" y1="464" x2="558" y2="464" stroke="#1a7f37" stroke-width="1.3"/>
+  <polygon points="558,464 549.0,468.2 549.0,459.8" fill="#1a7f37"/>
+  <text x="40" y="550" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="start" font-weight="600">C  When to stop</text>
+  <line x1="200" y1="600" x2="660" y2="600" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="200" y="634" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="start" font-weight="600">today: wall clock only</text>
+  <text x="200" y="620" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="start" font-weight="400">t=0</text>
+  <line x1="430.0" y1="578" x2="430.0" y2="622" stroke="#6e7781" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="436.0" y="644" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="start" font-weight="600">900s</text>
+  <line x1="660.0" y1="578" x2="660.0" y2="622" stroke="#cf222e" stroke-width="1.4"/>
+  <text x="654.0" y="570" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#cf222e" text-anchor="end" font-weight="600">1800s: the process tree dies on the clock</text>
+  <line x1="200" y1="710" x2="660" y2="710" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="200" y="744" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="start" font-weight="600">proposed: idle watchdog + the wall clock</text>
+  <text x="200" y="730" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="start" font-weight="400">t=0</text>
+  <line x1="324.2" y1="688" x2="324.2" y2="732" stroke="#1a7f37" stroke-width="1.4"/>
+  <text x="330.2" y="680" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1a7f37" text-anchor="start" font-weight="600">480s: log and tree both silent</text>
+  <line x1="660.0" y1="688" x2="660.0" y2="732" stroke="#6e7781" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="654.0" y="680" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="end" font-weight="600">1800s: backstop</text>
+  <rect x="700" y="560" width="340" height="118" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="870.0" y="599.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">Why the log alone will not do</text>
+  <text x="870.0" y="616.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">a cold build or a large download can run</text>
+  <text x="870.0" y="630.94" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">for minutes without output, so the check has to</text>
+  <text x="870.0" y="645.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">include the tree: only both silent is a stall</text>
 </svg>

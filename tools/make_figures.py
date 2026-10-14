@@ -202,24 +202,27 @@ TRANS = {
     "判决与事实分离：越界记 blocked（人须复核），验收照跑；最终卡是 blocked 时，verify_exit 仍告诉人代码本身是否可用":
         "A breach records blocked (for review) and acceptance still runs; verify_exit then says whether the work itself was sound",
     # -- 图 6 ---------------------------------------------------------------
-    "图 6  超时机制：取值链现状、建议取值链与判据对比":
-        "Figure 6  Timeouts: where the value comes from, and when to stop",
-    "A 现状取值链": "A  Where the value comes from today",
-    "注册表默认值": "the registry default",
-    "单次覆盖，记入 started 事件": "one-off override, recorded in started",
-    "项目本机 22 处声明": "22 declarations in one workspace",
-    "Taskgroup 无此字段 → 静默丢弃": "no such field on Taskgroup: dropped silently",
-    "唯一取值点": "the only place it is read",
+    "图 6  超时机制：三段取值链与止损判据":
+        "Figure 6  Timeouts: the three-step value chain, and when to stop",
+    "A 三段取值链现状（e346213 已落地）":
+        "A  The three-step chain as landed (e346213)",
+    "单次覆盖 · 来源 cli": "one-off override · source cli",
+    "按道预算 · 来源 lane": "the lane's own budget · source lane",
+    "注册表默认（本机 1800）· 来源 toml": "the registry default (1800s here) · source toml",
+    "内置兜底 1800": "built-in fallback 1800",
+    "无人指定时 · 来源 default": "when nothing names one · source default",
+    "唯一的取值入口": "the one place the value is read",
     "到点 killpg：SIGTERM → 5s → SIGKILL": "on expiry killpg: SIGTERM → 5s → SIGKILL",
     "只打本次派发自己的进程组": "only this run's own process group",
-    "断链": "broken link",
-    "B 建议取值链": "B  Where the value should come from",
-    "单次，最高优先": "one-off, wins over everything",
-    "lane.timeout（新增字段）": "lane.timeout (a new field)",
-    "按道预算，22 处声明即刻生效": "a per-lane budget that makes the 22 real",
-    "兜底，来源与值一并记录": "the fallback, recorded with its source",
-    "事件流新增 timeout_source，与既有的 cap_source 同形 —— 值永远与来源一起显示":
-        "The event stream gains timeout_source, shaped like cap_source: a value is always shown with where it came from",
+    "started 事件带 timeout_source，与 cap_source 同形；taskgroups 投影也带 timeout":
+        "the started event gains timeout_source (shaped like cap_source); the taskgroups record gains timeout",
+    "B 已落地对照": "B  What landed",
+    "修复前（e346213 之前）": "before e346213",
+    "只认 --timeout 与 [defaults]": "only --timeout and [defaults] were read",
+    "道级 timeout 无字段，声明不生效": "the lane had no such field, so its word did not count",
+    "修复后（e346213）": "after e346213",
+    "三段链 + 内置兜底，值随来源落账": "the three-step chain plus the fallback, source recorded with the value",
+    "started 事件 / taskgroups 投影都带": "both the started event and the taskgroups record now carry it",
     "C 止损判据": "C  When to stop",
     "现行：只看墙钟": "today: wall clock only",
     "1800s：墙钟到点才杀进程树": "1800s: the process tree dies on the clock",
@@ -650,60 +653,66 @@ def fig5(path):
 # 图 6 · 超时机制：取值链与判据
 # ---------------------------------------------------------------------------
 def fig6(path):
-    f = Fig(1080, 730, "图 6  超时机制：取值链现状、建议取值链与判据对比")
+    f = Fig(1080, 800, "图 6  超时机制：三段取值链与止损判据")
 
-    # panel A: 现状
-    f.text(40, 78, "A 现状取值链", 13, NAVY, "start", "600")
-    f.box(40, 92, 300, 54, [
-        ("[defaults] timeout = 1800", 12, NAVY, "600", 0),
-        ("注册表默认值", 10.5, GREY, "400", 5),
-    ], fill=BLUE_F, stroke=BLUE)
-    f.box(40, 162, 300, 54, [
+    # panel A: the landed three-step chain, in precedence order
+    f.text(40, 78, "A 三段取值链现状（e346213 已落地）", 13, NAVY, "start", "600")
+    f.box(40, 92, 330, 48, [
         ("run --timeout N", 12, NAVY, "600", 0),
-        ("单次覆盖，记入 started 事件", 10.5, GREY, "400", 5),
+        ("单次覆盖 · 来源 cli", 10.5, GREY, "400", 5),
     ], fill=BLUE_F, stroke=BLUE)
-    f.box(40, 232, 300, 66, [
-        ("[[taskgroup]] timeout = 2700 / 5400", 11.5, RED, "600", 0),
-        ("项目本机 22 处声明", 10.5, RED, "400", 5),
-        ("Taskgroup 无此字段 → 静默丢弃", 10.5, RED, "400", 4),
+    f.box(40, 148, 330, 48, [
+        ("[[taskgroup]] timeout", 12, NAVY, "600", 0),
+        ("按道预算 · 来源 lane", 10.5, GREY, "400", 5),
+    ], fill=BLUE_F, stroke=BLUE)
+    f.box(40, 204, 330, 48, [
+        ("[defaults] timeout", 12, NAVY, "600", 0),
+        ("注册表默认（本机 1800）· 来源 toml", 10.5, GREY, "400", 5),
+    ], fill=BLUE_F, stroke=BLUE)
+    f.box(40, 260, 330, 48, [
+        ("内置兜底 1800", 12, NAVY, "600", 0),
+        ("无人指定时 · 来源 default", 10.5, GREY, "400", 5),
+    ], fill=PANEL, stroke=LINE)
+
+    f.box(480, 148, 220, 120, [
+        ("registry.resolve_timeout()", 11.5, NAVY, "600", 0),
+        ("唯一的取值入口", 11, GREY, "400", 6),
+        ("cli > lane", 11, GREY, "400", 4),
+        ("> toml > default", 11, GREY, "400", 2),
+    ], fill=PANEL, stroke=LINE)
+    f.box(770, 148, 270, 120, [
+        ("adapter.timeout", 11.5, NAVY, "600", 0),
+        ("→ proc.wait(timeout)", 11.5, NAVY, "600", 2),
+        ("到点 killpg：SIGTERM → 5s → SIGKILL", 10.5, GREY, "400", 8),
+        ("只打本次派发自己的进程组", 10.5, GREY, "400", 4),
+    ], fill=PANEL, stroke=LINE)
+
+    f.arrow(372, 116, 478, 175, BLUE)
+    f.arrow(372, 172, 478, 195, BLUE)
+    f.arrow(372, 228, 478, 220, BLUE)
+    f.arrow(372, 284, 478, 240, BLUE, dash="4 3")
+    f.arrow(702, 208, 768, 208, BLUE, label="effective_timeout")
+
+    f.box(40, 322, 1000, 40, [
+        ("started 事件带 timeout_source，与 cap_source 同形；taskgroups 投影也带 timeout", 11.5, GREY, "400", 0),
+    ], fill="#ffffff", stroke=LINE, dash="4 3")
+
+    # panel B: what the fix landed (before -> after)
+    f.text(40, 408, "B 已落地对照", 13, NAVY, "start", "600")
+    f.box(40, 422, 480, 84, [
+        ("修复前（e346213 之前）", 12, RED, "600", 0),
+        ("只认 --timeout 与 [defaults]", 11, GREY, "400", 7),
+        ("道级 timeout 无字段，声明不生效", 11, GREY, "400", 4),
     ], fill=RED_F, stroke=RED, dash="6 4")
-
-    f.box(470, 140, 190, 90, [
-        ("dispatch.py:201", 11.5, NAVY, "600", 0),
-        ("唯一取值点", 11, GREY, "400", 6),
-        ("reg.timeout", 11, GREY, "400", 4),
-    ], fill=PANEL, stroke=LINE)
-    f.box(750, 140, 290, 90, [
-        ("adapter.timeout → proc.wait(timeout)", 11.5, NAVY, "600", 0),
-        ("到点 killpg：SIGTERM → 5s → SIGKILL", 11, GREY, "400", 6),
-        ("只打本次派发自己的进程组", 11, GREY, "400", 4),
-    ], fill=PANEL, stroke=LINE)
-
-    f.arrow(342, 119, 468, 165, BLUE)
-    f.arrow(342, 189, 468, 185, BLUE)
-    f.arrow(342, 265, 468, 215, RED, dash="6 4", label="断链")
-    f.arrow(662, 185, 748, 185, BLUE, label="effective_timeout")
-
-    # panel B: 建议
-    f.text(40, 350, "B 建议取值链", 13, NAVY, "start", "600")
-    f.box(40, 364, 300, 54, [
-        ("--timeout N", 12, NAVY, "600", 0),
-        ("单次，最高优先", 10.5, GREY, "400", 5),
+    f.box(560, 422, 480, 84, [
+        ("修复后（e346213）", 12, GREEN, "600", 0),
+        ("三段链 + 内置兜底，值随来源落账", 11, GREY, "400", 7),
+        ("started 事件 / taskgroups 投影都带", 11, GREY, "400", 4),
     ], fill=GREEN_F, stroke=GREEN)
-    f.box(370, 364, 300, 54, [
-        ("lane.timeout（新增字段）", 12, NAVY, "600", 0),
-        ("按道预算，22 处声明即刻生效", 10.5, GREY, "400", 5),
-    ], fill=GREEN_F, stroke=GREEN)
-    f.box(700, 364, 340, 54, [
-        ("[defaults] timeout = 1800", 12, NAVY, "600", 0),
-        ("兜底，来源与值一并记录", 10.5, GREY, "400", 5),
-    ], fill=GREEN_F, stroke=GREEN)
-    f.arrow(342, 391, 368, 391, GREEN)
-    f.arrow(672, 391, 698, 391, GREEN)
-    f.text(40, 444, "事件流新增 timeout_source，与既有的 cap_source 同形 —— 值永远与来源一起显示", 11.5, GREY, "start", "400")
+    f.arrow(522, 464, 558, 464, GREEN)
 
-    # panel C: 判据对比
-    f.text(40, 492, "C 止损判据", 13, NAVY, "start", "600")
+    # panel C: when to stop (still a proposal)
+    f.text(40, 550, "C 止损判据", 13, NAVY, "start", "600")
 
     def axis(y, label, marks):
         x0, x1 = 200, 660
@@ -724,16 +733,16 @@ def fig6(path):
             else:
                 f.text(x + 6, ty, txt, 11, color, "start", "600")
 
-    axis(590, "现行：只看墙钟", [
+    axis(600, "现行：只看墙钟", [
         (0.5, "900s", GREY, "5 4", "start", "below"),
         (1.0, "1800s：墙钟到点才杀进程树", RED, None, "end", "above"),
     ])
-    axis(680, "建议：无进展看门狗 + 墙钟兜底", [
+    axis(710, "建议：无进展看门狗 + 墙钟兜底", [
         (0.27, "480s：日志与工作树都静默", GREEN, None, "start", "above"),
         (1.0, "1800s：兜底墙钟", GREY, "5 4", "end", "above"),
     ])
 
-    f.box(700, 545, 340, 110, [
+    f.box(700, 560, 340, 118, [
         ("为什么不能只看日志", 12, NAVY, "600", 0),
         ("一次冷编译、一次大依赖下载可以几分钟", 10.5, GREY, "400", 6),
         ("不输出；判据须并入工作树的文件改动，", 10.5, GREY, "400", 4),

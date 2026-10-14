@@ -23,7 +23,7 @@ terminal state is written by the mechanical layer, and the audit stream is
 append-only and never read back. This document gives the system context, the data
 model, the key mechanisms, one measured evaluation of the timeout path, and seven
 defects with the design changes that close them; one of those changes — a
-per-lane timeout — is three small edits.
+per-lane timeout — has since landed (`e346213`), and the rest are still proposed.
 
 Keywords: dispatch layer; independent acceptance; protected paths; difference
 detection; hard timeout; idle detection; append-only audit
@@ -202,8 +202,8 @@ cleared has to survive on the record. `timeout` and `cancelled` are refused
 (`dispatch.py:1922`). Redoing work is a separate act: `rerun <id>` opens a fresh
 card from a terminal one and links the pair in the ledger (`rerun_of` / `rerun_as`).
 
-Two hard rules: an unknown status is always rendered, never silently dropped; and
-`accept` never quietly rewrites the facts of the run it closes.
+Two hard rules: an unknown status is always rendered, never dropped in silence;
+and `accept` never quietly rewrites the facts of the run it closes.
 
 ## 4 Key mechanisms
 
@@ -333,15 +333,22 @@ from the gate and the acceptance command.
 
 ### 4.7 Timeouts and process termination
 
-The timeout is a single wall-clock budget read from exactly two places.
+The timeout is a single wall-clock budget, resolved by a chain that walks three
+declared sources and then a built-in fallback — always reported together with where
+it came from.
 
 ![Figure 6 Where the timeout comes from, and when to stop](assets/figures/en/fig6-timeout.svg)
 
-    [defaults] timeout    the registry default (1800s here; projects.toml:8)
-    run --timeout N       a one-off override, recorded on the started event
+    run --timeout N      a one-off override for this dispatch     source: cli
+    lane.timeout         the [[taskgroup]]'s own budget           source: lane
+    [defaults] timeout   the registry default (1800s here)        source: toml
+    built-in 1800        used when nothing names one              source: default
 
-    dispatch.py:201       effective_timeout = --timeout ?? reg.timeout
-    registry.py:371       reg.timeout reads [defaults] and nothing else
+    registry.resolve_timeout(taskgroup, defaults, cli)    the one place the chain
+    dispatch.py:204      effective_timeout = resolve_timeout(...)  is read
+
+    the started event gains `timeout_source`, shaped like the `cap_source` beside
+    it, and `taskproof taskgroups` reports `timeout` on every lane record
 
 Expiry is mechanical and confined to the process group this dispatch created:
 `proc.wait(timeout)` raises, `_terminate_tree` sends SIGTERM to that group only,
@@ -416,14 +423,21 @@ is broken. A per-lane limit does not exist today; the only way to give one lane 
 different budget is to remember `--timeout` on every dispatch, which is a
 memory-based discipline rather than a machine gate.
 
+Update (`e346213`): this defect is fixed. The registry holds **22 lane-level
+declarations** in total — 19 on `[[taskgroup]]` blocks plus 3 on legacy
+`[[project]]` blocks (an old-style block *is* the lane, so those count too). After
+the fix `taskproof --json taskgroups` reports a non-null `timeout` for all 22.
+
 ### 5.4 Defects
 
 > Table 4 — what the current implementation gets wrong
 
-    D1  A lane-level timeout is silently dropped
-        `Taskgroup` has no such field (models.py:43-73) and loading a registry does
+    D1  A lane-level timeout was dropped without a word    — fixed in `e346213`
+        `Taskgroup` had no such field (models.py:43-73) and loading a registry did
         not reject unknown keys (registry.py:491), so 22 declarations did nothing
         and nothing said so. Directly opposed to "configuration is a contract".
+        e346213 adds the field, reads it in `registry.resolve_timeout` (source
+        `lane`), and records `timeout_source` on the started event.
 
     D2  One wall-clock budget for everything
         A packaging lane needs 5400s; a card that burns time looking for an entry
@@ -462,23 +476,23 @@ memory-based discipline rather than a machine gate.
 
 ## 6 Proposed design
 
-None of the following is implemented.
+Except where marked as landed, none of the following is implemented.
 
-### 6.1 A per-lane timeout and a three-step lookup
+### 6.1 A per-lane timeout and a three-step lookup   — landed in `e346213`
 
-Add one optional field to a lane and make the lookup a chain, as in figure 6B:
+This one shipped. `Taskgroup` now carries an optional `timeout`, the lookup is the
+chain drawn in figure 6A, and both the value and its source are recorded:
 
-    --timeout N            one-off, wins
-    lane.timeout           a per-lane budget (new field; makes existing
-                           declarations real)
-    [defaults] timeout     the fallback
-    the event stream gains timeout_source, shaped like the existing cap_source, so
-    a value is always reported with where it came from
+    --timeout N            one-off, wins              source: cli
+    lane.timeout           a per-lane budget          source: lane
+    [defaults] timeout     the fallback               source: toml
+    the built-in 1800      when nothing names one     source: default
 
-The code change is small: one field on `models.Taskgroup`, one validation and read
-in `registry._load_lane_fields`, the three-step lookup at `dispatch.py:201`, and the
-extra field on the `started` event. The payoff is that declarations already written
-become real gates, and heavy and light lanes can both be right in one parallel run.
+`registry.resolve_timeout` is the one place the chain is read; the `started` event
+now carries `timeout` together with `timeout_source`, shaped like the existing
+`cap_source`, and `taskproof taskgroups` reports `timeout` on every lane record. The
+payoff is that declarations already written are real gates, and heavy and light
+lanes can both be right in one parallel run.
 
 ### 6.2 Separate the acceptance budget
 
@@ -527,7 +541,8 @@ which is a larger change and deserves its own evaluation.
 Every proposal has to come with a machine-checkable check, in the style the project
 already uses:
 
-    per-lane timeout   unit: the three-step lookup, one case per step, plus the
+    per-lane timeout   already verified with the checks below (used for e346213):
+                       unit: the three-step lookup, one case per step, plus the
                        source field
                        end-to-end: a lane declaring timeout = 2, dispatched with no
                        --timeout, must end `timeout` with exit 71
@@ -553,11 +568,12 @@ a background process, and has its terminal state read back from the ledger.
 
 The verdict surface is trustworthy: acceptance is independent of the self-report, a
 boundary breach is decided by a difference rather than by trust, and state and audit
-are separate concerns. The **configuration** surface is where the weakness sits — one
-silently dropped key (D1) and one budget shared by two phases (D2, D3), both visible
-in the six timeouts and the 22 dangling declarations. The direction of the fix is not
-more enforcement of the run, but giving configuration and stopping rules the same
-mechanical standing the rest of the system already has.
+are separate concerns. The **configuration** surface is where the weakness sat — one
+key that used to be dropped without a word (D1, fixed in `e346213`) and one budget
+shared by two phases (D2, D3, still open), both visible in the six timeouts and the
+22 dangling declarations. The direction of the fix is not more enforcement of the
+run, but giving configuration and stopping rules the same mechanical standing the
+rest of the system already has.
 
 Limitations:
 
