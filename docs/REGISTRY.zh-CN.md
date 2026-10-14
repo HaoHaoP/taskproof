@@ -91,7 +91,7 @@ link      = ["desktop/node_modules"]              # 从主树软链依赖
 | `path` | 是 | — | 必须是**绝对路径**。它名下各条道的默认路径。 |
 | `aliases` | 否 | `[]` | 别名，凡是能写 id 的地方都能写它。 |
 | `group` | 否 | 块 `id` | 仅在兼容道块（同时带任一道字段的 `[[project]]`）上有意义；旧文件里的锁名会原样保留。 |
-| `verify` / `verify_kind` / `forbidden_paths` / `result_schema` / `timeout` | 否 | — | 不是项目字段。`[[project]]` 块上只要出现其中任意一个，就触发下面的兼容规则。 |
+| `verify` / `verify_kind` / `forbidden_paths` / `result_schema` | 否 | — | 不是项目字段。`[[project]]` 块上只要出现其中任意一个，就触发下面的兼容规则。 |
 
 ## `[[taskgroup]]` 字段
 
@@ -114,7 +114,7 @@ link      = ["desktop/node_modules"]              # 从主树软链依赖
 ## 读旧格式：零迁移
 
 一个 `[[project]]` 块只要带**任一**道字段 —— `verify`、`verify_kind`、
-`forbidden_paths`、`result_schema`、`workspace`、`link`、`timeout` —— 就被读成
+`forbidden_paths`、`result_schema`、`workspace`、`link` —— 就被读成
 **两条**声明：
 
 * 项目 `id = <块 id>`，`path` / `aliases` 照搬；

@@ -95,7 +95,7 @@ link      = ["desktop/node_modules"]              # symlink deps from the main t
 | `path` | yes | — | Must be **absolute**. The default path for its lanes. |
 | `aliases` | no | `[]` | Alternative names accepted wherever an id is accepted. |
 | `group` | no | the block `id` | Only meaningful on a compatibility lane block (one that also carries a lane field). The implicit lane's lock name is preserved from the old file. |
-| `verify` / `verify_kind` / `forbidden_paths` / `result_schema` / `timeout` | no | — | Not project fields. Any of them on a `[[project]]` block switches on the compatibility rule below. |
+| `verify` / `verify_kind` / `forbidden_paths` / `result_schema` | no | — | Not project fields. Any of them on a `[[project]]` block switches on the compatibility rule below. |
 
 ## `[[taskgroup]]` fields
 
@@ -118,7 +118,7 @@ link      = ["desktop/node_modules"]              # symlink deps from the main t
 ## Reading a flat, older file (zero migration)
 
 A `[[project]]` block that carries any lane field — `verify`, `verify_kind`,
-`forbidden_paths`, `result_schema`, `workspace`, `link`, or `timeout` — is read
+`forbidden_paths`, `result_schema`, `workspace`, or `link` — is read
 as **two** declarations:
 
 * a project `id = <block id>` with the block's `path` and `aliases`, and
