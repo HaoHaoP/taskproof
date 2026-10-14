@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1010" height="600" viewBox="0 0 1010 600">
+  <rect width="1010" height="600" fill="white"/>
+  <text x="24" y="34" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="16" fill="#1f2328" text-anchor="start" font-weight="600">图 1  taskproof 的系统上下文与职责边界</text>
+  <rect x="30" y="220" width="200" height="130" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="130.0" y="271.42" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="14" fill="#1f2328" text-anchor="middle" font-weight="600">主智能体 / 人</text>
+  <text x="130.0" y="291.47" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#6e7781" text-anchor="middle" font-weight="400">Hermes · Claude Code</text>
+  <text x="130.0" y="306.97" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#6e7781" text-anchor="middle" font-weight="400">终端 · 桌面控制台</text>
+  <rect x="290" y="78" width="430" height="400" rx="10" fill="#ffffff" stroke="#8c959f" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text x="505" y="106" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="14" fill="#1f2328" text-anchor="middle" font-weight="600">taskproof：纯机械层，无 LLM</text>
+  <rect x="310" y="130" width="180" height="92" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
+  <text x="400.0" y="161.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">配置面</text>
+  <text x="400.0" y="180.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">projects.toml</text>
+  <text x="400.0" y="196.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">仓 / 道 / 验收 / 禁改</text>
+  <rect x="505" y="130" width="180" height="92" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
+  <text x="595.0" y="161.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">调度面</text>
+  <text x="595.0" y="180.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">dispatch.py</text>
+  <text x="595.0" y="196.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">流水线 ①..⑨</text>
+  <rect x="310" y="240" width="180" height="92" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
+  <text x="400.0" y="271.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">执行面</text>
+  <text x="400.0" y="290.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">adapters/*</text>
+  <text x="400.0" y="306.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">命令模板 + 结果解析</text>
+  <rect x="505" y="240" width="180" height="92" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
+  <text x="595.0" y="271.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">判决面</text>
+  <text x="595.0" y="290.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">verify.py</text>
+  <text x="595.0" y="306.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">独立验收 + 差分闸门</text>
+  <rect x="310" y="352" width="375" height="96" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="497.5" y="379.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">并发锁 claims</text>
+  <text x="497.5" y="397.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">事务性占用 + expires_at 过期回收</text>
+  <text x="497.5" y="412.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">同 group 串行 · 全局 cap 上限</text>
+  <text x="497.5" y="427.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#9a6700" text-anchor="middle" font-weight="400">拒绝派发 = 退出码 75，账本不留痕</text>
+  <rect x="770" y="130" width="210" height="110" rx="6" fill="#ffffff" stroke="#1f2328" stroke-width="1.2"/>
+  <text x="875.0" y="164.14" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">编码 agent CLI</text>
+  <text x="875.0" y="183.58" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">codex · claude · gemini</text>
+  <text x="875.0" y="198.58" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">opencode · custom:&lt;cmd&gt;</text>
+  <text x="875.0" y="213.58" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">进程组独立、stdin=/dev/null</text>
+  <rect x="770" y="290" width="210" height="96" rx="6" fill="#ffffff" stroke="#1f2328" stroke-width="1.2"/>
+  <text x="875.0" y="324.64" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">目标仓库</text>
+  <text x="875.0" y="344.08" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">主树 或 长驻 worktree</text>
+  <text x="875.0" y="359.08" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">验收在仓内跑，产物落 /tmp</text>
+  <rect x="30" y="440" width="200" height="130" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="130.0" y="474.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">存储面</text>
+  <text x="130.0" y="493.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">SQLite</text>
+  <text x="130.0" y="509.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">tasks · events · claims</text>
+  <text x="130.0" y="525.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">events-YYYY-MM.jsonl</text>
+  <text x="130.0" y="541.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">写后即忘，不参与判决</text>
+  <rect x="300" y="505" width="400" height="62" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
+  <text x="500.0" y="530.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">只读 REST API → 看板 / 桌面控制台</text>
+  <text x="500.0" y="548.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">所有写操作只走 CLI，接口层无写端点</text>
+  <line x1="232" y1="265" x2="288" y2="265" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="288,265 279.0,269.2 279.0,260.8" fill="#0969da"/>
+  <rect x="210.8625" y="245.5" width="98.275" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="260.0" y="257.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">派发 run + 卡文</text>
+  <line x1="722" y1="190" x2="768" y2="190" stroke="#1f2328" stroke-width="1.3"/>
+  <polygon points="768,190 759.0,194.2 759.0,185.8" fill="#1f2328"/>
+  <rect x="696.725" y="170.5" width="96.55000000000003" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="745.0" y="182.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="400">argv + workdir</text>
+  <line x1="760" y1="330" x2="722" y2="330" stroke="#1f2328" stroke-width="1.3"/>
+  <polygon points="722,330 731.0,325.8 731.0,334.2" fill="#1f2328"/>
+  <rect x="714.0" y="310.5" width="54.0" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="741.0" y="322.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="400">读写文件</text>
+  <line x1="330" y1="452" x2="240" y2="492" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="240,492 246.51852238015783,484.50674530131386 249.93008549500678,492.18276230972407" fill="#0969da"/>
+  <rect x="246.5" y="476.5" width="77.0" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="285.0" y="488.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">写状态与事件</text>
+  <line x1="232" y1="538" x2="298" y2="538" stroke="#1a7f37" stroke-width="1.3"/>
+  <polygon points="298,538 289.0,542.2 289.0,533.8" fill="#1a7f37"/>
+  <rect x="255.25" y="518.5" width="19.5" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="265.0" y="530.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1a7f37" text-anchor="middle" font-weight="400">读</text>
+</svg>

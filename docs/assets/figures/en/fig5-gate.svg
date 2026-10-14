@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1010" height="620" viewBox="0 0 1010 620">
+  <rect width="1010" height="620" fill="white"/>
+  <text x="24" y="34" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="16" fill="#1f2328" text-anchor="start" font-weight="600">Figure 5  What the gate compares</text>
+  <rect x="40" y="80" width="240" height="110" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="160.0" y="115.39" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">Snapshot: before</text>
+  <text x="160.0" y="133.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">fingerprints of protected paths</text>
+  <text x="160.0" y="147.94" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">git state (HEAD/refs/stash)</text>
+  <text x="160.0" y="162.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">the file set</text>
+  <rect x="40" y="230" width="240" height="110" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="160.0" y="272.64" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">Snapshot: after</text>
+  <text x="160.0" y="290.69" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">same probes, same working tree</text>
+  <text x="160.0" y="305.19" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">(in workspace mode: that worktree)</text>
+  <rect x="330" y="130" width="250" height="160" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
+  <text x="455.0" y="180.67" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="14" fill="#1f2328" text-anchor="middle" font-weight="600">The diff decides</text>
+  <text x="455.0" y="201.72" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">only what changed between them counts</text>
+  <text x="455.0" y="219.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">a tree that was already dirty,</text>
+  <text x="455.0" y="233.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">directories a dev server rewrites</text>
+  <text x="455.0" y="247.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">is never blamed on this run</text>
+  <rect x="660" y="80" width="320" height="210" rx="6" fill="#ffffff" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="820.0" y="147.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">Three probes, chosen per rule</text>
+  <text x="820.0" y="167.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1f2328" text-anchor="middle" font-weight="400">file: fingerprint + diff — content edits</text>
+  <text x="820.0" y="184.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1f2328" text-anchor="middle" font-weight="400">git: HEAD / refs / stash — commits,</text>
+  <text x="820.0" y="198.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">rewrites, branch and tag moves</text>
+  <text x="820.0" y="215.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1f2328" text-anchor="middle" font-weight="400">presence: file-set membership only</text>
+  <text x="820.0" y="229.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">rewriting an existing file stays quiet</text>
+  <line x1="282" y1="135" x2="328" y2="160" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="328,160 318.08682346808365,159.39260305642594 322.0979353596105,152.01215717601653" fill="#0969da"/>
+  <line x1="282" y1="285" x2="328" y2="260" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="328,260 322.0979353596105,267.98784282398344 318.08682346808365,260.60739694357403" fill="#0969da"/>
+  <line x1="582" y1="210" x2="658" y2="185" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="658,185 650.7630653634349,191.80196861695813 648.1382704175303,183.82259198140858" fill="#0969da"/>
+  <rect x="604.5" y="178.0" width="31.0" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="620.0" y="189.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">hit</text>
+  <rect x="40" y="400" width="450" height="100" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
+  <text x="265.0" y="436.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">Two narrow exemptions</text>
+  <text x="265.0" y="455.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1a7f37" text-anchor="middle" font-weight="400">__pycache__, .pyc / .pyo: byproducts of running Python</text>
+  <text x="265.0" y="470.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1a7f37" text-anchor="middle" font-weight="400">branches another worktree has checked out: refs are shared</text>
+  <rect x="520" y="400" width="450" height="100" rx="6" fill="#ffebe9" stroke="#cf222e" stroke-width="1.2"/>
+  <text x="745.0" y="436.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">A structural blind spot</text>
+  <text x="745.0" y="455.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#cf222e" text-anchor="middle" font-weight="400">a tree on the wrong branch, a file that predates the run:</text>
+  <text x="745.0" y="470.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#cf222e" text-anchor="middle" font-weight="400">nothing changed, so the gate can never see it</text>
+  <rect x="40" y="520" width="930" height="62" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="505.0" y="554.36" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="400">A breach records blocked (for review) and acceptance still runs; verify_exit then says whether the work itself was sound</text>
+</svg>

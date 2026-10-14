@@ -4,6 +4,7 @@
 
 > Output of the initial design session: 11 decisions plus hard constraints.
 > Status: **design settled, not implemented.**
+> How each mechanism works today, with diagrams: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## One line
 

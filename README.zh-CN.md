@@ -11,7 +11,8 @@
 
 **状态：stage 1 已可用，stage 2 的桌面看板也来了。** 引擎、CLI、浏览器看板、本地只读
 REST API，以及 `desktop/` 里的 Electron 看板均已实现。完整设计与决策记录见
-[`docs/DESIGN.zh-CN.md`](docs/DESIGN.zh-CN.md)。
+[`docs/DESIGN.zh-CN.md`](docs/DESIGN.zh-CN.md)；各机制的现行实现与配图见
+[`docs/ARCHITECTURE.zh-CN.md`](docs/ARCHITECTURE.zh-CN.md)。
 
 ## 安装
 
@@ -322,6 +323,7 @@ CI 跑三个检查：资产扫描（`tools/scan_assets.py`）、枚举契约一�
 |---|---|
 | [`README.md`](README.md) | [`README.zh-CN.md`](README.zh-CN.md) |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | [`docs/DESIGN.zh-CN.md`](docs/DESIGN.zh-CN.md) |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | [`docs/ARCHITECTURE.zh-CN.md`](docs/ARCHITECTURE.zh-CN.md) |
 | [`docs/REGISTRY.md`](docs/REGISTRY.md) | [`docs/REGISTRY.zh-CN.md`](docs/REGISTRY.zh-CN.md) |
 | [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) | [`docs/WALKTHROUGH.zh-CN.md`](docs/WALKTHROUGH.zh-CN.md) |
 

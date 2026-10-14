@@ -4,6 +4,7 @@
 
 > 初次设计会话的产出：11 项决策 + 硬约束。
 > 状态：**设计已定，未实现。**
+> 各机制的现行实现与配图见 [`ARCHITECTURE.zh-CN.md`](ARCHITECTURE.zh-CN.md)。
 
 ## 一句话
 

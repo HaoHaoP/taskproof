@@ -13,7 +13,9 @@ agent's own claim that it finished.
 **Status: stage 1 is usable, and the stage-2 desktop console is here.** The
 engine, CLI, a browser board, a local read-only REST API, and an Electron console
 in `desktop/` are implemented. See [`docs/DESIGN.md`](docs/DESIGN.md) for the
-full design and the decision log.
+full design and the decision log, and
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how each mechanism works today,
+with diagrams.
 
 ## Install
 
@@ -394,6 +396,7 @@ The docs ship in pairs, English and Simplified Chinese:
 |---|---|
 | [`README.md`](README.md) | [`README.zh-CN.md`](README.zh-CN.md) |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | [`docs/DESIGN.zh-CN.md`](docs/DESIGN.zh-CN.md) |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | [`docs/ARCHITECTURE.zh-CN.md`](docs/ARCHITECTURE.zh-CN.md) |
 | [`docs/REGISTRY.md`](docs/REGISTRY.md) | [`docs/REGISTRY.zh-CN.md`](docs/REGISTRY.zh-CN.md) |
 | [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) | [`docs/WALKTHROUGH.zh-CN.md`](docs/WALKTHROUGH.zh-CN.md) |
 

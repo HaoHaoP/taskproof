@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="730" viewBox="0 0 1080 730">
+  <rect width="1080" height="730" fill="white"/>
+  <text x="24" y="34" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="16" fill="#1f2328" text-anchor="start" font-weight="600">图 6  超时机制：取值链现状、建议取值链与判据对比</text>
+  <text x="40" y="78" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="start" font-weight="600">A 现状取值链</text>
+  <rect x="40" y="92" width="300" height="54" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
+  <text x="190.0" y="114.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">[defaults] timeout = 1800</text>
+  <text x="190.0" y="130.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">注册表默认值</text>
+  <rect x="40" y="162" width="300" height="54" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
+  <text x="190.0" y="184.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">run --timeout N</text>
+  <text x="190.0" y="200.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">单次覆盖，记入 started 事件</text>
+  <rect x="40" y="232" width="300" height="66" rx="6" fill="#ffebe9" stroke="#cf222e" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="190.0" y="253.22" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#cf222e" text-anchor="middle" font-weight="600">[[taskgroup]] timeout = 2700 / 5400</text>
+  <text x="190.0" y="268.94" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#cf222e" text-anchor="middle" font-weight="400">项目本机 22 处声明</text>
+  <text x="190.0" y="283.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#cf222e" text-anchor="middle" font-weight="400">Taskgroup 无此字段 → 静默丢弃</text>
+  <rect x="470" y="140" width="190" height="90" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="565.0" y="172.22" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="600">dispatch.py:201</text>
+  <text x="565.0" y="189.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">唯一取值点</text>
+  <text x="565.0" y="204.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">reg.timeout</text>
+  <rect x="750" y="140" width="290" height="90" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="895.0" y="172.22" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="600">adapter.timeout → proc.wait(timeout)</text>
+  <text x="895.0" y="189.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">到点 killpg：SIGTERM → 5s → SIGKILL</text>
+  <text x="895.0" y="204.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">只打本次派发自己的进程组</text>
+  <line x1="342" y1="119" x2="468" y2="165" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="468,165 458.10543623122777,165.85884097812126 460.9861320120096,157.96823949163203" fill="#0969da"/>
+  <line x1="342" y1="189" x2="468" y2="185" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="468,185 459.1377979190478,189.48345561775352 458.87126552563564,181.08768522527242" fill="#0969da"/>
+  <line x1="342" y1="265" x2="468" y2="215" stroke="#cf222e" stroke-width="1.3" stroke-dasharray="6 4"/>
+  <polygon points="468,215 461.183734784756,222.22347066966117 458.08543241419056,214.41574869583624" fill="#cf222e"/>
+  <rect x="389.5" y="220.5" width="31.0" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="405.0" y="232.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#cf222e" text-anchor="middle" font-weight="400">断链</text>
+  <line x1="662" y1="185" x2="748" y2="185" stroke="#0969da" stroke-width="1.3"/>
+  <polygon points="748,185 739.0,189.2 739.0,180.8" fill="#0969da"/>
+  <rect x="647.2375" y="165.5" width="115.52500000000003" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="705.0" y="177.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">effective_timeout</text>
+  <text x="40" y="350" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="start" font-weight="600">B 建议取值链</text>
+  <rect x="40" y="364" width="300" height="54" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
+  <text x="190.0" y="386.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">--timeout N</text>
+  <text x="190.0" y="402.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">单次，最高优先</text>
+  <rect x="370" y="364" width="300" height="54" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
+  <text x="520.0" y="386.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">lane.timeout（新增字段）</text>
+  <text x="520.0" y="402.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">按道预算，22 处声明即刻生效</text>
+  <rect x="700" y="364" width="340" height="54" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
+  <text x="870.0" y="386.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">[defaults] timeout = 1800</text>
+  <text x="870.0" y="402.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">兜底，来源与值一并记录</text>
+  <line x1="342" y1="391" x2="368" y2="391" stroke="#1a7f37" stroke-width="1.3"/>
+  <polygon points="368,391 359.0,395.2 359.0,386.8" fill="#1a7f37"/>
+  <line x1="672" y1="391" x2="698" y2="391" stroke="#1a7f37" stroke-width="1.3"/>
+  <polygon points="698,391 689.0,395.2 689.0,386.8" fill="#1a7f37"/>
+  <text x="40" y="444" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#6e7781" text-anchor="start" font-weight="400">事件流新增 timeout_source，与既有的 cap_source 同形 —— 值永远与来源一起显示</text>
+  <text x="40" y="492" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="start" font-weight="600">C 止损判据</text>
+  <line x1="200" y1="590" x2="660" y2="590" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="200" y="624" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="start" font-weight="600">现行：只看墙钟</text>
+  <text x="200" y="610" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="start" font-weight="400">t=0</text>
+  <line x1="430.0" y1="568" x2="430.0" y2="612" stroke="#6e7781" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="436.0" y="634" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="start" font-weight="600">900s</text>
+  <line x1="660.0" y1="568" x2="660.0" y2="612" stroke="#cf222e" stroke-width="1.4"/>
+  <text x="654.0" y="560" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#cf222e" text-anchor="end" font-weight="600">1800s：墙钟到点才杀进程树</text>
+  <line x1="200" y1="680" x2="660" y2="680" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="200" y="714" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="start" font-weight="600">建议：无进展看门狗 + 墙钟兜底</text>
+  <text x="200" y="700" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="start" font-weight="400">t=0</text>
+  <line x1="324.2" y1="658" x2="324.2" y2="702" stroke="#1a7f37" stroke-width="1.4"/>
+  <text x="330.2" y="650" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1a7f37" text-anchor="start" font-weight="600">480s：日志与工作树都静默</text>
+  <line x1="660.0" y1="658" x2="660.0" y2="702" stroke="#6e7781" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="654.0" y="650" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="end" font-weight="600">1800s：兜底墙钟</text>
+  <rect x="700" y="545" width="340" height="110" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
+  <text x="870.0" y="580.61" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="600">为什么不能只看日志</text>
+  <text x="870.0" y="597.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">一次冷编译、一次大依赖下载可以几分钟</text>
+  <text x="870.0" y="611.94" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">不输出；判据须并入工作树的文件改动，</text>
+  <text x="870.0" y="626.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">二者都静默才判停摆</text>
+</svg>
