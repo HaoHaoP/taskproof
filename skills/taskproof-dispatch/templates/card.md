@@ -3,10 +3,18 @@
 <!-- Copy this file, fill every section, delete the comments.
      An empty section is a card defect, not a style choice: a missing source-material
      line sends the worker guessing, a missing constraint invites it to wander.
-     Keep the card under one root cause, one file range, one acceptance command. -->
+     Keep the card under one root cause, one file range, one acceptance command.
+     A card whose result a human will look at is a VISUAL CARD — see
+     ../references/visual-cards.md. It must fill region/口径, the status truth table
+     and the red-to-green probe, and it may not fire without a valid reference. -->
+
+region: <region slug, e.g. header-buttons; `none` for a non-visual card>
+口径: <absolute path#anchor; `none` for a non-visual card>
 
 ## Root cause
 - `path/to/file.py:88` — the one defect this card closes, stated as a fact.
+- <!-- visual card only: the root cause is the DELTA between what renders now and the
+     reference. The operator's own words go into the store, never into the card. -->
 
 ## Source material
 <!-- Absolute path + line range, and one line telling the worker to read it itself.
@@ -14,6 +22,25 @@
 - prototype: `/absolute/path/to/prototype/viewer.html:1710-1735`
 - spec: `/absolute/path/to/design/notes.md` section 3
 - Read them yourself; do not ask me to restate them.
+- <!-- visual card only, exactly one: --> reference: `…` (prototype range | existing
+  implementation range | signed-off comparison page | circled screenshot + measured values)
+
+## Status truth table
+<!-- Visual card only; otherwise write "not applicable".
+     Rows = every state that can exist (tab × edit/view × selected/none × with-data/without).
+     Columns = the elements. Cells = shown / hidden / position + the file:line that decides it.
+     An empty cell is an unspecified state and comes back as a rework. -->
+
+| state | element A | element B | element C |
+|---|---|---|---|
+| | | | |
+
+## Red-to-green probe
+<!-- Visual card only. One assertion, real browser, RED before the fix, green after.
+     It measures numbers, not appearances: element counts, getComputedStyle values,
+     offsetWidth, elementFromPoint, class names, aria-expanded, location.hash. -->
+- red before the fix: `<command / probe>`
+- human eye (cannot be moved to the machine): <one line, be honest>
 
 ## Work
 - Only `path/to/file.py` and `tests/test_...py`. Close the root cause above; change nothing else.
@@ -29,7 +56,9 @@
 cd /absolute/path/to/repo && python -m unittest tests.test_cli.TestDispatch.test_refuses_full_cap -v && python -m unittest discover -s tests
 ```
 <!-- One command; exit 0 means the card is met. Identical to `verify` in the registry.
-     It must be green on a clean tree before you fire, and it must be able to go red. -->
+     It must be green on a clean tree before you fire, and it must be able to go red.
+     A card that MUST write files adds a did-it-land check, so "nothing changed, verify
+     green" cannot pass: git diff --quiet -- <file> && exit 1 -->
 
 ## Hard constraints
 - Only the files named above; no `git add` / commit / push.
@@ -40,4 +69,5 @@ cd /absolute/path/to/repo && python -m unittest tests.test_cli.TestDispatch.test
 - The list of changed files.
 - The failing run you saw before the fix.
 - The raw output of the acceptance command.
+- <!-- visual card only: --> for every colour/size you set, the line in the reference it came from.
 - <one line per fact the next card or the operator needs>

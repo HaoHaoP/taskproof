@@ -26,6 +26,12 @@ Commands are always a single copy-pasteable line. Example paths are always writt
 
 Rules 7–11 are the dispatch-economy rules — the judgement tables behind them are in [`references/token-discipline.md`](references/token-discipline.md).
 
+12. **A card whose result a human will look at carries a reference, not a description.** `region:` and `口径:` are mandatory headers on it, and three checks run before firing — the store file exists, the anchor resolves, and the store has been written since this region's previous card. Any one failing means **do not fire** (section 2.1).
+13. **The store is the only source of visual content.** A card names paths and line ranges; colours, sizes, visibility rules and copy live in the store. When the operator changes their mind, the store is written first — a card that contradicts the store is a card defect.
+14. **Same region, three consecutive cards rejected as "the previous card's output" → stop firing and build a comparison page** (section 2.1).
+
+The visual-card rules (12–14) are in [`references/visual-cards.md`](references/visual-cards.md) — the four kinds of reference, the status truth table, the red-to-green probe, the comparison page and the convergence budget.
+
 ## 1. Register a project and its taskgroups
 
 ```bash
@@ -76,6 +82,22 @@ Semantics to remember:
 ## 2. Write the card to a file
 
 The card body lives in a file and is passed with `$(cat ...)` at fire time — this avoids shell escaping and keeps the card reusable and archivable.
+
+### 2.1 A card whose result a human will look at
+
+A **visual card** — layout, colour, size, position, visibility, copy — carries three things a logic card does not, because the ordinary acceptance command cannot see a look and will happily rubber-stamp sixteen rejections:
+
+**Two headers.** `region:` (one file plus one visual area, e.g. `header-buttons`) and `口径:` (absolute path into the store, plus an anchor or line range).
+
+**Three checks before firing, any one failing = do not fire.** The store file exists; the anchor resolves to what the card claims; the store has been written **since this region's previous card**. The third one is the point — a store that stopped being maintained is worse than no store, because cards stop citing it and start describing symptoms again.
+
+**A reference, one per card.** Exactly four kinds count: a prototype line range, an existing implementation's line range, a signed-off comparison page, or a screenshot the operator circled plus its measured values. The operator's words are not a reference. Where a card would cite several sources that disagree, reconcile them **before** writing the card, write the resolution into the store, and let the card cite one.
+
+Plus a **status truth table** (rows = every state that can exist, columns = elements, cells = shown/hidden/position + the `file:line` that decides it) and a **red-to-green probe** (one assertion, real browser, red before the fix). Anything that cannot be moved to the machine side is written down as "human eye", explicitly.
+
+When no reference can be named, or the operator answers "like X" / "hard to say" / "your call", or this region already had a card rejected — the next action is **not a card**: build a hand-made comparison page for the whole region, get it circled, and put it in the store.
+
+Full detail: [`references/visual-cards.md`](references/visual-cards.md).
 
 ````bash
 mkdir -p /tmp/cards
@@ -221,5 +243,6 @@ The three habits this checklist leans on without repeating — closure rework is
 - Design decisions: [`docs/DESIGN.md`](../../docs/DESIGN.md)
 - A full from-zero-to-one-dispatch walkthrough: [`docs/WALKTHROUGH.md`](../../docs/WALKTHROUGH.md)
 - Dispatch economy — review, source material, TDD, closure/backlog, model downgrade: [`references/token-discipline.md`](references/token-discipline.md)
+- Visual cards — references, status truth table, red-to-green probe, comparison page, convergence budget: [`references/visual-cards.md`](references/visual-cards.md)
 - Card templates to copy: [`templates/card.md`](templates/card.md) (English) / [`templates/card.zh-CN.md`](templates/card.zh-CN.md) (简体中文)
 - Exit codes: 0 success / 2 registry problem / 64 usage error / 70 adapter failure / 71 verification failure / 75 concurrency limit

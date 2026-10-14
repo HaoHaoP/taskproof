@@ -26,6 +26,12 @@ description: Use when a main agent dispatches coding cards to worker agents thro
 
 铁律 7–11 是派活省钱纪律，它们背后的判据表在 [`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md)。
 
+12. **结果要人用眼睛看的卡，带的是参照物，不是描述。** 它必填 `region:` 与 `口径:` 两个头，发车前跑三查 —— store 文件存在、锚点解析得出来、store 在本区域上一张卡之后被写过。任一条不过就**不许发车**（见第 2.1 节）。
+13. **store 是观感内容的唯一来源。** 卡里只有路径与行号；配色、尺寸、显隐规则、文案都住在 store 里。操作者改主意时先写 store —— 与 store 矛盾的卡就是缺陷卡。
+14. **同一区域连续 3 张卡被判「退回上一版产出」→ 停止发车，先出对拍页**（见第 2.1 节）。
+
+观感卡这三条（12–14）的细则在 [`references/visual-cards.zh-CN.md`](references/visual-cards.zh-CN.md) —— 四类参照物、状态真值表、红绿探针、对拍页与收敛预算。
+
 ## 1. 注册项目与它的任务组
 
 ```bash
@@ -76,6 +82,22 @@ taskproof --json register /absolute/path/to/repo --dry-run
 ## 2. 把卡写进文件
 
 卡正文放在文件里，发车时用 `$(cat ...)` 传入——避免 shell 转义，也让卡可复用、可归档。
+
+### 2.1 结果要人用眼睛看的卡
+
+**观感卡**（布局、配色、尺寸、位置、显隐、文案）比逻辑卡多带三样东西。理由很具体：普通验收命令看不见观感，它会高高兴兴地把十六张被退回的卡全盖章放行。
+
+**两个头。** `region:`（一个文件 + 一个视觉区域，如 `header-buttons`）与 `口径:`（store 的绝对路径 + 锚点或行号）。
+
+**发车前三条检查，任一条不过就不发车。** store 文件存在；锚点解析出来的就是卡里说的那些；store 在**本区域上一张卡之后被写过**。第三条是重点 —— 停更的 store 比没有 store 更坏，因为卡会不再引它，改回去描述现象。
+
+**一卡一参照物。** 只有四类算：原型行号范围、既有实现的行号范围、已圈定的对拍页、操作者圈过的截图 + 量出来的取值。操作者的原话不算。当一张卡想引多个互相打架的来源，**写卡之前**就对完、把结论写进 store，卡里只引一个。
+
+再外加一张**状态真值表**（行 = 所有可能出现的状态，列 = 元素，格 = 有/无/位置 + 决定它的那处 `file:line`）与一条**红绿探针**（一条断言、真浏览器、修之前必须红）。确实搬不到机器那侧的，明写一行「人工目视」。
+
+指不出参照物，或操作者答的是「参考 XX 那样」「说不太清」「你看着来」，或本区域已经有卡被退回 —— 下一个动作**不是发卡**：手做一份覆盖整个区域的对拍页，拿到圈定，放进 store。
+
+细则全文：[`references/visual-cards.zh-CN.md`](references/visual-cards.zh-CN.md)。
 
 ````bash
 mkdir -p /tmp/cards
@@ -221,5 +243,6 @@ worker 报 done 不算证据 —— 你自己再跑一遍机器已经跑过的�
 - 设计决策：[`docs/DESIGN.md`](../../docs/DESIGN.md)
 - 从零到一次派发的完整走查：[`docs/WALKTHROUGH.md`](../../docs/WALKTHROUGH.md)
 - 派活的省钱纪律 —— 复核、素材、TDD、闭环/待办、模型降级：[`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md)
+- 观感卡的纪律 —— 参照物、状态真值表、红绿探针、对拍页、收敛预算：[`references/visual-cards.zh-CN.md`](references/visual-cards.zh-CN.md)
 - 可直接复制的卡模板：[`templates/card.zh-CN.md`](templates/card.zh-CN.md)（简体中文）/ [`templates/card.md`](templates/card.md)（English）
 - 退出码：0 成功 / 2 注册表问题 / 64 用法错误 / 70 适配器失败 / 71 验收失败 / 75 并发受限
