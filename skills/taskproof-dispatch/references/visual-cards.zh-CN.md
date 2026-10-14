@@ -60,8 +60,8 @@ python3 /absolute/path/to/taskproof/tools/check-card.py /tmp/cards/<卡号>.md
 
 只有四类：
 
-- **原型行号范围** —— `prototype.html:1028-1066`；
-- **既有实现的行号范围** —— `release-1.2:web/src/project/views/index/params/index.vue:1-11`；
+- **原型行号范围** —— `prototype.html:1710-1735`；
+- **既有实现的行号范围** —— `release-1.2:src/views/index/params/index.vue:1-11`；
 - **已圈定的对拍页** —— 见第 7 节；
 - **操作者圈过的截图** + 从它量出来的取值。
 

@@ -60,8 +60,8 @@ Exit `0` = fire, `1` = do not fire, `2` = the card file itself is unreadable. Th
 
 Exactly four kinds:
 
-- a **prototype line range** — `prototype.html:1028-1066`;
-- an **existing implementation's line range** — `release-1.2:web/src/project/views/index/params/index.vue:1-11`;
+- a **prototype line range** — `prototype.html:1710-1735`;
+- an **existing implementation's line range** — `release-1.2:src/views/index/params/index.vue:1-11`;
 - a **signed-off comparison page** — see section 7;
 - a **screenshot the operator circled**, plus the values measured from it.
 
