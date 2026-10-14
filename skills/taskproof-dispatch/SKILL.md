@@ -32,6 +32,16 @@ Rules 7–11 are the dispatch-economy rules — the judgement tables behind them
 
 The visual-card rules (12–14) are in [`references/visual-cards.md`](references/visual-cards.md) — the four kinds of reference, the status truth table, the red-to-green probe, the comparison page and the convergence budget.
 
+## 0.1 This repository is public
+
+Anything written here is world-readable, and stays that way. Three rules:
+
+- **Examples are neutral placeholders.** `header-buttons`, `prototype.html:1710-1735`, `release-1.2:src/views/index/params/index.vue:1-11`, `/absolute/path/…`. Never a real project name, repository directory, branch, feature name, hostname, person, or home directory.
+- **Never paraphrase a job into the manual.** An example that reads naturally here is an example that came from somewhere. Wording and header names adapt to whatever you are working on; the manual must not carry it back.
+- **`tools/scan_assets.py` is a backstop, not a proof.** Its organisation-specific words live *outside* the repository (`~/.taskproof/asset-patterns.txt`) and a clean run reports only that *those* words are absent. It cannot tell you nothing leaked; it tells you the listed words are not there. Add the words you actually use as you meet them, and never let a green check stand in for the rule.
+
+This covers commit messages and file names as well as file bodies — a message is world-readable the moment it is pushed, and it is the part nobody re-reads before pushing.
+
 ## 1. Register a project and its taskgroups
 
 ```bash

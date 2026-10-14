@@ -32,6 +32,16 @@ description: Use when a main agent dispatches coding cards to worker agents thro
 
 观感卡这三条（12–14）的细则在 [`references/visual-cards.zh-CN.md`](references/visual-cards.zh-CN.md) —— 四类参照物、状态真值表、红绿探针、对拍页与收敛预算。
 
+## 0.1 这个仓是公开的
+
+写进来的东西任何人都读得到，而且会一直读得到。三条：
+
+- **示例一律中性占位。** `header-buttons`、`prototype.html:1710-1735`、`release-1.2:src/views/index/params/index.vue:1-11`、`/absolute/path/…`。绝不出现真实项目名、仓库目录、分支、功能名、主机名、人名、家目录。
+- **绝不把某份活复述进手册。** 在这里读着自然的例子，就是从哪里搬过来的例子。措辞与头的名字会跟着你手上的项目走，手册不许把它们带回来。
+- **`tools/scan_assets.py` 只是兜底，不是证明。** 它的组织词活在仓**外**（`~/.taskproof/asset-patterns.txt`），报 clean 只说明**清单里那些**词没出现，不说明没泄露。你实际用到的词要随手补进清单，而且永远别拿一个绿色的检查代替规则本身。
+
+这条对**提交信息**和**文件名**同样成立，不只对文件正文 —— 提交信息一推出去就是公开的，而且恰恰是推之前没人会重读的那部分。
+
 ## 1. 注册项目与它的任务组
 
 ```bash
