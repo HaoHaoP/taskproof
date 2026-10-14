@@ -205,7 +205,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: taskproof ${{ github.ref_name }}
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
           files: |
             release-assets/*.whl
             release-assets/*.tar.gz
@@ -221,122 +221,56 @@ jobs:
 
             **English**
 
-            One fix and one piece of plumbing, both in the desktop console.
-
-            - **A dead drawer comes back.** Clicking a card could route to the
-              task, load its detail, and still show no drawer. The cause is a
-              patch that threw once while mounting the drawer's subtree:
-              `mountElement` builds the element before inserting it, so the
-              component stayed alive with nothing in the document -- and Vue,
-              believing it was mounted, never mounted it again. The drawer now
-              probes for its own element while open and remounts itself (up to
-              three times) when it is missing.
-            - **Renderer failures are recorded.** The renderer has no write
-              channel of its own and this build only prints a failed patch to
-              `console.error`, so a failure left no trace anywhere. The main
-              process now appends renderer console errors -- with the file and
-              line they came from -- plus renderer crashes and unresponsive
-              events to `renderer-errors.log` beside the app's settings
-              (`~/Library/Application Support/taskproof-desktop/` on macOS).
-            - **The dispatch manual learns the review discipline.** Closure on
-              machine evidence only, material attached by absolute path, one
-              rework per closure, and a card template to copy.
-
-            **中文**
-
-            一个修复 + 一处管线，都在桌面控制台里。
-
-            - **抽屉卡死会自己回来。** 点卡可能路由到了、详情也取了，就是不弹抽屉。根因是一次
-              挂载中抛了异常：Vue 的 `mountElement` 先建元素、挂完子节点才把元素插进文档，
-              异常落在中间 —— 于是组件还活着、文档里却没有它，而 Vue 以为已挂载，再也不会挂
-              第二次。现在抽屉打开时会自检自己的元素在不在文档里，不在就重挂（最多三次）。
-            - **渲染层异常会落盘。** 渲染层自己没有写通道，这一版又只把失败的 patch 打进
-              `console.error`，所以出了事哪都查不到。现在主进程会把渲染层 error 级的
-              console（带出来源文件与行号）、渲染进程崩溃、无响应这几类记到
-              `renderer-errors.log`（与设置同目录：macOS 在
-              `~/Library/Application Support/taskproof-desktop/`）。
-            - **派活手册补上复核纪律。** 只认机器跑出的收尾证据、素材按绝对路径附上、一次闭环
-              一次返工，另附可直接复制的卡模板。
-
-            **English**
-
-            taskproof is a conveyor belt for AI coding agents: it dispatches
-            work, independently verifies it, and records the result.
-
-            #### Download
-
-            - **macOS — Apple silicon (arm64) only, macOS 11+.** No Intel and no
-              Rosetta build. Grab the `*.dmg`.
-            - **Windows 10+ (x64).** Grab the `*.exe` installer.
-            - **Linux (x64).** Grab the `*.AppImage` (portable) or the `*.deb`
-              (Debian/Ubuntu).
-
-            #### These builds are unsigned
-
-            There is no signing or notarisation certificate yet, so your OS will
-            warn you the first time:
-
-            - **macOS:** Gatekeeper blocks the app. Right-click it → **Open**,
-              then confirm — or run
-              `xattr -d com.apple.quarantine /Applications/Taskproof.app`.
-            - **Windows:** SmartScreen shows a warning. Click **More info** →
-              **Run anyway**.
-
-            Every installer **ships its own Python runtime**, so the app works
-            as soon as it is installed — there is nothing to `pip install`. It
-            does need a system **`git`** for worktrees and the protected-path
-            gate; without git, the settings page says so.
-
-            #### Command line
-
-            ```bash
-            pipx install git+https://github.com/HaoHaoP/taskproof
-            ```
-
-            Or install the wheel attached to this release:
-
-            ```bash
-            pipx install ./taskproof-<version>-py3-none-any.whl
-            ```
-
-            See the README for full usage.
+            - **The browser board is the desktop renderer.** `taskproof board` no longer
+              serves a hand-written page: it serves the same Vue renderer the Electron
+              console loads, over the same loopback REST API, and that build is committed and
+              shipped inside the wheel. CI rebuilds it and fails on drift, so the two hosts
+              cannot diverge.
+            - **`.gz` siblings are reproducible across platforms.** The compressed assets
+              were produced by Node's bundled zlib, whose output (the gzip header's OS byte,
+              and the deflate stream across major versions) depends on the machine that built
+              it — so a Linux runner rebuilding them always saw a difference and the
+              committed-artifact check could never pass. They now come from an exact-pinned
+              pure-JS compressor, so the same source gives the same bytes everywhere. The
+              payload grows by about 2%.
+            - **A lane can set its own timeout.** Writing `timeout = 2700` on a
+              `[[taskgroup]]` used to be dropped without a word: the loader did not reject the
+              key, so nothing said so. The effective timeout is now a chain — `--timeout N` >
+              the lane's `timeout` > `[defaults] timeout` > the built-in 1800 — and it is
+              always reported together with where it came from, on the `started` event and in
+              `taskproof taskgroups`.
+            - **A card that goes quiet stops early.** A no-progress watchdog (`idle_timeout`
+              per lane, or `--idle-timeout N`) stops a run when both its log and its working
+              tree have been silent for that long, instead of burning the whole wall clock.
+              It ships off by default, and the `timeout` event says which budget fired
+              (`reason: idle` or `wall-clock`). One card produced log output for thirty
+              minutes without changing a single file; that is the case this closes.
+            - **Docs: an architecture chapter, in both languages.** `ARCHITECTURE.md` and
+              `ARCHITECTURE.zh-CN.md` now describe what the system actually does, with
+              diagrams generated from `tools/make_figures.py`; the language switch sits at the
+              top of every doc pair; and `DESIGN.md`'s status line states what has shipped.
+            - **Dispatch tooling.** `tools/check-card.py` mechanises the card checks,
+              `taskproof wait` blocks for a verdict while `tasks` shows it at a glance, and a
+              run's change surface is recorded rather than just counted.
 
             **中文**
 
-            taskproof 是给 AI 编程代理用的传送带：派活、独立验证、留下记录。
-
-            #### 下载
-
-            - **macOS —— 仅 Apple 芯片（arm64），最低 macOS 11。** 不提供 Intel
-              或 Rosetta 版本。请下载 `*.dmg`。
-            - **Windows 10+（x64）。** 请下载 `*.exe` 安装包。
-            - **Linux（x64）。** 请下载 `*.AppImage`（免安装）或 `*.deb`
-              （Debian/Ubuntu）。
-
-            #### 这些安装包未签名
-
-            目前还没有签名或公证证书，所以第一次打开时系统会提示：
-
-            - **macOS：** Gatekeeper 会拦截应用。右键点击 → **打开**，再确认；
-              或执行
-              `xattr -d com.apple.quarantine /Applications/Taskproof.app`。
-            - **Windows：** SmartScreen 会弹出警告。点击 **更多信息** →
-              **仍要运行**。
-
-            每个安装包都**自带 Python 运行时**，安装完即可使用，无需
-            `pip install`。但需要系统 **`git`** 才能使用作业树（worktree）与受保护
-            路径闸门；没有 git 时，设置页会明确说明。
-
-            #### 命令行
-
-            ```bash
-            pipx install git+https://github.com/HaoHaoP/taskproof
-            ```
-
-            也可以安装本 Release 附件里的 wheel：
-
-            ```bash
-            pipx install ./taskproof-<version>-py3-none-any.whl
-            ```
-
-            完整用法见 README。
+            - **浏览器看板就是桌面渲染层。** `taskproof board` 不再服务手写页面：它服务 Electron 控制台加载的
+              同一份 Vue 渲染层，走同一个 loopback 只读 API，产物进仓并随 wheel 发布。CI 会重建并在漂移时失败，
+              两个宿主因此不会分叉。
+            - **`.gz` 兄弟文件跨平台可复现。** 压缩产物此前由 Node 内置的 zlib 生成，而它的输出（gzip 头的
+              OS 字节、跨大版本的 deflate 流）取决于构建它的机器 —— 于是 Linux runner 重建总能看到差异，
+              "提交的产物必须等于重建结果"这条判据永远不可能通过。现在改由精确锁版本的纯 JS 压缩器生成，
+              同一份源码在任何平台压出同样的字节。代价是体积大约 +2%。
+            - **道可以自带超时。** 在 `[[taskgroup]]` 上写 `timeout = 2700` 以前会被无声丢弃：加载器不认这个键，
+              也不报错。现在有效值是三段链 —— `--timeout N` > 道上的 `timeout` > `[defaults] timeout` >
+              内置 1800 —— 并且永远与来源一起显示（`started` 事件与 `taskproof taskgroups`）。
+            - **卡静默就提前止损。** 新的无进展看门狗（道字段 `idle_timeout`，或 `--idle-timeout N`）在日志与
+              工作树都静默超过该预算时停手，而不是把墙钟烧完。它默认关闭；`timeout` 事件会说明是哪个预算先到
+              （`reason: idle` 或 `wall-clock`）。曾有一张卡连续三十分钟一直在输出日志、却没改动任何文件 ——
+              这就是它要闭掉的场景。
+            - **文档：多了一章架构，中英成对。** `ARCHITECTURE.md` 与 `ARCHITECTURE.zh-CN.md` 讲的是系统实际
+              怎么做（配图由 `tools/make_figures.py` 生成、可复现）；六份文档的语言切换都移到了标题下；
+              `DESIGN.md` 的状态行改成已发布的事实。
+            - **派活工具。** `tools/check-card.py` 把卡的几条检查机械化了；`taskproof wait` 等裁决、`tasks`
+              一眼看裁决；一次运行的改动面被记下来，而不只是一个计数。
