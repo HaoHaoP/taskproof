@@ -554,5 +554,42 @@ class WorkspaceFieldTest(unittest.TestCase):
         self.assertEqual(lane.link, [])
 
 
+class LaneTimeoutFieldTest(unittest.TestCase):
+    """Card 81: a lane's `timeout`, when written, must be a positive integer.
+
+    Zero, a negative number and a non-integer are all hard errors naming the
+    offending lane — never a silently dropped key (the bug this card fixes).
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, body, name="projects.toml"):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(textwrap.dedent(body))
+        return path
+
+    def test_lane_timeout_rejects_non_positive(self):
+        for bad in ("0", "-1", '"x"'):
+            with self.subTest(bad=bad):
+                path = self.write(
+                    f"""
+                    [[taskgroup]]
+                    id = "solo"
+                    path = "/tmp/solo"
+                    timeout = {bad}
+                    """
+                )
+                with self.assertRaises(RegistryError) as ctx:
+                    registry.load(path)
+                message = str(ctx.exception)
+                self.assertIn("timeout", message)
+                self.assertIn("solo", message)
+
+
 if __name__ == "__main__":
     unittest.main()

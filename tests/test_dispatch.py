@@ -66,11 +66,22 @@ def registry_toml(
     forbidden=(),
     cap=3,
     timeout=60,
+    lane_timeout=None,
 ) -> str:
+    """A one-lane registry, tuned for the dispatch tests.
+
+    ``timeout`` is the ``[defaults]`` timeout; pass ``None`` to omit it (so the
+    built-in fallback is what applies). ``lane_timeout`` writes a ``timeout`` on
+    the lane itself — any lane field on a ``[[project]]`` block makes it a
+    same-named taskgroup (zero migration).
+    """
     lines = [
         "[defaults]",
         f"concurrency = {cap}",
-        f"timeout = {timeout}",
+    ]
+    if timeout is not None:
+        lines.append(f"timeout = {timeout}")
+    lines += [
         "",
         "[[project]]",
         f"id = {_q(pid)}",
@@ -84,6 +95,8 @@ def registry_toml(
         # Even without an acceptance command this is a lane: any lane field on a
         # `[[project]]` block makes it a same-named taskgroup (zero migration).
         lines.append('verify_kind = "none"')
+    if lane_timeout is not None:
+        lines.append(f"timeout = {lane_timeout}")
     if forbidden:
         joined = ", ".join(_q(f) for f in forbidden)
         lines.append(f"forbidden_paths = [{joined}]")
@@ -977,6 +990,49 @@ class RunAdapterTimeoutTest(unittest.TestCase):
                 self.assertEqual(concurrency.count_active(conn), 0)
             finally:
                 conn.close()
+
+
+class LaneTimeoutTest(DispatchBase):
+    """Card 81: a lane's own `timeout` is a real gate, and the `started` event
+    records which step of the chain (cli / lane / toml / default) decided it."""
+
+    def _started_payload(self, task_id):
+        events = task_detail(self.ws, task_id)["events"]
+        return next(e["payload"] for e in events if e["event"] == "started")
+
+    def test_lane_timeout_applies_without_flag(self):
+        # The lane's `timeout = 1` must kill a 30s sleep with NO `--timeout`.
+        self.write_registry(verify="exit 0", lane_timeout=1)
+        with self.assertRaises(VerifyError):
+            dispatch(
+                self.ws,
+                "proj",
+                "x",
+                adapter="custom:sh -c 'sleep 30; echo x'",
+            )
+        row = task_detail(self.ws, self.latest_task_id())["task"]
+        self.assertEqual(row["status"], STATUS_TIMEOUT)
+        self.assertEqual(row["exit_code"], 71)
+        self.assertIsNone(row["verify_exit"])
+
+    def test_timeout_source_is_recorded_per_source(self):
+        # (registry kwargs, dispatch kwargs, effective value, expected source).
+        cases = [
+            ({}, {"timeout": 5}, 5, "cli"),
+            ({"lane_timeout": 3}, {}, 3, "lane"),
+            ({}, {}, 60, "toml"),
+            ({"timeout": None}, {}, 1800, "default"),
+        ]
+        for reg_kwargs, run_kwargs, value, source in cases:
+            with self.subTest(source=source):
+                # A fresh registry each round; `echo hi` never hits the clock.
+                self.write_registry(verify="exit 0", **reg_kwargs)
+                task_id = dispatch(
+                    self.ws, "proj", "x", adapter="custom:echo hi", **run_kwargs
+                )
+                started = self._started_payload(task_id)
+                self.assertEqual(started["timeout"], value)
+                self.assertEqual(started["timeout_source"], source)
 
 
 class WorktreeTest(DispatchBase):

@@ -91,7 +91,7 @@ link      = ["desktop/node_modules"]              # 从主树软链依赖
 | `path` | 是 | — | 必须是**绝对路径**。它名下各条道的默认路径。 |
 | `aliases` | 否 | `[]` | 别名，凡是能写 id 的地方都能写它。 |
 | `group` | 否 | 块 `id` | 仅在兼容道块（同时带任一道字段的 `[[project]]`）上有意义；旧文件里的锁名会原样保留。 |
-| `verify` / `verify_kind` / `forbidden_paths` / `result_schema` | 否 | — | 不是项目字段。`[[project]]` 块上只要出现其中任意一个，就触发下面的兼容规则。 |
+| `verify` / `verify_kind` / `forbidden_paths` / `result_schema` / `timeout` | 否 | — | 不是项目字段。`[[project]]` 块上只要出现其中任意一个，就触发下面的兼容规则。 |
 
 ## `[[taskgroup]]` 字段
 
@@ -108,13 +108,14 @@ link      = ["desktop/node_modules"]              # 从主树软链依赖
 | `result_schema` | 否 | `"default"` | `"default"`、`"none"`，或指向 JSON Schema 的绝对路径。 |
 | `workspace` | 否 | `"none"` | `"none"` 就地跑 —— 缺省值，与今天逐字一致。`"worktree"` 让 taskproof 为这条道惰性建一份**长驻** git worktree 并永久复用。其它取值是硬错误。 |
 | `link` | 否 | `[]` | **相对工作区根**的相对路径（例如 `desktop/node_modules`），从主树软链进工作区。只在 `workspace = "worktree"` 时有意义；绝对路径或含 `..` 段是硬错误。 |
+| `timeout` | 否 | — | 这条道的硬超时，单位秒。取值是三段链：`--timeout N` > 道上的 `timeout` > `[defaults] timeout`；三者都没给时落到内置的 `1800`。必须是正整数；`0`、负数或非整数都是硬错误。 |
 | `auto_registered` | 否 | `false` | 由 `taskproof register` 写入，不打算手改。 |
 
 ## 读旧格式：零迁移
 
 一个 `[[project]]` 块只要带**任一**道字段 —— `verify`、`verify_kind`、
-`forbidden_paths`、`result_schema`、`workspace`、`link` —— 就被读成**两条**
-声明：
+`forbidden_paths`、`result_schema`、`workspace`、`link`、`timeout` —— 就被读成
+**两条**声明：
 
 * 项目 `id = <块 id>`，`path` / `aliases` 照搬；
 * 任务组 `id = <块 id>`、`project = <块 id>`，路径继承，道字段照搬。

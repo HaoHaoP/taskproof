@@ -95,7 +95,7 @@ link      = ["desktop/node_modules"]              # symlink deps from the main t
 | `path` | yes | — | Must be **absolute**. The default path for its lanes. |
 | `aliases` | no | `[]` | Alternative names accepted wherever an id is accepted. |
 | `group` | no | the block `id` | Only meaningful on a compatibility lane block (one that also carries a lane field). The implicit lane's lock name is preserved from the old file. |
-| `verify` / `verify_kind` / `forbidden_paths` / `result_schema` | no | — | Not project fields. Any of them on a `[[project]]` block switches on the compatibility rule below. |
+| `verify` / `verify_kind` / `forbidden_paths` / `result_schema` / `timeout` | no | — | Not project fields. Any of them on a `[[project]]` block switches on the compatibility rule below. |
 
 ## `[[taskgroup]]` fields
 
@@ -112,13 +112,14 @@ link      = ["desktop/node_modules"]              # symlink deps from the main t
 | `result_schema` | no | `"default"` | `"default"`, `"none"`, or an absolute path to a JSON Schema. |
 | `workspace` | no | `"none"` | `"none"` runs in place — the default, byte-for-byte today's behaviour. `"worktree"` asks taskproof to lazily create ONE long-lived git worktree for this lane and reuse it forever. Any other value is a hard error. |
 | `link` | no | `[]` | Relative paths, **relative to the workspace root** (e.g. `desktop/node_modules`), to symlink from the main checkout into the lane workspace. Only valid with `workspace = "worktree"`; an absolute path or any `..` segment is a hard error. |
+| `timeout` | no | — | Per-lane hard timeout in seconds. The effective value is a three-step chain: `--timeout N` > this lane's `timeout` > `[defaults] timeout`, and when none of those is set it falls back to the built-in `1800`. Must be a positive integer; `0`, a negative number or a non-integer is a hard error. |
 | `auto_registered` | no | `false` | Written by `taskproof register`; not meant to be edited by hand. |
 
 ## Reading a flat, older file (zero migration)
 
 A `[[project]]` block that carries any lane field — `verify`, `verify_kind`,
-`forbidden_paths`, `result_schema`, `workspace`, or `link` — is read as **two**
-declarations:
+`forbidden_paths`, `result_schema`, `workspace`, `link`, or `timeout` — is read
+as **two** declarations:
 
 * a project `id = <block id>` with the block's `path` and `aliases`, and
 * a taskgroup `id = <block id>`, `project = <block id>`, inheriting the path and

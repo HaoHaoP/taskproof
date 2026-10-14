@@ -64,7 +64,7 @@ import re
 import tempfile
 import threading
 import tomllib
-from typing import List, Optional
+from typing import List, NamedTuple, Optional
 
 from . import concurrency, verify
 from .errors import RegistryError
@@ -369,7 +369,67 @@ class Registry:
 
     @property
     def timeout(self) -> int:
-        return int(self.defaults.get("timeout", 1800))
+        # The `[defaults]` timeout, or the built-in fallback when unset. Use
+        # `resolve_timeout(...)` for the full three-step chain *and* its source.
+        return int(self.defaults.get("timeout", DEFAULT_TIMEOUT))
+
+
+# ---------------------------------------------------------------------------
+# The effective per-run timeout: a value *and* where it came from.
+# ---------------------------------------------------------------------------
+#
+# The timeout has four possible sources, in precedence order:
+#
+#   1. ``cli``     — a one-off ``run --timeout N`` for this dispatch only;
+#   2. ``lane``    — the ``timeout`` on the ``[[taskgroup]]`` being dispatched;
+#   3. ``toml``    — ``[defaults] timeout`` in the workspace registry;
+#   4. ``default`` — the built-in fallback below, used when nothing names one.
+#
+# ``cli`` / ``toml`` reuse the exact words `concurrency` uses for the cap, so
+# the event stream never grows a second spelling for the same provenance.
+SOURCE_TIMEOUT_CLI = concurrency.SOURCE_CLI
+SOURCE_TIMEOUT_LANE = "lane"
+SOURCE_TIMEOUT_TOML = concurrency.SOURCE_TOML
+SOURCE_TIMEOUT_DEFAULT = "default"
+
+#: Seconds enforced when neither the command line, the lane, nor `[defaults]`
+#: names a timeout.
+DEFAULT_TIMEOUT = 1800
+
+
+class TimeoutSetting(NamedTuple):
+    """An effective timeout together with its provenance.
+
+    ``source`` is one of :data:`SOURCE_TIMEOUT_CLI` / :data:`SOURCE_TIMEOUT_LANE`
+    / :data:`SOURCE_TIMEOUT_TOML` / :data:`SOURCE_TIMEOUT_DEFAULT`. ``as_dict``
+    is the wire shape a surface exposes when it wants value-plus-source.
+    """
+
+    value: int
+    source: str
+
+    def as_dict(self) -> dict:
+        return {"value": self.value, "source": self.source}
+
+
+def resolve_timeout(
+    taskgroup: Optional[Taskgroup], defaults, cli: Optional[int] = None
+) -> TimeoutSetting:
+    """The effective timeout for one dispatch, with its source.
+
+    ``cli`` (the run's ``--timeout``) wins over ``taskgroup.timeout``, which
+    wins over ``[defaults] timeout`` in ``defaults``, which wins over the
+    built-in fallback. ``taskgroup`` and ``defaults`` may be ``None``.
+    """
+    if cli is not None:
+        return TimeoutSetting(int(cli), SOURCE_TIMEOUT_CLI)
+    lane = getattr(taskgroup, "timeout", None)
+    if lane is not None:
+        return TimeoutSetting(int(lane), SOURCE_TIMEOUT_LANE)
+    configured = (defaults or {}).get("timeout")
+    if configured is not None:
+        return TimeoutSetting(int(configured), SOURCE_TIMEOUT_TOML)
+    return TimeoutSetting(DEFAULT_TIMEOUT, SOURCE_TIMEOUT_DEFAULT)
 
 
 #: Scope-source labels. The CLI prints these verbatim, so they are part of the
@@ -553,6 +613,19 @@ def _load_lane_fields(
             "workspace = 'worktree'"
         )
 
+    # A lane timeout, when written, must be a positive integer. TOML gives us
+    # bool/int/float here, so reject every wrong type up front rather than
+    # letting a truthy `true` masquerade as 1 second. Missing stays `None`:
+    # the value falls through to `[defaults]` at dispatch time (see
+    # `resolve_timeout`), never silently here.
+    timeout = entry.get("timeout")
+    if timeout is not None:
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+            raise RegistryError(
+                f"{source}: {label} field 'timeout' must be a positive "
+                f"integer (got {timeout!r})"
+            )
+
     return {
         "group": _load_group(entry, default_group, label, source),
         "verify": verify_value,
@@ -562,6 +635,7 @@ def _load_lane_fields(
         "result_schema": result_schema,
         "workspace": workspace,
         "link": link,
+        "timeout": timeout,
     }
 
 
@@ -771,6 +845,7 @@ def taskgroup_record(taskgroup: Taskgroup, probe_flags: Optional[dict] = None) -
         "verify_kind": taskgroup.verify_kind,
         "forbidden_paths": list(taskgroup.forbidden_paths),
         "result_schema": taskgroup.result_schema,
+        "timeout": taskgroup.timeout,
         "auto_registered": bool(taskgroup.auto_registered),
         "probe": probe,
         "probe_exit": probe_exit,

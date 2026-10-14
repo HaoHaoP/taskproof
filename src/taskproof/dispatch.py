@@ -198,7 +198,11 @@ def dispatch(
     reg = registry.load(registry.workspace_registry_path(workspace))
     taskgroup = reg.require(project_key)
 
-    effective_timeout = timeout if timeout is not None else reg.timeout
+    # The effective per-run timeout and where it came from (card 81): a
+    # `--timeout` wins over the lane's own `timeout`, which wins over
+    # `[defaults] timeout`, which wins over the built-in fallback.
+    timeout_setting = registry.resolve_timeout(taskgroup, reg.defaults, timeout)
+    effective_timeout = timeout_setting.value
 
     # The effective global cap for this dispatch, with its source (card 42). A
     # `--cap N` is a one-off override: it rides the event stream but is never
@@ -261,10 +265,13 @@ def dispatch(
                     "read_only": read_only,
                     "worktree": worktree,
                     "skip_verify": skip_verify,
-                    # The hard timeout this run enforces. It has no column, so it
-                    # rides in the event: `rerun` reads it back to reuse the same
-                    # flag (See `_run_options`).
+                    # The hard timeout this run enforces, and where it came
+                    # from (card 81). The value has no column, so it rides in
+                    # the event: `rerun` reads it back to reuse the same flag
+                    # (See `_run_options`). `timeout_source` is shaped like the
+                    # `cap_source` beside it — cli / lane / toml / default.
                     "timeout": effective_timeout,
+                    "timeout_source": timeout_setting.source,
                     # The effective global cap *and its source* (card 42), so the
                     # event stream can explain why a card was admitted — e.g. a
                     # one-off `--cap 5` that let a fourth card run.

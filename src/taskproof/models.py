@@ -71,6 +71,11 @@ class Taskgroup:
     #: Concurrency lock name. Empty means this lane's own id; loading fills the
     #: default in so callers never need to special-case an unset value.
     group: str = ""
+    #: Per-lane hard timeout in seconds. ``None`` (the default) means "no lane
+    #: budget": the effective timeout then falls through to ``[defaults]
+    #: timeout`` and finally the built-in fallback. A ``--timeout`` on the
+    #: command line overrides it for that one run. See `registry.resolve_timeout`.
+    timeout: Optional[int] = None
 
     def __post_init__(self):
         if not isinstance(self.group, str) or not self.group.strip():
