@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>taskproof — a conveyor belt for AI coding agents</title>
+<meta name="description" content="Dispatch a brief, let an acceptance command (not the agent's summary) decide, and keep an auditable ledger. Stdlib Python, no LLM inside.">
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#e6edf3; --muted:#8b949e;
+    --accent:#58a6ff; --green:#3fb950; --red:#f85149;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 24px}
+  header{border-bottom:1px solid var(--line);padding:18px 0}
+  .row{display:flex;align-items:center;gap:14px}
+  .row h1{font-size:22px;margin:0;letter-spacing:-.01em}
+  .row .spacer{flex:1}
+  .lang{background:var(--panel);border:1px solid var(--line);color:var(--fg);
+    border-radius:6px;padding:5px 11px;font-size:13px;cursor:pointer}
+  .lang:hover{border-color:var(--accent)}
+  .hero{padding:56px 0 8px}
+  .hero img.icon{width:88px;height:88px}
+  .hero h2{font-size:40px;line-height:1.15;margin:22px 0 12px;letter-spacing:-.02em}
+  .hero p.lead{font-size:19px;color:var(--muted);margin:0 0 6px;max-width:44em}
+  .punch{margin:26px 0 30px;font-size:26px;line-height:1.35;font-weight:600}
+  .punch b{color:var(--green);display:block}
+  .btns{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 10px}
+  .btn{border:1px solid var(--line);background:var(--panel);color:var(--fg);
+    padding:11px 18px;border-radius:8px;font-size:15px;display:inline-block}
+  .btn.primary{border-color:var(--accent);background:#12243d;color:#cfe4ff}
+  .btn:hover{border-color:var(--accent);text-decoration:none}
+  figure{margin:34px 0}
+  figure img{width:100%;border:1px solid var(--line);border-radius:10px;display:block}
+  figcaption{color:var(--muted);font-size:14px;margin-top:10px}
+  h3{font-size:22px;margin:52px 0 14px;letter-spacing:-.01em}
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px}
+  .card .n{color:var(--accent);font-weight:600;font-size:13px;letter-spacing:.08em;text-transform:uppercase}
+  .card p{margin:8px 0 0;color:var(--muted);font-size:15px}
+  .card b{color:var(--fg)}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;overflow:auto}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:15px}
+  th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:500}
+  footer{border-top:1px solid var(--line);margin-top:64px;padding:26px 0 46px;color:var(--muted);font-size:14px}
+  footer .row a{margin-right:16px}
+  [data-lang="en"] .zh{display:none}
+  [data-lang="zh"] .en{display:none}
+  @media (max-width:720px){.steps{grid-template-columns:1fr}.hero h2{font-size:30px}.punch{font-size:21px}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap row">
+    <img src="assets/icon.png" alt="" width="26" height="26">
+    <h1>taskproof</h1>
+    <span class="spacer"></span>
+    <a href="https://github.com/HaoHaoP/taskproof" class="en">GitHub</a>
+    <a href="https://github.com/HaoHaoP/taskproof" class="zh">GitHub</a>
+    <button class="lang" id="langBtn">中文</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="hero">
+    <img class="icon" src="assets/icon.png" alt="taskproof">
+    <h2 class="en">A conveyor belt for AI coding agents.</h2>
+    <h2 class="zh">给 AI 编码 agent 用的传送带。</h2>
+    <p class="lead en">It does not decide <i>what</i> to do. It guarantees that whatever gets dispatched is independently verified and recorded — so you never have to trust an agent's own claim that it finished.</p>
+    <p class="lead zh">它不决定<i>做什么</i>。它保证派出去的活被<b>独立验收</b>并<b>记账</b> —— 从此不必相信 agent 自称"已完成"。</p>
+
+    <div class="punch en">Your agent says “done”.<b>The acceptance command decides.</b></div>
+    <div class="punch zh">agent 说"完成了"。<b>算数的是验收命令。</b></div>
+
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/HaoHaoP/taskproof/releases/latest"><span class="en">Download 0.3.0</span><span class="zh">下载 0.3.0</span></a>
+      <a class="btn" href="https://github.com/HaoHaoP/taskproof">GitHub</a>
+      <a class="btn" href="https://github.com/HaoHaoP/taskproof/blob/main/docs/ARCHITECTURE.md"><span class="en">Design docs</span><span class="zh">设计文档</span></a>
+    </div>
+  </section>
+
+  <figure>
+    <img src="assets/demo.gif" alt="A card is dispatched, the agent claims it is done, and the machine disagrees.">
+    <figcaption class="en">A card is dispatched. The agent says it finished. The record says it changed nothing — the acceptance command is what decides.</figcaption>
+    <figcaption class="zh">派一张卡，agent 说它做完了，记录显示它一个文件都没改 —— 裁决者是验收命令。</figcaption>
+  </figure>
+
+  <h3 class="en">How it works</h3>
+  <h3 class="zh">怎么运转</h3>
+  <div class="steps">
+    <div class="card">
+      <div class="n en">1 · card</div><div class="n zh">1 · 卡</div>
+      <p class="en">A brief plus <b>the command that will decide it</b>. That command is the only thing believed.</p>
+      <p class="zh">一段任务 + <b>裁决它的命令</b>。只有这条命令算证据。</p>
+    </div>
+    <div class="card">
+      <div class="n en">2 · lane</div><div class="n zh">2 · 道</div>
+      <p class="en">It runs on a lane: your choice of <b>codex, claude, gemini, opencode</b> — or <code>custom:&lt;shell command&gt;</code>.</p>
+      <p class="zh">落在一条道上跑：<b>codex / claude / gemini / opencode</b>，或 <code>custom:&lt;任意命令&gt;</code>。</p>
+    </div>
+    <div class="card">
+      <div class="n en">3 · ledger</div><div class="n zh">3 · 账本</div>
+      <p class="en">Either way it is recorded: <b>what changed</b>, the verdict, the full event stream. Local SQLite.</p>
+      <p class="zh">无论成败都记账：<b>真实改动</b>、裁决、完整事件流，本地 SQLite。</p>
+    </div>
+  </div>
+
+  <h3 class="en">What the ledger holds</h3>
+  <h3 class="zh">账本里有什么</h3>
+  <figure>
+    <img src="assets/board.png" alt="The board: a failed card beside a completed one.">
+    <figcaption class="en">The board, served from the same renderer the desktop console loads. A card that claimed success and changed nothing sits next to one that actually did the work.</figcaption>
+    <figcaption class="zh">看板与桌面控制台加载同一份渲染层。左边那张自称成功却什么都没改的卡，挨着真正干完活的那张。</figcaption>
+  </figure>
+
+  <table>
+    <tr>
+      <th><span class="en">Recorded</span><span class="zh">记录项</span></th>
+      <th><span class="en">Why it matters</span><span class="zh">为什么重要</span></th>
+    </tr>
+    <tr>
+      <td><span class="en">change surface</span><span class="zh">改动面</span></td>
+      <td><span class="en">“it changed 0 files” is a fact, not an opinion.</span><span class="zh">"它改了 0 个文件"是事实，不是观点。</span></td>
+    </tr>
+    <tr>
+      <td><span class="en">verdict</span><span class="zh">裁决</span></td>
+      <td><span class="en">An acceptance command, never the agent's summary. “Did not run” is never recorded as “passed”.</span><span class="zh">验收命令说了算，不是 agent 的自述；"没跑"永远不会记成"通过"。</span></td>
+    </tr>
+    <tr>
+      <td><span class="en">event stream</span><span class="zh">事件流</span></td>
+      <td><span class="en">Every run is auditable afterwards, including which budget stopped it.</span><span class="zh">每次运行事后可审计，包括是哪个预算把它停下的。</span></td>
+    </tr>
+  </table>
+
+  <h3 class="en">Install</h3>
+  <h3 class="zh">安装</h3>
+  <pre><code># command line
+pipx install git+https://github.com/HaoHaoP/taskproof
+
+# desktop console (macOS / Windows / Linux)
+#   installers live on the Releases page</code></pre>
+  <p class="lead en">Python 3.11+, standard library only, no API keys, no LLM inside the tool itself — the judge must not be another model.</p>
+  <p class="lead zh">Python 3.11+，只用标准库，无需 API key，工具内部不含 LLM —— 判官不能是另一个模型。</p>
+
+</main>
+
+<footer>
+  <div class="wrap row">
+    <span>Apache-2.0 · <span class="en">no LLM inside</span><span class="zh">内部无 LLM</span></span>
+    <span class="spacer"></span>
+    <a href="https://github.com/HaoHaoP/taskproof/blob/main/README.md">README</a>
+    <a href="https://github.com/HaoHaoP/taskproof/blob/main/README.zh-CN.md">README 中文</a>
+    <a href="https://github.com/HaoHaoP/taskproof/blob/main/docs/ARCHITECTURE.zh-CN.md">架构 中文</a>
+  </div>
+</footer>
+
+<script>
+  var html = document.documentElement, btn = document.getElementById('langBtn');
+  btn.addEventListener('click', function () {
+    var zh = html.getAttribute('data-lang') === 'zh';
+    html.setAttribute('data-lang', zh ? 'en' : 'zh');
+    html.setAttribute('lang', zh ? 'en' : 'zh-CN');
+    btn.textContent = zh ? '中文' : 'English';
+  });
+</script>
+</body>
+</html>
