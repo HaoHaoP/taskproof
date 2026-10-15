@@ -13,7 +13,7 @@ Set Shell "bash"
 Set FontFamily "Menlo, monospace"
 Set FontSize 15
 Set Width 1500
-Set Height 520
+Set Height 380
 Set Padding 20
 Set Theme "Dracula"
 Set TypingSpeed 12ms
