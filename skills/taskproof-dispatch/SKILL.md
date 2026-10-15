@@ -245,7 +245,7 @@ A worker reporting done is not evidence — and neither is your own second run o
 
 A **red** result is the one thing that earns a second look by default: re-run it 2–3 times in the same tree before calling it a defect (a machine running several lanes makes polling tests flaky), then decide.
 
-The three habits this checklist leans on without repeating — closure rework is free once and nothing else is free, behaviour cards name a test, a cheap model only for enumerable cards — are iron rules 9–11. The judgement tables behind them (the false-green catalogue, the backlog format, which cards qualify for a cheap model) are in [`references/token-discipline.md`](references/token-discipline.md); read it once before you write a card.
+The three habits this checklist leans on without repeating — closure rework is free once and nothing else is free, behaviour cards name a test, a cheap model only for enumerable cards — are iron rules 9–11. The judgement tables behind them (the false-green catalogue, the backlog format, which cards qualify for a cheap model, docs folded into the feature card) are in [`references/token-discipline.md`](references/token-discipline.md); read it once before you write a card.
 
 ## 10. References
 

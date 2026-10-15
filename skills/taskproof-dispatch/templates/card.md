@@ -48,6 +48,14 @@ region:   <region slug, e.g. header-buttons; optional with 参照物:, `none` = 
 ## Work
 - Only `path/to/file.py` and `tests/test_...py`. Close the root cause above; change nothing else.
 
+## Docs the card makes false
+<!-- Always filled in on a behaviour card: which sentences, in which file:line, stop being true
+     once this lands? Name them, and let the worker fix them in the same card (list those files
+     in the allowed-to-change line under Work). Write "none" when there are none. Cross-feature
+     diagrams that need a redraw can wait for one final pass — but "none" and "never thought
+     about it" are not the same answer. -->
+- `docs/REGISTRY.md` gains a row (both languages, never just one)
+
 ## Test
 <!-- Behaviour change or bug fix: one test per root cause, named in the acceptance
      command below. No behaviour change: say so, mark this a test-only card, and make
