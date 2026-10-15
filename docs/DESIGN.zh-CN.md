@@ -354,7 +354,7 @@ stage 2  Vue 3 + Vite 前端 → Electron 薄壳（不内嵌 Python 运行时）
 **技术选型。** TypeScript、Vue 3（`<script setup>`）、electron-vite
 （main / preload / renderer）、Pinia、vue-router（hash 模式 —— 生产走
 `file://`）、Element Plus、UnoCSS、vue-i18n、electron-builder。v1 只做开发期
-运行，暂不出安装包。
+运行；自 0.2.1 起三个平台都出安装包。
 
 **进程模型。** Electron 持有服务：它拉起 `taskproof api --port 0`，从子进程
 stdout 读出实际端口，退出时杀掉子进程。Python 侧的改动是：`api` 刷出一行实际
@@ -450,5 +450,5 @@ Dock 角标、开机自启）与渲染层项（主题、语言）同在一个文
 ```
 
 命名调研：语义最贴的十个英文词（foreman / steward / warden / attest / gauntlet /
-verdict / notary / overseer / proven / proofrun）在 PyPI 上全部已被占用。
-`taskproof` 可用，GitHub 同名仓库仅 13 个。
+verdict / notary / overseer / proven / proofrun）在定名当时已全部被 PyPI 占用。
+`taskproof` 当时可用，GitHub 同名仓库仅 13 个 —— 现在它在 PyPI 上归本项目（首发 0.3.0）。

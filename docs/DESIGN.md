@@ -417,8 +417,8 @@ small changes described below; everything else is additive.
 
 **Stack.** TypeScript, Vue 3 (`<script setup>`), electron-vite
 (main / preload / renderer), Pinia, vue-router (hash mode — production loads
-over `file://`), Element Plus, UnoCSS, vue-i18n, electron-builder. Dev-run only
-for v1; no packaged installer yet.
+over `file://`), Element Plus, UnoCSS, vue-i18n, electron-builder. v1 shipped as
+a dev-run only; since 0.2.1 all three platforms get packaged installers.
 
 **Process model.** Electron owns the server: it spawns `taskproof api --port 0`,
 reads the bound port from the child's stdout, and terminates the child on exit.
@@ -530,6 +530,7 @@ Splitting into several repositories (core / adapters / desktop) — possible lat
 ```
 
 Naming survey: the ten most fitting English words (foreman / steward / warden /
-attest / gauntlet / verdict / notary / overseer / proven / proofrun) are all
-already taken on PyPI. `taskproof` is available, with only 13 same-named GitHub
-repositories.
+attest / gauntlet / verdict / notary / overseer / proven / proofrun) were all
+already taken on PyPI when this was decided. `taskproof` was free, with only 13
+same-named GitHub repositories — and PyPI now lists it as this project's (first
+published: 0.3.0).

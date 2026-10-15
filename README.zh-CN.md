@@ -43,24 +43,30 @@ REST API，以及 `desktop/` 里的 Electron 看板均已实现。完整设计�
 ### 命令行版（开发者）
 
 ```bash
+pipx install taskproof
+```
+
+`uv tool install taskproof` 等效。需要 Python **3.11+**；包是纯标准库 Python，没有依赖树要解。
+
+要最新开发版，直接从仓库装：
+
+```bash
 pipx install git+https://github.com/HaoHaoP/taskproof
 ```
 
-或从同一个 Release 下载 wheel，装本地文件：
+离线，或要锁定某一个构建：从 [Releases](https://github.com/HaoHaoP/taskproof/releases)
+页下载 wheel（或 sdist）再装本地文件。文件名里带着版本号，照你刚下载的那个 Release 写，
+没有不带版本号的文件名可抄。
 
 ```bash
 pipx install ./taskproof-<version>-py3-none-any.whl
 ```
-
-wheel 的文件名里带着版本号，照你刚下载的那个 Release 写，没有不带版本号的文件名可抄。
 
 或从源码可编辑安装：
 
 ```bash
 pip install -e .
 ```
-
-**PyPI 上没有这个包。** 别去 PyPI 找；用上面三种方式之一。
 
 ## 跑一条任务
 
