@@ -203,10 +203,16 @@ cancelled                 被人主动停掉
 **必须带 `--note "…"`**：收掉一张失败卡是人签字认可"这次记的是假红"，所以理由必须留在
 账本里。note 为空或缺失会在改动任何东西之前被拒（CLI `rc != 0`、HTTP `400`）。放行
 `failed` 会把它升成 `done`，同时把 `verify_*` 与 `finished_at` 原样留在卡上——验收结果
-永远权威，人工登记只是与它并列。两种情况都只写一条 `accepted` 事件，记下是谁放行的
-（`by`）、验收结论与退出码（`verify` / `verify_exit`）、人看到的证据（`files_changed`，
-越界时还有被确认的那次越界摘要）、`from` / `to` 两个状态、以及 note。`done` / `timeout` /
-`cancelled` 与所有非终态一律照旧拒绝。
+永远权威，人工登记只是与它并列。
+
+`timeout` 卡（适配器撞上硬超时）同样只能走 `accept <id>` 且**必须带 `--note`**，但它是
+**登记、不是晋升**：状态仍是 `timeout`，账本只追加一条 `accepted` 事件，其 `from` 与 `to`
+都是 `timeout`——`from == to` 就是"只登记、不改判"的写法，半成品因此绝不混入完成数；
+`verify_*` 与 `finished_at` 与跑完时一字不差。
+
+三种情况都只写一条 `accepted` 事件，记下是谁放行的（`by`）、验收结论与退出码
+（`verify` / `verify_exit`）、人看到的证据（`files_changed`，越界时还有被确认的那次越界
+摘要）、`from` / `to` 两个状态、以及 note。`done` / `cancelled` 与所有非终态一律照旧拒绝。
 
 重跑是另一件事：`rerun <id>` 从终态卡起一张新卡，复用它的 brief 与 run 旗标，并在账本
 里双向关联（新卡记 `rerun_of`、旧卡记 `rerun_as`），`log <id> --json` 两张卡能互相找到。
@@ -297,7 +303,8 @@ taskproof tasks [--status S] [--project P] [--limit N]
 taskproof show <task-id>                单任务详情
 taskproof log <task-id>                 事件流
 taskproof verify <task-id>              复跑验收（只更新事实，不动终态）
-taskproof accept <task-id> [--note T]   放行 blocked 或 failed 卡（failed 必带 --note）
+taskproof accept <task-id> [--note T]   放行 blocked / failed / timeout 卡
+                                        （failed 与 timeout 必带 --note；timeout 状态不变）
 taskproof rerun <task-id>               从终态卡起一张新卡，并在账本里双向关联
 taskproof cancel <task-id>              停任务（对自己那棵进程树 SIGTERM→SIGKILL）
 taskproof rm <task-id>                  删除终态任务的记录、事件与保留的 worktree

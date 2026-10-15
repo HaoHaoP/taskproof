@@ -159,15 +159,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "accept",
         help=(
-            "clear a blocked or failed task: done if acceptance passed (a failed "
-            "card needs --note), else failed"
+            "clear a blocked, failed or timed-out task: done if acceptance passed "
+            "(failed and timeout cards need --note; a timeout stays timeout)"
         ),
     )
     p.add_argument("task_id")
     p.add_argument(
         "--note",
         help=(
-            "why a failed card is being cleared; required for failed "
+            "why a failed or timed-out card is being cleared; required for failed "
+            "(false red) and timeout (keeping half-finished work) "
             "(人工收尾必须留说明)"
         ),
     )

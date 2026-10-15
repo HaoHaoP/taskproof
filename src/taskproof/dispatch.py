@@ -2205,25 +2205,33 @@ def _last_summary(conn, task_id: str) -> Optional[str]:
 def accept_task(
     workspace: str, task_id: str, *, by: str = "cli", note: Optional[str] = None
 ) -> dict:
-    """Clear a `blocked` or `failed` card — the human disposition of one run.
+    """Clear a `blocked`, `failed` or `timeout` card — the human disposition of
+    one run.
 
     `blocked` (a boundary breach) is accepted with or without a note, exactly as
     it always has been: a green acceptance earns `done`, a red or skipped one
     earns `failed`. `failed` (the adapter failed, or acceptance ran and went red)
     may also be accepted, but ONLY with a non-empty ``note``: closing a failed
-    card is a human sign-off, and the reason must survive in the ledger.
+    card is a human sign-off that the recorded red was a false one, and the
+    reason must survive in the ledger. `timeout` (the adapter hit the hard
+    timeout) is accepted the same way — also ONLY with a non-empty ``note`` —
+    because a timed-out run's artefacts are half-finished by definition and the
+    sign-off means "a human has looked at this and kept the work", never "done".
 
     `accept` is a human **registration**, not a verdict: it never re-runs
     acceptance and never rewrites `verify_*`. Whatever the run recorded when it
     stopped stays authoritative; a failed card is promoted to `done` only because
-    a human judged the recorded failure a false red, and that judgement is kept
-    in the `accepted` event alongside the evidence the human saw.
+    a human judged the recorded failure a false red. A `timeout` card is not
+    promoted at all: it stays `timeout` and the ledger simply gains one
+    `accepted` event whose `from` and `to` are both `"timeout"` — from == to is
+    how "registered, not re-judged" is written. Either judgement is kept in the
+    `accepted` event alongside the evidence the human saw.
 
-    Every other status (running / verifying / done / timeout /
-    cancelled) is refused with a readable `TaskStateError`, so `accept` can never
-    silently re-close a card. The card's `verify_*` columns and `finished_at` are
-    left untouched — the run's own facts do not change because a human later
-    signed off. Returns the updated task row.
+    Every other status (running / verifying / done / cancelled) is refused with a
+    readable `TaskStateError`, so `accept` can never silently re-close a card.
+    The card's `verify_*` columns and `finished_at` are left untouched — the
+    run's own facts do not change because a human later signed off. Returns the
+    updated task row.
     """
     note_text = note if isinstance(note, str) else None
     note_present = bool(note_text and note_text.strip())
@@ -2234,20 +2242,23 @@ def accept_task(
         if row is None:
             raise TaskNotFoundError(f"no such task: {task_id}")
         status = row["status"]
-        if status not in (STATUS_BLOCKED, STATUS_FAILED):
+        if status not in (STATUS_BLOCKED, STATUS_FAILED, STATUS_TIMEOUT):
             raise TaskStateError(
                 f"task {task_id} is {status}; "
-                "only a blocked or failed task can be accepted"
+                "only a blocked, failed or timed-out task can be accepted"
             )
-        if status == STATUS_FAILED and not note_present:
-            # A failed card is closed by human judgement, not by a fresh verdict,
-            # so the reason MUST be on the record. Refuse before touching the row.
+        if status in (STATUS_FAILED, STATUS_TIMEOUT) and not note_present:
+            # A failed or timed-out card is closed by human judgement, not by a
+            # fresh verdict, so the reason MUST be on the record: a failed card's
+            # sign-off says the red was false, a timed-out card's says the
+            # half-finished work is being kept. Refuse before touching the row.
+            what = "failed" if status == STATUS_FAILED else "timed-out"
             raise UsageError(
-                "accepting a failed task requires a note: "
+                f"accepting a {what} task requires a note: "
                 "人工收尾必须留说明",
                 hint=(
                     "accept is a human registration, not a verdict; pass "
-                    '--note "why this failure is being cleared"'
+                    '--note "why this false red / timed-out result is kept"'
                 ),
             )
 
@@ -2262,6 +2273,11 @@ def accept_task(
             # A human signed the red off as a false negative: the recorded facts
             # stay, the terminal state becomes `done`.
             new_status = STATUS_DONE
+        elif status == STATUS_TIMEOUT:
+            # Registration only: a timed-out card is not re-judged. Its terminal
+            # state stays `timeout` and `finished_at` is left alone — the run's
+            # own facts stand; the `accepted` event is the only thing added.
+            new_status = status
         else:
             # `blocked` keeps following its acceptance result, exactly as before.
             new_status = STATUS_DONE if verify_exit == 0 else STATUS_FAILED
@@ -2287,7 +2303,10 @@ def accept_task(
             if agent_summary:
                 payload["summary"] = agent_summary[:_SUMMARY_TAIL_CHARS]
 
-        storage.update_task(conn, task_id, status=new_status)
+        # A timeout is never promoted, so its row is not written at all; every
+        # other path moves `status` (and only `status`).
+        if new_status != status:
+            storage.update_task(conn, task_id, status=new_status)
         storage.append_event(conn, task_id, "accepted", payload)
         return dict(storage.get_task(conn, task_id))
     finally:

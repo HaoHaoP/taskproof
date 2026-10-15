@@ -4,7 +4,8 @@
 
 > Observed 2026-10-14 against v0.3.0. Sections 2 to 4 describe **current
 > behaviour** and cite `file:line`; section 5 is what was measured; section 6 is
-> **proposed work that is not implemented** — do not read it as shipped behaviour.
+> proposed work, with the landings marked in place — do not read the unmarked
+> parts as shipped behaviour.
 > The decision log and the invariants behind this design are in
 > [`DESIGN.md`](DESIGN.md).
 
@@ -22,8 +23,10 @@ after the agent exits, the boundary check is a before/after difference, the
 terminal state is written by the mechanical layer, and the audit stream is
 append-only and never read back. This document gives the system context, the data
 model, the key mechanisms, one measured evaluation of the timeout path, and seven
-defects with the design changes that close them; one of those changes — a
-per-lane timeout — has since landed (`e346213`), and the rest are still proposed.
+defects with the design changes that close them; several of those changes have
+since landed — the per-lane timeout (`e346213`), the idle watchdog (`46ad07ad`),
+the timeout sign-off (card 90) and unknown-key visibility (card 88) — and the rest
+are still proposed.
 
 Keywords: dispatch layer; independent acceptance; protected paths; difference
 detection; hard timeout; idle detection; append-only audit
@@ -198,9 +201,13 @@ The human sign-off is `accept <id>`, a **registration** rather than a verdict: i
 never re-runs acceptance and never rewrites `verify_*`. A `blocked` card clears
 without a note (a green acceptance earns `done`, a red or skipped one earns
 `failed`); a `failed` card requires `--note`, because a failure that is being
-cleared has to survive on the record. `timeout` and `cancelled` are refused
-(`dispatch.py:1922`). Redoing work is a separate act: `rerun <id>` opens a fresh
-card from a terminal one and links the pair in the ledger (`rerun_of` / `rerun_as`).
+cleared has to survive on the record. A `timeout` card is accepted the same way —
+`--note` required — but it is only **registered**: it stays `timeout` and the
+ledger gains one `accepted` event whose `from` and `to` are both `timeout`, so
+half-finished work never enters the completion count. `done` and `cancelled` are
+still refused (`dispatch.py`'s `accept_task`). Redoing work is a separate act:
+`rerun <id>` opens a fresh card from a terminal one and links the pair in the
+ledger (`rerun_of` / `rerun_as`).
 
 Two hard rules: an unknown status is always rendered, never dropped in silence;
 and `accept` never quietly rewrites the facts of the run it closes.
@@ -506,8 +513,8 @@ the fix `taskproof --json taskgroups` reports a non-null `timeout` for all 22.
 
 ## 6 Proposed design
 
-Except where marked as landed — §6.1 (`e346213`), §6.3 (`46ad07ad`) and §6.6
-(card 88) — none of the following is implemented.
+Except where marked as landed — §6.1 (`e346213`), §6.3 (`46ad07ad`), §6.4
+(card 90) and §6.6 (card 88) — none of the following is implemented.
 
 ### 6.1 A per-lane timeout and a three-step lookup   — landed in `e346213`
 
@@ -557,13 +564,16 @@ and the wall clock converge on the same `timeout` terminal state (exit 71),
 distinguished only by the `timeout` event's `reason`. Against the sample in 5.3, this
 would have cut a 1800s waste to roughly eight minutes.
 
-### 6.4 Letting a timeout be signed off
+### 6.4 Letting a timeout be signed off   — landed (card 90)
 
 Extend `accept` to `timeout`, with a mandatory note: the artefacts of a timed-out
 card are half-finished by definition, so registering it can only mean "a human has
-looked at this", never "done". A distinct terminal state (say `salvaged`), counted
-separately on the board, keeps half-finished work out of the completion count. The
-refusals stay: `done` and `cancelled` are still rejected.
+looked at this", never "done". It landed as a **registration on the existing
+`timeout` terminal** rather than as a new state: the status word, the board column
+and the completion count are all unchanged, and `accept` appends one `accepted`
+event whose `from` and `to` are both `timeout` (`from == to` is how "registered,
+not promoted" is written), leaving `verify_*` and `finished_at` exactly as the run
+recorded them. The refusals stay: `done` and `cancelled` are still rejected.
 
 ### 6.5 Make configuration timing consistent
 
@@ -601,8 +611,9 @@ already uses:
                        be judged stalled
                        true positive: log and tree silent together must be judged
                        stalled and recorded
-    timed-out sign-off a refusal matrix: done / cancelled still refused, timeout
-                       refused without --note, accepted with one
+    timed-out sign-off already verified (card 90): a refusal matrix — done /
+                       cancelled still refused, timeout refused without --note,
+                       accepted with one and left timeout
     unknown keys       unit: a registry with an unrecognised key warns and keeps its
                        exit code
     asset hygiene      python3 tools/scan_assets.py must be clean before pushing

@@ -1,5 +1,6 @@
 """Card 36 layer 3: `accept <id>` (clearing a blocked card) and `rerun <id>`
-(ledger-linked re-dispatch).
+(ledger-linked re-dispatch), plus card 90 (a `timeout` card accepted as a
+registration: `--note` required, terminal state left alone).
 
 Everything here runs a harmless ``custom:`` adapter in a throwaway workspace —
 no real agent is invoked and nothing reaches the network. The ``RealProcess``
@@ -247,26 +248,113 @@ class AcceptTest(_Base):
         self.assertEqual(self.latest_event(task_id, "accepted")["payload"]["verify"], "skipped")
 
     # ③ accept works on blocked (note optional) and failed (note required);
-    # every other state is refused, unchanged.
-    def test_accept_refuses_done_timeout_cancelled_and_running(self):
+    # every other state is refused, unchanged. `timeout` left this set in card
+    # 90: it is now accepted too, but only as a registration (see below).
+    def test_accept_refuses_done_cancelled_and_running(self):
         done = dispatch.dispatch(self.ws, "proj", "clean", adapter=_CLEAN)
-        timeout = self.timed_out()
         cancelled = self.cancelled()
         running = self.non_terminal("pending")
 
         for task_id, before in (
             (done, STATUS_DONE),
-            (timeout, STATUS_TIMEOUT),
             (cancelled, STATUS_CANCELLED),
             (running, STATUS_RUNNING),
         ):
             self.assertEqual(self.row(task_id)["status"], before)
             code, _out, err = self.run_cli("accept", task_id)
             self.assertNotEqual(code, 0, task_id)
-            self.assertIn("only a blocked or failed task", err)
+            self.assertIn("only a blocked, failed or timed-out task", err)
             # The terminal state was not silently rewritten.
             self.assertEqual(self.row(task_id)["status"], before)
             self.assertIsNone(self.latest_event(task_id, "accepted"))
+
+
+# ---------------------------------------------------------------------------
+# timeout -> timeout: a registration that needs a note and promotes nothing
+# ---------------------------------------------------------------------------
+
+
+class AcceptTimeoutTest(_Base):
+    NOTE = "超时但成果已落地：产物已复核并合并，仅登记不改判"
+
+    # A timeout card is refused without a note; the row and ledger are untouched.
+    def test_timeout_without_note_is_refused_before_anything_changes(self):
+        task_id = self.timed_out()
+        before = self.row(task_id)
+        events_before = self.events(task_id)
+        self.assertEqual(before["status"], STATUS_TIMEOUT)
+
+        for argv in (
+            ("accept", task_id),
+            ("accept", task_id, "--note", ""),
+            ("accept", task_id, "--note", "   "),
+        ):
+            code, _out, err = self.run_cli(*argv)
+            self.assertEqual(code, 64, argv)  # EXIT_USAGE, before any write
+            self.assertIn("人工收尾必须留说明", err)
+
+        self.assertEqual(self.row(task_id)["status"], STATUS_TIMEOUT)
+        # Nothing changed at all: one status, and not one new event.
+        self.assertEqual(len(self.events(task_id)), len(events_before))
+        self.assertIsNone(self.latest_event(task_id, "accepted"))
+
+    # A timeout card with a note records `accepted` but stays `timeout`: the
+    # sign-off is a registration, and from == to is how that is written.
+    def test_timeout_with_note_is_registered_without_promoting(self):
+        task_id = self.timed_out()
+        before = self.row(task_id)
+        accepted_before = len(
+            [e for e in self.events(task_id) if e["event"] == "accepted"]
+        )
+        self.assertEqual(before["status"], STATUS_TIMEOUT)
+
+        code, out, err = self.run_cli("accept", task_id, "--note", self.NOTE)
+        self.assertEqual(code, 0, err)
+        # The CLI reports the row as it now stands: still `timeout`.
+        self.assertEqual(json.loads(out)["status"], STATUS_TIMEOUT)
+
+        after = self.row(task_id)
+        self.assertEqual(after["status"], STATUS_TIMEOUT)  # never promoted to done
+        # The run's own facts are frozen: one recorded run, one verdict.
+        for column in (
+            "verify_exit",
+            "verify_cmd",
+            "files_changed",
+            "finished_at",
+            "exit_code",
+        ):
+            self.assertEqual(after[column], before[column], column)
+
+        accepted = [e for e in self.events(task_id) if e["event"] == "accepted"]
+        self.assertEqual(len(accepted), accepted_before + 1)
+        p = accepted[-1]["payload"]
+        self.assertEqual(p["by"], "cli")
+        self.assertEqual(p["from"], "timeout")
+        self.assertEqual(p["to"], "timeout")
+        self.assertEqual(p["note"], self.NOTE)
+        self.assertEqual(p["verify_exit"], before["verify_exit"])
+        self.assertEqual(p["files_changed"], before["files_changed"])
+
+    # The ledger's own case: the run timed out, a later `verify` found the work
+    # sound. The green acceptance still does not lift the card out of `timeout`.
+    def test_timeout_with_green_acceptance_is_registered_but_stays_timeout(self):
+        task_id = self.timed_out()
+        self.write_registry(verify="exit 0")
+        code, out, err = self.run_cli("verify", task_id)
+        self.assertEqual(code, 0, err)
+        self.assertTrue(json.loads(out)["passed"])
+        self.assertEqual(self.row(task_id)["status"], STATUS_TIMEOUT)
+        self.assertEqual(self.row(task_id)["verify_exit"], 0)
+
+        code, _out, err = self.run_cli("accept", task_id, "--note", self.NOTE)
+        self.assertEqual(code, 0, err)
+        row = self.row(task_id)
+        self.assertEqual(row["status"], STATUS_TIMEOUT)  # not promoted to `done`
+        self.assertEqual(row["verify_exit"], 0)  # the green fact stands
+        p = self.latest_event(task_id, "accepted")["payload"]
+        self.assertEqual(p["verify"], "passed")
+        self.assertEqual(p["from"], "timeout")
+        self.assertEqual(p["to"], "timeout")
 
 
 # ---------------------------------------------------------------------------
@@ -522,7 +610,23 @@ class RealProcessTest(_Base):
         done = dispatch.dispatch(self.ws, "proj", "clean", adapter=_CLEAN)
         proc = self._run_cli("accept", done)
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("only a blocked or failed task", proc.stderr)
+        self.assertIn("only a blocked, failed or timed-out task", proc.stderr)
+
+    def test_accept_timeout_through_the_real_binary(self):
+        # ⑧ the timeout sign-off, through the documented door: a missing note is
+        # refused with the usage exit code, a real note registers without moving
+        # the terminal state.
+        timeout = self.timed_out()
+        proc = self._run_cli("accept", timeout)
+        self.assertEqual(proc.returncode, 64, proc.stderr)
+
+        proc = self._run_cli("--json", "accept", timeout, "--note", "kept the work")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)["status"], STATUS_TIMEOUT)
+        self.assertEqual(self.row(timeout)["status"], STATUS_TIMEOUT)
+        self.assertEqual(
+            self.latest_event(timeout, "accepted")["payload"]["to"], STATUS_TIMEOUT
+        )
 
 
 if __name__ == "__main__":

@@ -234,11 +234,20 @@ red, so the reason must survive in the ledger. An empty or missing note is
 refused before anything changes (CLI `rc != 0`, HTTP `400`). Accepting a `failed`
 card promotes it to `done` while leaving `verify_*` and `finished_at` exactly as
 the run recorded them — the acceptance result stays authoritative and the human
-registration rides alongside it. Either path writes one `accepted` event naming
-who cleared it (`by`), the verdict and exit (`verify` / `verify_exit`), the
-evidence the human saw (`files_changed`, plus the confirmed breach summary for a
-`blocked` card), the `from` / `to` statuses, and the note. `done` / `timeout` /
-`cancelled` and every non-terminal state are still refused.
+registration rides alongside it.
+
+A `timeout` card (the adapter hit the hard timeout) is accepted the same way —
+`accept <id>` with a mandatory `--note` — but it is a **registration, not a
+promotion**: the status stays `timeout` and the ledger gains one `accepted` event
+whose `from` and `to` are both `timeout`. `from == to` is how "registered, not
+re-judged" is written, so half-finished work never enters the completion count.
+`verify_*` and `finished_at` stay exactly as the run recorded them.
+
+Each path writes one `accepted` event naming who cleared it (`by`), the verdict
+and exit (`verify` / `verify_exit`), the evidence the human saw (`files_changed`,
+plus the confirmed breach summary for a `blocked` card), the `from` / `to`
+statuses, and the note. `done` / `cancelled` and every non-terminal state are
+still refused.
 
 Re-running the work is a separate act: `rerun <id>` starts a fresh card from a
 terminal one, reusing its brief and run flags, and links the two in the ledger
@@ -351,7 +360,8 @@ taskproof tasks [--status S] [--project P] [--limit N]
 taskproof show <task-id>                single task detail
 taskproof log <task-id>                 event stream
 taskproof verify <task-id>              re-run acceptance (facts only; never moves the status)
-taskproof accept <task-id> [--note T]   clear a blocked or failed card (failed needs --note)
+taskproof accept <task-id> [--note T]   clear a blocked, failed or timeout card
+                                        (failed / timeout need --note; timeout stays timeout)
 taskproof rerun <task-id>               start a fresh, ledger-linked copy of a terminal task
 taskproof cancel <task-id>              stop a task (SIGTERM -> SIGKILL its own tree)
 taskproof rm <task-id>                  delete a terminal task's record, events and kept worktree
