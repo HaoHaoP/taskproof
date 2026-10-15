@@ -23,7 +23,7 @@ def _q(value) -> str:
 
 
 def registry_toml(path, *, pid="proj", group="proj", verify="exit 0",
-                  verify_kind="check", forbidden=()) -> str:
+                  verify_kind="check", forbidden=(), branch=None) -> str:
     lines = [
         "[defaults]",
         "concurrency = 3",
@@ -40,6 +40,8 @@ def registry_toml(path, *, pid="proj", group="proj", verify="exit 0",
     if forbidden:
         joined = ", ".join(_q(f) for f in forbidden)
         lines.append(f"forbidden_paths = [{joined}]")
+    if branch is not None:
+        lines.append(f"branch = {_q(branch)}")
     return "\n".join(lines) + "\n"
 
 
@@ -61,6 +63,14 @@ class CliBase(unittest.TestCase):
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = cli.main(list(argv))
         return code, out.getvalue()
+
+    def run_cli_streams(self, *argv):
+        """Like `run_cli`, but hands back stderr too — the warning surface."""
+        out = io.StringIO()
+        err = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(list(argv))
+        return code, out.getvalue(), err.getvalue()
 
     def write_registry(self, **kwargs):
         os.makedirs(self.ws, exist_ok=True)
@@ -421,11 +431,120 @@ class ExitCodeTest(CliBase):
         )
         self.assertEqual(code, 71)
 
+    def test_branch_precondition_is_78(self):
+        # The lane declares a branch and its path is not a repository at all:
+        # readable configuration the environment cannot satisfy (sysexits
+        # EX_CONFIG). Refused before any slot, so the ledger stays empty.
+        self.run_cli("--workspace", self.ws, "init")
+        self.write_registry(branch="main")
+        code, _ = self.run_cli(
+            "--workspace", self.ws, "run", "proj", "brief", "--adapter", "custom:echo hi"
+        )
+        self.assertEqual(code, 78)
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0], 0)
+        finally:
+            conn.close()
+
     def test_register_missing_path_is_64(self):
         code, _ = self.run_cli(
             "--workspace", self.ws, "register", os.path.join(self.tmp, "missing")
         )
         self.assertEqual(code, 64)
+
+
+class UnknownKeyWarningTest(CliBase):
+    """Card 88: a key nothing reads is warned about, never silently dropped.
+
+    One line per key on **stderr**, from the two listing commands only, with the
+    exit code untouched (still 0) and the `--json` payload exactly the shape it
+    had. `run` stays quiet: its stream is read by machines.
+    """
+
+    LANE_ROW_KEYS = {
+        "id", "project", "path", "group", "aliases", "verify", "verify_kind",
+        "forbidden_paths", "result_schema", "timeout", "idle_timeout", "branch",
+        "auto_registered", "probe", "probe_exit",
+    }
+
+    def write_typo_registry(self):
+        os.makedirs(self.ws, exist_ok=True)
+        body = (
+            "[defaults]\nconcurrency = 3\nconcurency = 4\n\n"
+            f'[[taskgroup]]\nid = "lane"\npath = {_q(self.proj)}\n'
+            'group = "lane"\nverify = "exit 0"\nverify_kind = "check"\n'
+            'branck = "main"\n'
+        )
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write(body)
+
+    def test_projects_warns_on_stderr_and_still_exits_zero(self):
+        self.write_typo_registry()
+
+        code, out, err = self.run_cli_streams("--workspace", self.ws, "projects")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            err.splitlines(),
+            [
+                "warning: unknown key 'concurency' in [defaults]",
+                "warning: unknown key 'branck' in lane 'lane'",
+            ],
+        )
+        # The warning is on stderr only; the table itself is untouched.
+        self.assertNotIn("warning", out)
+        self.assertIn("lane", out)
+
+    def test_taskgroups_warns_and_its_json_shape_is_unchanged(self):
+        self.write_typo_registry()
+
+        code, out, err = self.run_cli_streams(
+            "--workspace", self.ws, "--json", "taskgroups"
+        )
+
+        self.assertEqual(code, 0)
+        self.assertIn("warning: unknown key 'branck' in lane 'lane'", err)
+        payload = json.loads(out)
+        # No warning smuggled into the payload, and no field invented for it.
+        self.assertEqual(set(payload), {"taskgroups", "registry"})
+        self.assertEqual(set(payload["taskgroups"][0]), self.LANE_ROW_KEYS)
+        self.assertIsNone(payload["taskgroups"][0]["branch"])
+
+    def test_taskgroups_still_reports_a_declared_branch(self):
+        os.makedirs(self.ws, exist_ok=True)
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write(registry_toml(self.proj, branch="main"))
+
+        code, out, err = self.run_cli_streams(
+            "--workspace", self.ws, "--json", "taskgroups"
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        self.assertEqual(json.loads(out)["taskgroups"][0]["branch"], "main")
+
+    def test_a_clean_registry_warns_about_nothing(self):
+        self.write_registry()
+
+        for argv in (("projects",), ("taskgroups",)):
+            with self.subTest(command=argv[0]):
+                code, _, err = self.run_cli_streams("--workspace", self.ws, *argv)
+                self.assertEqual(code, 0)
+                self.assertEqual(err, "")
+
+    def test_run_never_warns(self):
+        # `run`'s output is the machine-readable surface; the warning belongs to
+        # the two commands a human uses to read the registry back.
+        self.write_typo_registry()
+
+        code, _, err = self.run_cli_streams(
+            "--workspace", self.ws, "run", "lane", "brief",
+            "--adapter", "custom:echo hi",
+        )
+
+        self.assertEqual(code, 0)
+        self.assertNotIn("warning", err)
 
 
 class BlockedStatusTest(CliBase):

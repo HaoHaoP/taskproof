@@ -640,5 +640,241 @@ class IdleTimeoutFieldTest(unittest.TestCase):
         self.assertEqual(lane.idle_timeout, 0)
 
 
+class LaneBranchFieldTest(unittest.TestCase):
+    """Card 88: a lane may declare the branch it runs on.
+
+    Only the *shape* is settled at load time — whether the repository has that
+    branch is a dispatch-time question (the repo may not be on this machine, and
+    `taskproof projects` must not fail for a lane nobody is running).
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, body, name="projects.toml"):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(textwrap.dedent(body))
+        return path
+
+    def test_branch_is_read_and_survives_into_the_json_record(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "solo"
+            path = "/tmp/solo"
+            branch = "feat/lane-home"
+            """
+        )
+        reg = registry.load(path)
+        lane = reg.require("solo")
+        self.assertEqual(lane.branch, "feat/lane-home")
+        record = registry.taskgroup_record(lane)
+        self.assertEqual(record["branch"], "feat/lane-home")
+
+    def test_branch_absent_is_none_and_projects_as_null(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "solo"
+            path = "/tmp/solo"
+            """
+        )
+        lane = registry.load(path).require("solo")
+        self.assertIsNone(lane.branch)
+        self.assertIsNone(registry.taskgroup_record(lane)["branch"])
+
+    def test_legacy_project_block_can_declare_a_branch(self):
+        # The compat rule reads a lane off any lane field, and a `[[project]]`
+        # block carrying `branch` keeps working the same way `timeout` does.
+        path = self.write(
+            """
+            [[project]]
+            id = "solo"
+            path = "/tmp/solo"
+            verify = "exit 0"
+            branch = "main"
+            """
+        )
+        self.assertEqual(registry.load(path).require("solo").branch, "main")
+
+    def test_branch_alone_does_not_turn_a_project_into_a_lane(self):
+        # `branch` is a lane *setting*, not a lane *marker*: the `_LANE_FIELDS`
+        # tuple decides that question, and adding settings to it is how a bare
+        # project block silently becomes a dispatchable lane (card 81's review
+        # caught exactly that with `timeout`).
+        path = self.write(
+            """
+            [[project]]
+            id = "solo"
+            path = "/tmp/solo"
+            branch = "main"
+            """
+        )
+        reg = registry.load(path)
+        self.assertEqual(reg.taskgroups, [])
+        with self.assertRaises(RegistryError):
+            reg.require("solo")
+
+    def test_branch_rejects_bad_shapes(self):
+        for bad, expected in (('""', "empty"), ('"   "', "empty"),
+                              ('"a b"', "whitespace"), ("3", "string")):
+            with self.subTest(bad=bad):
+                path = self.write(
+                    f"""
+                    [[taskgroup]]
+                    id = "solo"
+                    path = "/tmp/solo"
+                    branch = {bad}
+                    """
+                )
+                with self.assertRaises(RegistryError) as ctx:
+                    registry.load(path)
+                message = str(ctx.exception)
+                self.assertIn("branch", message)
+                self.assertIn("solo", message)
+                self.assertIn(expected, message)
+
+    def test_surrounding_whitespace_is_trimmed_not_refused(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "solo"
+            path = "/tmp/solo"
+            branch = "  main  "
+            """
+        )
+        self.assertEqual(registry.load(path).require("solo").branch, "main")
+
+
+class UnknownKeysTest(unittest.TestCase):
+    """Card 88: a key nothing reads is collected, never silently dropped.
+
+    This is `timeout`-class insurance. The registry still loads and the exit
+    code does not change; `taskproof projects` / `taskgroups` warn on stderr.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, body, name="projects.toml"):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(textwrap.dedent(body))
+        return path
+
+    def test_typo_on_a_lane_and_in_defaults_are_both_collected(self):
+        path = self.write(
+            """
+            [defaults]
+            concurrency = 3
+            concurency = 4
+
+            [[project]]
+            id = "app"
+            path = "/tmp/app"
+
+            [[taskgroup]]
+            id = "lane"
+            project = "app"
+            branck = "main"
+            """
+        )
+        reg = registry.load(path)
+        self.assertEqual(
+            reg.unknown_keys, [("[defaults]", "concurency"), ("lane", "branck")]
+        )
+
+    def test_unknown_key_on_a_project_block_names_the_project(self):
+        path = self.write(
+            """
+            [[project]]
+            id = "app"
+            path = "/tmp/app"
+            verfy = "exit 0"
+            """
+        )
+        self.assertEqual(registry.load(path).unknown_keys, [("app", "verfy")])
+
+    def test_no_unknown_keys_is_an_empty_list(self):
+        path = self.write(
+            """
+            [defaults]
+            concurrency = 3
+            timeout = 60
+
+            [[project]]
+            id = "app"
+            path = "/tmp/app"
+            aliases = ["a"]
+
+            [[taskgroup]]
+            id = "lane"
+            project = "app"
+            path = "/tmp/app"
+            group = "g"
+            verify = "exit 0"
+            verify_kind = "check"
+            forbidden_paths = [".git/"]
+            result_schema = "none"
+            workspace = "worktree"
+            link = ["node_modules"]
+            timeout = 30
+            idle_timeout = 0
+            branch = "main"
+            auto_registered = false
+            """
+        )
+        reg = registry.load(path)
+        self.assertEqual(reg.unknown_keys, [])
+        # Every key above is a real one: the lane itself loaded, workspace and
+        # all, rather than merely surviving the walk.
+        self.assertEqual(reg.require("lane").workspace, "worktree")
+
+    def test_a_defaults_key_nothing_reads_is_reported(self):
+        # `[defaults] idle_timeout` looks plausible and does nothing: card 83
+        # gave the watchdog no `[defaults]` rung (it is a per-lane opt-in), so
+        # the key is exactly the sort of declaration this warning exists to
+        # catch. Only `concurrency` and `timeout` are read from `[defaults]`.
+        path = self.write(
+            """
+            [defaults]
+            concurrency = 3
+            idle_timeout = 30
+
+            [[taskgroup]]
+            id = "lane"
+            path = "/tmp/app"
+            auto_registered = true
+            """
+        )
+        reg = registry.load(path)
+        self.assertEqual(reg.unknown_keys, [("[defaults]", "idle_timeout")])
+
+    def test_two_blocks_with_the_same_typo_are_reported_separately(self):
+        path = self.write(
+            """
+            [[taskgroup]]
+            id = "one"
+            path = "/tmp/one"
+            oops = 1
+
+            [[taskgroup]]
+            id = "two"
+            path = "/tmp/two"
+            oops = 1
+            """
+        )
+        self.assertEqual(
+            registry.load(path).unknown_keys, [("one", "oops"), ("two", "oops")]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

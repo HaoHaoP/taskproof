@@ -60,6 +60,10 @@
     {
       "code": 75,
       "meaning": "concurrency"
+    },
+    {
+      "code": 78,
+      "meaning": "precondition"
     }
   ]
 }

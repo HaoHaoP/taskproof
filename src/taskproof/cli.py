@@ -375,6 +375,22 @@ def _read_probe_flags(reg_path) -> dict:
     return registry.read_probe_flags(reg_path)
 
 
+def _warn_unknown_keys(reg) -> None:
+    """Print one stderr warning per key a block declares that nothing reads.
+
+    Card 88. An unknown key is not an error — the registry stays loadable and
+    the exit code stays 0 — but it is never silent either: this is how a
+    declaration that does nothing announces itself instead of waiting for a
+    human to notice months later (card 81's 22 dangling `timeout`s).
+
+    Only the two *listing* commands warn, and only on stderr, so `--json` keeps
+    the exact shape it had and `run` keeps its machine-readable stream clean.
+    """
+    for block, key in reg.unknown_keys:
+        where = "[defaults]" if block == "[defaults]" else f"lane '{block}'"
+        print(f"warning: unknown key '{key}' in {where}", file=sys.stderr)
+
+
 def _lane_overview(reg, stats, probes):
     """Project rows: one per project, each carrying its lanes and totals."""
     projects = []
@@ -465,6 +481,7 @@ def cmd_projects(args):
     """
     reg_path = registry.workspace_registry_path(args.workspace)
     reg = registry.load(reg_path)
+    _warn_unknown_keys(reg)
     probes = _read_probe_flags(reg_path)
 
     overview = []
@@ -511,6 +528,7 @@ def cmd_taskgroups(args):
     """List every taskgroup (lane): id, owning project, path and verify command."""
     reg_path = registry.workspace_registry_path(args.workspace)
     reg = registry.load(reg_path)
+    _warn_unknown_keys(reg)
     probes = _read_probe_flags(reg_path)
 
     taskgroups = [registry.taskgroup_record(tg, probes) for tg in reg.taskgroups]

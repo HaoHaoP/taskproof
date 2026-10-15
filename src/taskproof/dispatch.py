@@ -33,7 +33,14 @@ from typing import Optional
 from . import concurrency, registry, storage, verify
 from .adapters import get as get_adapter
 from .adapters.base import ResultParseError
-from .errors import EXIT_VERIFY, AdapterError, ConcurrencyError, UsageError, VerifyError
+from .errors import (
+    EXIT_VERIFY,
+    AdapterError,
+    ConcurrencyError,
+    PreconditionError,
+    UsageError,
+    VerifyError,
+)
 from .models import (
     STATUS_BLOCKED,
     STATUS_CANCELLED,
@@ -159,6 +166,97 @@ def _cap_aware_refusal(exc: ConcurrencyError, setting) -> ConcurrencyError:
     return exc
 
 
+def _head_branch(path: str) -> str:
+    """``git -C <path> rev-parse --abbrev-ref HEAD``; empty on any failure.
+
+    Read-only. A detached HEAD reports the literal ``HEAD`` — that is exactly
+    what the refusal message has to show, because a lane that wants a branch and
+    finds a detached checkout is looking at the same mistake as one that wants
+    `main` and finds `other`.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
+
+
+def _has_branch_commit(path: str, branch: str) -> bool:
+    """Does ``refs/heads/<branch>`` resolve to a commit in ``path``?
+
+    Read-only, and deliberately the same question `git worktree add <branch>`
+    will ask a moment later: a name that no commit backs would otherwise turn
+    into a failed workspace creation AFTER a slot has been taken.
+    """
+    revision = f"refs/heads/{branch}^{{commit}}"
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", revision],
+            cwd=path,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def _check_branch_precondition(taskgroup) -> None:
+    """Refuse a dispatch the repository cannot honour (card 88), before any slot.
+
+    A lane that declares ``branch = X`` is stating which checkout it may run on.
+    Nothing checked that before: the card landed on whatever HEAD the tree
+    happened to be on, and the only guard was a shell assertion hand-written at
+    the head of some lanes' `verify` command — which a `workspace = "worktree"`
+    lane cannot even use, because its long-lived checkout is created from the
+    main tree's HEAD and detached from any branch.
+
+    * ``workspace = "none"``: the tree must actually be ON that branch, so the
+      check is ``rev-parse --abbrev-ref HEAD`` == X (a detached checkout
+      reports ``HEAD``, and is refused).
+    * ``workspace = "worktree"``: the branch must exist, because that is the
+      commit the lane workspace is built from; the main tree may be anywhere.
+
+    A lane without the key is not gated at all — today's behaviour, unchanged.
+    Runs before the task row and before the concurrency claim, so a refusal
+    leaves the ledger empty and takes no cap slot (exit 78).
+    """
+    branch = getattr(taskgroup, "branch", None)
+    if not branch:
+        return
+    path = taskgroup.path
+    if not os.path.isdir(path) or not _is_git_repo(path):
+        raise PreconditionError(
+            f"lane '{taskgroup.id}' declares branch '{branch}', but {path} "
+            "is not a git repository",
+            hint="check the lane's path, or drop the branch key",
+        )
+    if taskgroup.workspace == "worktree":
+        if not _has_branch_commit(path, branch):
+            raise PreconditionError(
+                f"lane '{taskgroup.id}' wants branch '{branch}', but {path} "
+                "has no such branch",
+                hint="fetch the branch, fix the name, or drop the branch key",
+            )
+        return
+    current = _head_branch(path)
+    if current != branch:
+        raise PreconditionError(
+            f"lane '{taskgroup.id}' wants branch '{branch}', the tree at "
+            f"{path} is on '{current}'",
+            hint="switch the tree to the declared branch, or drop the branch key",
+        )
+
+
 def dispatch(
     workspace: str,
     project_key: str,
@@ -183,7 +281,8 @@ def dispatch(
     link survives even a failed rerun. ``taskproof rerun`` is the only caller.
 
     Raises the typed errors in `errors.py` so the CLI can map them to exit codes:
-      ConcurrencyError -> 75, AdapterError -> 70, VerifyError -> 71, RegistryError -> 2
+      ConcurrencyError -> 75, AdapterError -> 70, VerifyError -> 71,
+      RegistryError -> 2, PreconditionError -> 78
 
     Rules that must survive any refactor:
       * the acceptance command runs in the PROJECT workdir, never the workspace
@@ -198,6 +297,12 @@ def dispatch(
     # ① resolve the taskgroup. A missing/unknown key is a RegistryError (exit 2).
     reg = registry.load(registry.workspace_registry_path(workspace))
     taskgroup = reg.require(project_key)
+
+    # ①′ the branch gate (card 88): a lane that declares `branch = X` must find
+    # a repository that can honour it. Before the adapter is chosen, before a
+    # task id or a slot exists, so a refusal is a PreconditionError (exit 78)
+    # with no ledger trace and no cap slot taken.
+    _check_branch_precondition(taskgroup)
 
     # The effective per-run timeout and where it came from (card 81): a
     # `--timeout` wins over the lane's own `timeout`, which wins over
@@ -1589,9 +1694,22 @@ def _ensure_links(repo_root: str, workspace_root: str, links) -> list:
 
 
 def _worktree_add(repo_root: str, path: str, lane) -> None:
-    """``git worktree add --detach`` a fresh, long-lived lane workspace."""
+    """``git worktree add --detach`` a fresh, long-lived lane workspace.
+
+    A lane that declares `branch` gets its workspace built from that branch
+    (card 88), so the checkout it runs in for the rest of its life is the one
+    the registry names rather than whatever the main tree's HEAD happened to be
+    on the day it was first used. `--detach` is not decoration: a branch can be
+    checked out by only one worktree at a time and the main tree normally holds
+    it, so a plain checkout of the same branch fails outright. A lane without
+    the key is created exactly as before — detached at the main tree's HEAD —
+    because the argument list is left untouched.
+    """
+    argv = ["git", "worktree", "add", "--detach", path]
+    if getattr(lane, "branch", None):
+        argv.append(lane.branch)
     proc = subprocess.run(
-        ["git", "worktree", "add", "--detach", path],
+        argv,
         cwd=repo_root,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -1615,6 +1733,12 @@ def _ensure_lane_workspace(conn, task_id: str, lane, *, worktree_flag: bool = Fa
     same repo is a hard error with the `workspace-rm` remedy. ``worktree_flag``
     is the one-time ``--worktree`` argument: when set it is ignored, because the
     lane workspace already is the long-lived checkout.
+
+    A lane that declares `branch` is created from that branch; an existing
+    workspace is never re-created or moved onto a newly declared one, exactly
+    like every other edit to a lane's configuration: what runs next changes,
+    the checked-out tree on disk does not. Switch it with `workspace-rm` plus a
+    new run if that is what you want.
     """
     if not _is_git_repo(lane.path):
         raise UsageError(

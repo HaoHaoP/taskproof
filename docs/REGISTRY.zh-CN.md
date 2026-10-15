@@ -110,6 +110,7 @@ link      = ["desktop/node_modules"]              # 从主树软链依赖
 | `link` | 否 | `[]` | **相对工作区根**的相对路径（例如 `desktop/node_modules`），从主树软链进工作区。只在 `workspace = "worktree"` 时有意义；绝对路径或含 `..` 段是硬错误。 |
 | `timeout` | 否 | — | 这条道的硬超时，单位秒。取值是三段链：`--timeout N` > 道上的 `timeout` > `[defaults] timeout`；三者都没给时落到内置的 `1800`。必须是正整数；`0`、负数或非整数都是硬错误。 |
 | `idle_timeout` | 否 | `0`（关闭） | 无进展看门狗预算，单位秒。取值是三段链：`--idle-timeout N` > 道上的 `idle_timeout` > 内置的 `0`（关闭）。只有日志**与**工作树都静默满这么久才判停摆，且记录为 `timeout` 事件并带 `reason = "idle"`。必须是非负整数；负数或非整数是硬错误，`0` 表示关闭。首期默认关闭，先观察误报再谈开启。 |
+| `branch` | 否 | — | 这条道属于哪个分支。**写了就成闸门：**`workspace = "none"` 的道，树没检出在那个分支上就发车即拒（退出码 `78`，不写任务行、不占并发槽位）——分离头算"在 `HEAD` 上"，一样拒；`workspace = "worktree"` 的道要求该分支能解出提交（`refs/heads/<分支>^{commit}`），并按它建工作区（`git worktree add --detach <ws> <分支>`，用 `--detach` 是因为主树通常正持着该分支）。**没写就没有这条闸门** —— 道照旧落在树当前所在的分支上，worktree 道也照旧从主树当前 `HEAD` 建，与今天逐字一致。加载期只校验形状（字符串、去空白后非空、内部无空白）；仓库到底有没有这条分支，发车时才回答。 |
 | `auto_registered` | 否 | `false` | 由 `taskproof register` 写入，不打算手改。 |
 
 ## 读旧格式：零迁移
@@ -244,8 +245,25 @@ result_schema 指定的文件不存在
 workspace 不是 "none" / "worktree" 之一
 link 项是绝对路径、或含 ".." 段
 道没写 workspace = "worktree" 却写了 link
+branch 不是字符串、去空白后为空、或内部含空白字符
 裸项目 id 对应多条道
 ```
+
+## 未知键在 stderr 上告警
+
+加载器没有读取者的键不会拦下任何事 —— 注册表照常加载，退出码也不变 —— 但也不会
+被无声吞掉。`taskproof projects` 与 `taskproof taskgroups` 会按每条键往 **stderr**
+打一行：
+
+```
+warning: unknown key 'branck' in lane 'some-lane'
+warning: unknown key 'concurency' in [defaults]
+```
+
+`[defaults]` 以自己的名字出现；块则以自己的 id 出现。算作已知的键是：块自身的身份键，
+外加 `[[project]]` 块上的**全部道级字段**（兼容路径本来就是靠道级字段判"这是不是一条道"）；
+`[defaults]` 只有 `concurrency` 与 `timeout` —— 加载器实际读取的那两个。
+`--json` 输出不受影响：不塞字段；`run` 完全不打这类警告，它的输出是给机器读的。
 
 ## 编辑方式
 

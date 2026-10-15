@@ -131,8 +131,9 @@ class ApiTest(unittest.TestCase):
             {
                 "id", "project", "path", "group", "aliases", "verify",
                 "verify_kind", "forbidden_paths", "result_schema", "timeout",
-                "idle_timeout", "auto_registered", "probe", "probe_exit",
-                "tasks", "in_progress", "failed", "last_activity",
+                "idle_timeout", "branch", "auto_registered", "probe",
+                "probe_exit", "tasks", "in_progress", "failed",
+                "last_activity",
             },
         )
 
@@ -204,8 +205,8 @@ class ProjectsByProjectTest(unittest.TestCase):
     LEGACY_ROW_KEYS = {
         "id", "project", "path", "group", "aliases", "verify", "verify_kind",
         "forbidden_paths", "result_schema", "timeout", "idle_timeout",
-        "auto_registered", "probe", "probe_exit", "tasks", "in_progress",
-        "failed", "last_activity",
+        "branch", "auto_registered", "probe", "probe_exit", "tasks",
+        "in_progress", "failed", "last_activity",
     }
     SUMMARY_KEYS = {
         "running", "verifying", "done", "failed", "blocked", "timeout",

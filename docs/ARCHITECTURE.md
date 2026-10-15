@@ -210,11 +210,14 @@ and `accept` never quietly rewrites the facts of the run it closes.
 ### 4.1 The dispatch pipeline
 
 One dispatch is a straight line of nine steps, of which the fifth takes almost all
-the wall time.
+the wall time. One precondition sits in front of the third, and it is decided
+before anything is written down:
 
 ![Figure 4 One dispatch, end to end](assets/figures/en/fig4-pipeline.svg)
 
     ① resolve the lane (id / alias / path); unregistered exits 2
+    ①′ the branch gate: a lane that declares `branch` must find a tree that can
+      honour it; a mismatch exits 78 and leaves no ledger row
     ② prepare and connect the workspace (creating the db when needed)
     ③ take the locks: one per group plus the global cap; a refusal exits 75 and
       leaves no ledger row
@@ -234,6 +237,12 @@ a run that breaches a boundary never ran acceptance at all — its `verify_exit`
 NULL and a human has to run `taskproof verify <id>` to learn whether the work
 itself was sound. And the lock release sits in `finally`, so it does not depend on
 how the run ended.
+
+The precondition (①′) also runs *before* the locks (③), which is what makes its
+refusal cheap to reason about: it happens before the task row exists, so there is
+nothing to clean up, no cap slot to release, and no half-written card to explain.
+A lane that declares no `branch` skips ①′ entirely — that is every lane today, and
+its path through the pipeline is unchanged.
 
 ### 4.2 Concurrency
 
@@ -306,7 +315,10 @@ the byte-code out of `t/`.
 
 And one structural blind spot: the gate only sees what changed between the two
 snapshots, so **pre-existing** state is invisible to it — a tree that was already
-on the wrong branch, an untracked file that predates the run.
+on the wrong branch, an untracked file that predates the run. A lane that
+declares `branch` is the exception, and only because a *different* mechanism
+answers first: the precondition at ①′ refuses the dispatch outright, before the
+gate has anything to compare.
 
 ### 4.5 Independent acceptance
 
@@ -383,7 +395,8 @@ A second timeout with the same name is unrelated: `taskproof wait --timeout`
 ### 4.8 Exit codes are not the task status
 
     0 success / 2-3 a registry problem / 64 a usage error / 70 the adapter failed /
-    71 acceptance or an artefact self-check failed / 75 the concurrency limit
+    71 acceptance or an artefact self-check failed / 75 the concurrency limit /
+    78 a declared precondition the repository cannot satisfy (branch mismatch)
 
 An exit code says **how the command ended**, not how the task was recorded, and the
 two are deliberately decoupled: a run that breaches a protected path is recorded
@@ -481,17 +494,20 @@ the fix `taskproof --json taskgroups` reports a non-null `timeout` for all 22.
         read live. The same edit therefore does opposite things to a card that is
         already running.
 
-    D7  The blind spot is invisible
-        Because the gate only compares snapshots, "the tree was already on the
-        wrong branch" can never be detected, and the registry has no `branch` key
-        (see [`REGISTRY.md`](REGISTRY.md)). The current mitigation is a branch
-        assertion written by hand at the head of a lane's `verify` command, which
-        means every new lane has to remember to add one.
+    D7  The blind spot is invisible — fixed where it is declared, still there
+        where it is not
+        A lane that declares `branch` is no longer blind: the precondition at ①′
+        (§4.1) refuses a dispatch whose tree is on another branch, before any slot
+        and with no ledger trace (see [`REGISTRY.md`](REGISTRY.md)). A lane that
+        declares nothing is still exactly as blind as before — the gate only
+        compares snapshots, so "the tree was already on the wrong branch" stays
+        invisible, and so does a hand-written branch assertion at the head of a
+        lane's `verify` command being the only guard there is.
 
 ## 6 Proposed design
 
-Except where marked as landed — §6.1 (`e346213`) and §6.3 (`46ad07ad`) — none of the
-following is implemented.
+Except where marked as landed — §6.1 (`e346213`), §6.3 (`46ad07ad`) and §6.6
+(card 88) — none of the following is implemented.
 
 ### 6.1 A per-lane timeout and a three-step lookup   — landed in `e346213`
 
@@ -555,13 +571,16 @@ Pick one answer for D6 and show it to the reader. The suggestion is "snapshot at
 dispatch, record it on the event", so a card in flight is never changed by a later
 edit and the person editing can see that the change applies to what comes next.
 
-### 6.6 Make unknown keys visible
+### 6.6 Make unknown keys visible   — landed (card 88)
 
 Collect unrecognised keys while loading the registry and report them from
 `taskproof projects` and `doctor`. The 22 dangling declarations were exactly what
 silent ignoring produces; turning it into a warning removes the way D1 comes back
-and changes no exit code. Fixing D7 properly means giving the registry a branch key,
-which is a larger change and deserves its own evaluation.
+and changes no exit code. The warning surfaced from the two listing commands
+(`projects`, `taskgroups`) rather than `doctor`, and no exit code moved. Fixing D7
+properly meant giving the registry a branch key: `branch` is now a declared lane
+field, and declaring one turns the branch into the dispatch-time precondition at
+①′ — the larger change got its own card and its own evaluation.
 
 ## 7 How the changes would be verified
 

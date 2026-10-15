@@ -125,6 +125,41 @@ _LANE_FIELDS = (
     "link",
 )
 
+#: Every key `_load_lane_fields` reads, i.e. every key that is a lane *setting*.
+#: Deliberately NOT the same tuple as `_LANE_FIELDS` above: that one decides
+#: whether a `[[project]]` block *is* a lane, so a setting that does not settle
+#: that question (`timeout`, `branch`, `group`, ...) must stay out of it or a
+#: bare project block would silently become a lane. This tuple is the other
+#: direction — it is what the unknown-key warning uses, so adding a key to the
+#: loader means adding it here too.
+_LANE_SETTING_KEYS = (
+    "group",
+    "verify",
+    "verify_kind",
+    "forbidden_paths",
+    "auto_registered",
+    "result_schema",
+    "workspace",
+    "link",
+    "timeout",
+    "idle_timeout",
+    "branch",
+)
+
+#: Keys a `[[project]]` block may carry without a warning: its own identity
+#: plus every lane setting (the compat path reads a lane off exactly those).
+_PROJECT_KEYS = frozenset(("id", "path", "aliases") + _LANE_SETTING_KEYS)
+
+#: A `[[taskgroup]]` block is the same shape plus its owning project.
+_TASKGROUP_KEYS = _PROJECT_KEYS | {"project"}
+
+#: Keys `[defaults]` is actually read for — `Registry.concurrency`,
+#: `Registry.timeout` / `registry.resolve_timeout`. `idle_timeout` is
+#: deliberately absent: card 83 gave the idle watchdog no `[defaults]` rung
+#: (`registry.resolve_idle_timeout`), so writing one there is ignored like any
+#: typo and has to be warned about, not blessed.
+_DEFAULTS_KEYS = frozenset(("concurrency", "timeout"))
+
 
 class RegistryConflictError(RegistryError):
     """The caller's expected hash no longer matches the registry on disk."""
@@ -266,11 +301,19 @@ class Registry:
         taskgroups: List[Taskgroup],
         defaults: dict,
         source: Optional[str] = None,
+        unknown_keys=None,
     ):
         self.projects = projects
         self.taskgroups = taskgroups
         self.defaults = defaults or {}
         self.source = source
+        #: `(block id, key)` for every key a block carried that its kind cannot
+        #: read, in file order and deduplicated. `[defaults]` names itself as
+        #: `"[defaults]"`. Empty is the normal case. Loading never fails on
+        #: these — `taskproof projects` / `taskgroups` warn on stderr instead,
+        #: which is how a silently dropped `timeout` (card 81's bug) would have
+        #: announced itself.
+        self.unknown_keys = list(unknown_keys or [])
 
     # -- lookup -----------------------------------------------------------
 
@@ -674,6 +717,31 @@ def _load_lane_fields(
             "workspace = 'worktree'"
         )
 
+    # A lane's `branch` (card 88) is only a NAME here. Whether the repository
+    # actually has it is a question for dispatch time (the repo may not be on
+    # the machine yet, and a check at load time would make `projects` fail for a
+    # lane nobody is running). The shape, though, is settled now: a string that
+    # still has something in it once trimmed, and no whitespace inside — a
+    # `branch = "george main"` would otherwise be handed to `git`, which reads
+    # it as a revision range, not a branch.
+    branch = entry.get("branch")
+    if branch is not None:
+        if not isinstance(branch, str):
+            raise RegistryError(
+                f"{source}: {label} field 'branch' must be a string "
+                f"(got {type(branch).__name__})"
+            )
+        branch = branch.strip()
+        if not branch:
+            raise RegistryError(
+                f"{source}: {label} field 'branch' must not be empty"
+            )
+        if any(character.isspace() for character in branch):
+            raise RegistryError(
+                f"{source}: {label} field 'branch' must not contain "
+                f"whitespace: {branch!r}"
+            )
+
     # A lane timeout, when written, must be a positive integer. TOML gives us
     # bool/int/float here, so reject every wrong type up front rather than
     # letting a truthy `true` masquerade as 1 second. Missing stays `None`:
@@ -704,6 +772,7 @@ def _load_lane_fields(
         "result_schema": result_schema,
         "workspace": workspace,
         "link": link,
+        "branch": branch,
         "timeout": timeout,
         "idle_timeout": idle_timeout,
     }
@@ -851,7 +920,35 @@ def load(path: str) -> Registry:
     defaults = data.get("defaults", {})
     if not isinstance(defaults, dict):
         raise RegistryError(f"{path}: 'defaults' must be a table")
-    return Registry(projects, taskgroups, defaults, source=path)
+
+    # Card 88: every key a block carries that its kind has no reader for. The
+    # ids are guaranteed non-empty strings by here (both loops above refuse a
+    # block without one first), so this pass only has to walk the blocks.
+    # `data` keeps keys in the order they first appear in the document, which is
+    # what "in order of appearance" means for a reader looking at the file.
+    unknown_keys: List[tuple] = []
+    recorded = set()
+
+    def note(block: str, entry: dict, known) -> None:
+        for key in entry:
+            if key in known or (block, key) in recorded:
+                continue
+            recorded.add((block, key))
+            unknown_keys.append((block, key))
+
+    for name, value in data.items():
+        if name == "defaults" and isinstance(value, dict):
+            note("[defaults]", value, _DEFAULTS_KEYS)
+        elif name == "project" and isinstance(value, list):
+            for entry in value:
+                note(entry["id"], entry, _PROJECT_KEYS)
+        elif name == "taskgroup" and isinstance(value, list):
+            for entry in value:
+                note(entry["id"], entry, _TASKGROUP_KEYS)
+
+    return Registry(
+        projects, taskgroups, defaults, source=path, unknown_keys=unknown_keys
+    )
 
 
 def workspace_registry_path(workspace: str) -> str:
@@ -917,6 +1014,9 @@ def taskgroup_record(taskgroup: Taskgroup, probe_flags: Optional[dict] = None) -
         "result_schema": taskgroup.result_schema,
         "timeout": taskgroup.timeout,
         "idle_timeout": taskgroup.idle_timeout,
+        # Card 88: the declared branch, or null when the lane declares none
+        # (the shape `timeout` beside it uses for "not declared").
+        "branch": taskgroup.branch,
         "auto_registered": bool(taskgroup.auto_registered),
         "probe": probe,
         "probe_exit": probe_exit,

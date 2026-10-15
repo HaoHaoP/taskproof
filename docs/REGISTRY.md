@@ -114,6 +114,7 @@ link      = ["desktop/node_modules"]              # symlink deps from the main t
 | `link` | no | `[]` | Relative paths, **relative to the workspace root** (e.g. `desktop/node_modules`), to symlink from the main checkout into the lane workspace. Only valid with `workspace = "worktree"`; an absolute path or any `..` segment is a hard error. |
 | `timeout` | no | — | Per-lane hard timeout in seconds. The effective value is a three-step chain: `--timeout N` > this lane's `timeout` > `[defaults] timeout`, and when none of those is set it falls back to the built-in `1800`. Must be a positive integer; `0`, a negative number or a non-integer is a hard error. |
 | `idle_timeout` | no | `0` (off) | No-progress watchdog budget in seconds. The effective value is a three-step chain: `--idle-timeout N` > this lane's `idle_timeout` > the built-in `0` (off). A card is stopped only when BOTH its log and its working tree have been quiet for that long, and the stop is recorded as a `timeout` carrying `reason = "idle"`. Must be a non-negative integer; a negative number or a non-integer is a hard error, and `0` disables the watchdog. Shipped off so it can be watched for false positives before anyone trusts it. |
+| `branch` | no | — | The branch this lane belongs on. **Declaring it turns the branch into a gate:** a `workspace = "none"` lane is refused at dispatch (exit `78`, no task row, no concurrency slot) unless the tree is checked out ON that branch — a detached `HEAD` counts as "on `HEAD`" and is refused; a `workspace = "worktree"` lane requires the branch to resolve to a commit (`refs/heads/<branch>^{commit}`) and builds its workspace from that branch (`git worktree add --detach <ws> <branch>`, detached so the main tree may keep holding it). **Not declaring it is not a gate at all** — the lane runs wherever the tree happens to be and a worktree lane is still created from the main tree's current `HEAD`, exactly as before. Only the shape is validated at load time (a non-empty string with no whitespace inside); whether the repository actually has the branch is answered at dispatch. |
 | `auto_registered` | no | `false` | Written by `taskproof register`; not meant to be edited by hand. |
 
 ## Reading a flat, older file (zero migration)
@@ -279,8 +280,28 @@ result_schema file not found
 workspace is not one of "none" / "worktree"
 link entry is absolute or contains a ".." segment
 link is set on a lane whose workspace is not "worktree"
+branch is not a string, is empty, or contains whitespace
 a bare project id resolves to several lanes
 ```
+
+## Unknown keys warn on stderr
+
+A key the loader has no reader for does not stop anything — the registry still
+loads and the exit code is unchanged — but it is never dropped in silence
+either. `taskproof projects` and `taskproof taskgroups` print one line per key
+to **stderr**:
+
+```
+warning: unknown key 'branck' in lane 'some-lane'
+warning: unknown key 'concurency' in [defaults]
+```
+
+`[defaults]` names itself; a block names its own id. The keys that count as
+known are the block's identity plus, for a `[[project]]` block, every lane
+setting (the compatibility rule reads a lane off exactly those), and for
+`[defaults]` only `concurrency` and `timeout` — the two keys the loader actually
+reads there. `--json` output is unaffected: no field is added, and `run` does
+not warn at all, because its stream is read by machines.
 
 ## Editing it
 

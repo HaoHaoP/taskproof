@@ -254,6 +254,7 @@ the pair.
 70   adapter (agent) failure
 71   verification or artifact self-check failure
 75   concurrency limit reached
+78   registry precondition the repository cannot satisfy (branch mismatch)
 ```
 
 An exit code says **how the command ended**, not what the task was recorded as,

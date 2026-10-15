@@ -39,7 +39,13 @@ from taskproof.dispatch import (
     summary_counts,
     task_detail,
 )
-from taskproof.errors import AdapterError, ConcurrencyError, UsageError, VerifyError
+from taskproof.errors import (
+    AdapterError,
+    ConcurrencyError,
+    PreconditionError,
+    UsageError,
+    VerifyError,
+)
 from taskproof.models import (
     STATUS_BLOCKED,
     STATUS_DONE,
@@ -1682,6 +1688,246 @@ class LaneWorkspaceTest(unittest.TestCase):
             os.path.exists(plain_wt),
             "rm still deletes the task's own --worktree checkout",
         )
+
+
+class LaneBranchGateTest(unittest.TestCase):
+    """Card 88: a lane that declares `branch` is a contract about the checkout.
+
+    Two questions, both answered against a real temporary repository rather
+    than a fixture: is this dispatch allowed to happen at all (a mismatch is a
+    refusal with no ledger trace), and where does a `workspace = "worktree"`
+    lane's long-lived checkout come from (the declared branch, not whatever the
+    main tree's HEAD happened to be)?
+
+    A lane that declares nothing keeps today's behaviour byte for byte, and
+    that is pinned here too — it is the regression that matters most, because
+    every existing lane has no `branch` key.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = os.path.realpath(self._tmp.name)
+        self.ws = os.path.join(self.tmp, "workspace")
+        prepare_workspace(self.ws)
+        self.repo = os.path.join(self.tmp, "project")
+        os.makedirs(self.repo)
+        self._git("init", "-q")
+        # `symbolic-ref` rather than `git init -b`: the branch names below are
+        # pinned no matter which default the installed git prefers.
+        self._git("symbolic-ref", "HEAD", "refs/heads/main")
+        self._git("config", "user.email", "t@t")
+        self._git("config", "user.name", "t")
+        self._write(os.path.join(self.repo, "seed.txt"), "seed\n")
+        self._git("add", "seed.txt")
+        self._git("commit", "-qm", "seed")
+        self.main_commit = self._head(self.repo)
+        # `other` diverges: one commit `main` does not have, so "which branch
+        # was this checkout built from" is a question with a real answer.
+        self._git("checkout", "-q", "-b", "other")
+        self._write(os.path.join(self.repo, "other.txt"), "other\n")
+        self._git("add", "other.txt")
+        self._git("commit", "-qm", "other")
+        self.other_commit = self._head(self.repo)
+        self.assertNotEqual(self.main_commit, self.other_commit)
+        self.workspace_path = os.path.join(self.tmp, "project-ws-lane")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    # -- helpers ----------------------------------------------------------
+
+    def _git(self, *args, cwd=None):
+        return subprocess.run(
+            ["git", *args], cwd=cwd or self.repo, check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+
+    def _head(self, where):
+        return self._git("rev-parse", "HEAD", cwd=where).stdout.strip()
+
+    def _current_branch(self, where):
+        return self._git(
+            "rev-parse", "--abbrev-ref", "HEAD", cwd=where
+        ).stdout.strip()
+
+    def _write(self, path, text):
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def _registry(self, *, workspace=None, branch=None, path=None, lane_id="lane"):
+        path = path or self.repo
+        lines = [
+            "[defaults]", "concurrency = 3", "timeout = 60", "",
+            "[[taskgroup]]", f'id = "{lane_id}"', f'path = "{path}"',
+            'verify = "exit 0"', 'verify_kind = "check"',
+        ]
+        if workspace is not None:
+            lines.append(f'workspace = "{workspace}"')
+        if branch is not None:
+            lines.append(f'branch = "{branch}"')
+        with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+
+    def _run(self, **kwargs):
+        return dispatch(
+            self.ws, "lane", "do it",
+            adapter="custom:sh -c 'echo done'", **kwargs,
+        )
+
+    def _workdir(self, task_id):
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            return storage.get_task(conn, task_id)["workdir"]
+        finally:
+            conn.close()
+
+    def _ledger_counts(self):
+        """(task rows, event rows, held slots) — a refusal must leave 0/0/0."""
+        conn = storage.connect(storage.db_path(self.ws))
+        try:
+            storage.migrate(conn)
+            tasks = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+            events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            return tasks, events, concurrency.count_active(conn)
+        finally:
+            conn.close()
+
+    def _audit_lines(self):
+        lines = []
+        for name in sorted(os.listdir(self.ws)):
+            if name.startswith("events-") and name.endswith(".jsonl"):
+                with open(os.path.join(self.ws, name), encoding="utf-8") as fh:
+                    lines += [line for line in fh.read().splitlines() if line.strip()]
+        return lines
+
+    # -- refusals ---------------------------------------------------------
+
+    def test_none_lane_on_another_branch_is_refused_without_a_trace(self):
+        self._registry(branch="main")
+        self._git("checkout", "-q", "other")
+
+        with self.assertRaises(PreconditionError) as ctx:
+            self._run()
+
+        self.assertEqual(PreconditionError.exit_code, 78)
+        self.assertEqual(ctx.exception.exit_code, 78)
+        message = str(ctx.exception)
+        self.assertIn("lane 'lane' wants branch 'main'", message)
+        self.assertIn("is on 'other'", message)
+        # Refused before the task id, the row and the claim: nothing to find.
+        self.assertEqual(self._ledger_counts(), (0, 0, 0))
+        self.assertEqual(self._audit_lines(), [])
+
+    def test_a_detached_tree_is_refused_and_named_as_HEAD(self):
+        # A `workspace = "worktree"` lane is what forced this gate into the
+        # dispatcher: its own checkout is detached, so a hand-written `verify`
+        # guard reading `--abbrev-ref HEAD` can only ever see "HEAD".
+        self._registry(branch="main")
+        self._git("checkout", "-q", "main")
+        self._git("checkout", "-q", "--detach")
+
+        with self.assertRaises(PreconditionError) as ctx:
+            self._run()
+
+        self.assertIn("is on 'HEAD'", str(ctx.exception))
+        self.assertEqual(self._ledger_counts(), (0, 0, 0))
+
+    def test_worktree_lane_refuses_a_branch_that_does_not_resolve(self):
+        self._registry(workspace="worktree", branch="release/does-not-exist")
+
+        with self.assertRaises(PreconditionError) as ctx:
+            self._run()
+
+        self.assertEqual(ctx.exception.exit_code, 78)
+        self.assertIn("has no such branch", str(ctx.exception))
+        # Nothing was built and nothing was recorded.
+        self.assertFalse(os.path.exists(self.workspace_path))
+        self.assertEqual(self._ledger_counts(), (0, 0, 0))
+
+    def test_a_path_that_is_not_a_repository_is_refused(self):
+        plain = os.path.join(self.tmp, "not-a-repo")
+        os.makedirs(plain)
+        self._registry(branch="main", path=plain)
+        with self.assertRaises(PreconditionError) as ctx:
+            self._run()
+        self.assertIn("is not a git repository", str(ctx.exception))
+        self.assertEqual(self._ledger_counts(), (0, 0, 0))
+
+    def test_a_path_that_does_not_exist_is_refused(self):
+        self._registry(branch="main", path=os.path.join(self.tmp, "gone"))
+        with self.assertRaises(PreconditionError) as ctx:
+            self._run()
+        self.assertIn("is not a git repository", str(ctx.exception))
+        self.assertEqual(self._ledger_counts(), (0, 0, 0))
+
+    # -- the gate opens ---------------------------------------------------
+
+    def test_none_lane_on_the_declared_branch_runs(self):
+        self._registry(branch="main")
+        self._git("checkout", "-q", "main")
+
+        task_id = self._run()
+
+        detail = task_detail(self.ws, task_id)["task"]
+        self.assertEqual(detail["status"], STATUS_DONE)
+        self.assertEqual(self._workdir(task_id), self.repo)
+
+    def test_worktree_lane_is_built_from_the_declared_branch(self):
+        self._registry(workspace="worktree", branch="main")
+        # The main tree stays on `other` throughout: if the workspace were built
+        # from HEAD (today's behaviour) this run would land on `other`'s commit.
+        self._git("checkout", "-q", "other")
+
+        task_id = self._run()
+
+        self.assertEqual(self._head(self.workspace_path), self.main_commit)
+        self.assertNotEqual(self._head(self.workspace_path), self.other_commit)
+        # Detached on purpose: the main tree usually holds the branch, and git
+        # lets only one worktree check a branch out at a time.
+        self.assertEqual(self._current_branch(self.workspace_path), "HEAD")
+        self.assertEqual(self._workdir(task_id), self.workspace_path)
+
+    def test_worktree_lane_builds_detached_while_the_main_tree_holds_the_branch(self):
+        # The common case, and the reason for `--detach`: `git worktree add <ws>
+        # main` fails outright when the main tree already has `main` checked out
+        # ("fatal: 'main' is already checked out").
+        self._registry(workspace="worktree", branch="main")
+        self._git("checkout", "-q", "main")
+
+        self._run()
+
+        self.assertEqual(self._head(self.workspace_path), self.main_commit)
+        self.assertEqual(self._current_branch(self.workspace_path), "HEAD")
+        # ...and the main tree still holds it afterwards.
+        self.assertEqual(self._current_branch(self.repo), "main")
+
+    # -- the undocumented key that is not there ---------------------------
+
+    def test_a_lane_without_branch_still_runs_off_branch(self):
+        # No `branch` key at all: the registry says nothing, so neither does the
+        # dispatcher — this is every lane in the wild today.
+        self._registry()
+        self._git("checkout", "-q", "other")
+
+        task_id = self._run()
+
+        self.assertEqual(task_detail(self.ws, task_id)["task"]["status"], STATUS_DONE)
+        self.assertEqual(self._workdir(task_id), self.repo)
+
+    def test_a_worktree_lane_without_branch_is_still_built_from_head(self):
+        self._registry(workspace="worktree")
+        self._git("checkout", "-q", "other")
+        head = self._head(self.repo)
+
+        task_id = self._run()
+
+        self.assertEqual(self._head(self.workspace_path), head)
+        self.assertEqual(self._head(self.workspace_path), self.other_commit)
+        self.assertEqual(self._current_branch(self.workspace_path), "HEAD")
+        self.assertEqual(self._workdir(task_id), self.workspace_path)
 
 
 class VerifyingLifecycleTest(DispatchBase):

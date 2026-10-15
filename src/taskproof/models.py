@@ -68,6 +68,13 @@ class Taskgroup:
     #: (for example ``desktop/node_modules``). Empty means the dispatcher may
     #: probe for package-manager dependency directories.
     link: List[str] = field(default_factory=list)
+    #: Branch this lane declares as its home (card 88). ``None`` — the default —
+    #: means the lane says nothing, so no gate runs and a ``workspace =
+    #: "worktree"`` lane is still built from the main tree's current HEAD, byte
+    #: for byte as before. A declared name is checked against the repository at
+    #: dispatch time (a mismatch raises a precondition error, exit 78) and is
+    #: the commit a lane workspace is created from. See `dispatch`.
+    branch: Optional[str] = None
     #: Concurrency lock name. Empty means this lane's own id; loading fills the
     #: default in so callers never need to special-case an unset value.
     group: str = ""

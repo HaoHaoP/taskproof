@@ -48,6 +48,7 @@ EXIT_MEANINGS = (
     (errors.EXIT_ADAPTER, "adapter"),
     (errors.EXIT_VERIFY, "verify"),
     (errors.EXIT_CONCURRENCY, "concurrency"),
+    (errors.EXIT_PRECONDITION, "precondition"),
 )
 
 
