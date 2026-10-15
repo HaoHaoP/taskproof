@@ -12,6 +12,10 @@ permissions:
 
 jobs:
   build:
+    # A pre-release (an `-rc` tag's dry run) must never reach the public index:
+    # `release: published` also fires for pre-releases, so without this guard a
+    # dry run would upload its artefacts for real. A dispatch still publishes.
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,6 +44,7 @@ jobs:
 
   publish:
     needs: build
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
