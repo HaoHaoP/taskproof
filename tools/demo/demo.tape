@@ -20,14 +20,15 @@ Set TypingSpeed 12ms
 Set CursorBlink false
 Set Framerate 24
 
+# The setup and the first command are typed while hidden, so the very first
+# frame of the GIF already shows something instead of an empty prompt.
+Hide
 Type "cd /tmp/tp-demo/repo && export TASKPROOF_HOME=/tmp/tp-demo/state"
 Enter
-Sleep 700ms
-
-Type "# card 1: the agent says it is done"
-Enter
-Sleep 700ms
+Sleep 500ms
 Type "taskproof run demo-app 'fix the greeting in app.txt' --adapter custom:./agent-lies"
+Show
+Sleep 350ms
 Enter
 Sleep 7s
 
