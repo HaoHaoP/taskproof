@@ -189,6 +189,12 @@ jobs:
   release:
     needs: [python, mac, win, linux]
     runs-on: ubuntu-latest
+    # `contents: write` to create the Release; `actions: write` to dispatch the
+    # publish workflow in the last step below (a job-level block replaces the
+    # workflow-level one, so both have to be listed).
+    permissions:
+      contents: write
+      actions: write
     steps:
       - name: download all artefacts
         uses: actions/download-artifact@v4
@@ -261,3 +267,15 @@ jobs:
             - **配图是生成器的函数，不是解释器的函数。** 生成器的数值写法随解释器变（Python 3.12 的补偿求和会动
               最后一位），于是"重跑生成器再比对"根本当不成判据。现在每个 SVG 属性都过一个统一的数值格式助手，
               CI 会重生成两套并在漂移时失败。
+
+      # `release: published` cannot route here on its own: this Release is created
+      # with the run's automatic GITHUB_TOKEN, and events raised by that token do
+      # not start further workflows. `workflow_dispatch` is the documented
+      # exception, so the publish workflow is dispatched on purpose — on the tag's
+      # ref, so PyPI gets exactly the tagged tree, and only for a real release: an
+      # `-rc` dry run keeps its artefacts away from the public index.
+      - name: publish to PyPI
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run publish.yml --ref "${{ github.ref_name }}"
