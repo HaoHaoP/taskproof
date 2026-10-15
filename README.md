@@ -51,26 +51,32 @@ else keeps working.
 ### Command line
 
 ```bash
+pipx install taskproof
+```
+
+`uv tool install taskproof` does the same thing. Python **3.11+**, and the package
+is pure standard-library Python — there is no dependency tree to resolve.
+
+The latest development version, straight from the repository:
+
+```bash
 pipx install git+https://github.com/HaoHaoP/taskproof
 ```
 
-Or download the wheel from the same Release and install the local file:
+Offline, or pinned to one build: download the wheel (or the sdist) from the
+[Releases](https://github.com/HaoHaoP/taskproof/releases) page and install the
+file. Its name carries the version, so take it from the release you downloaded —
+there is no unpinned wheel name to copy.
 
 ```bash
 pipx install ./taskproof-<version>-py3-none-any.whl
 ```
-
-The wheel's filename carries the version — take it from the Release you just
-downloaded; there is no unpinned wheel name to copy.
 
 Or run from a source checkout:
 
 ```bash
 pip install -e .
 ```
-
-**There is no `taskproof` package on PyPI.** Do not look for it there; use one of
-the three installs above.
 
 ## Run a task
 

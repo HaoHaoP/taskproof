@@ -26,6 +26,7 @@ dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/HaoHaoP/taskproof"
+Documentation = "https://taskproof.haohaop.com/"
 Issues = "https://github.com/HaoHaoP/taskproof/issues"
 
 [project.scripts]
