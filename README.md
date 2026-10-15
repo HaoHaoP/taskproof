@@ -10,6 +10,10 @@ It does not decide *what* to do. It guarantees that whatever gets dispatched is
 **independently verified** and **recorded** — so you never have to trust an
 agent's own claim that it finished.
 
+<p align="center"><img src="docs/assets/demo.gif" width="820" alt="A card is dispatched, the agent claims it is done, and the machine disagrees."></p>
+
+*A card is dispatched. The agent says it finished. The record says it changed nothing — the acceptance command is what decides.*
+
 **Status: stage 1 is usable, and the stage-2 desktop console is here.** The
 engine, CLI, a browser board, a local read-only REST API, and an Electron console
 in `desktop/` are implemented. See [`docs/DESIGN.md`](docs/DESIGN.md) for the
@@ -53,8 +57,11 @@ pipx install git+https://github.com/HaoHaoP/taskproof
 Or download the wheel from the same Release and install the local file:
 
 ```bash
-pipx install ./taskproof-0.2.1-py3-none-any.whl
+pipx install ./taskproof-<version>-py3-none-any.whl
 ```
+
+The wheel's filename carries the version — take it from the Release you just
+downloaded; there is no unpinned wheel name to copy.
 
 Or run from a source checkout:
 
@@ -255,6 +262,10 @@ UnoCSS, Pinia, vue-i18n). It is the same renderer `taskproof board` serves in a
 browser — one rendering layer with two hosts. It is bilingual — zh-CN and en, following the system locale with an
 English fallback.
 
+<p align="center"><img src="docs/assets/board.png" width="900" alt="The board: a not-passing column next to a done column."></p>
+
+*The board — the run the agent called done sits under **not passing**; the run that really changed the file sits under **done**.*
+
 The process model is the interesting part. The app spawns the local service
 itself — `taskproof api --port 0` — reads the bound port from the child's stdout,
 and terminates the child on exit. Data comes from that loopback, **read-only**
@@ -373,6 +384,9 @@ Two test suites, both green at the time of writing:
 CI runs three checks: the asset scan (`tools/scan_assets.py`), the enum-contract
 consistency check (`PYTHONPATH=src python3 tools/gen_contract.py --check`), and
 the desktop build + tests.
+
+The animation at the top of this page is reproducible: `tools/demo/` holds the
+throwaway `/tmp` workspace builder and the `vhs` tape.
 
 ## Known limitations
 

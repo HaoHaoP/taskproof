@@ -9,6 +9,10 @@
 它不决定**该做什么**，只保证派出去的活都被**独立验收**过、**留了痕迹** ——
 你不需要相信 agent 自称"我干完了"。
 
+<p align="center"><img src="docs/assets/demo.gif" width="820" alt="一张卡被派发，智能体自称完成，机器不同意。"></p>
+
+*一张卡被派发出去。智能体说它干完了。账本说它什么也没改 —— 说了算的是验收命令。*
+
 **状态：stage 1 已可用，stage 2 的桌面看板也来了。** 引擎、CLI、浏览器看板、本地只读
 REST API，以及 `desktop/` 里的 Electron 看板均已实现。完整设计与决策记录见
 [`docs/DESIGN.zh-CN.md`](docs/DESIGN.zh-CN.md)；各机制的现行实现与配图见
@@ -45,8 +49,10 @@ pipx install git+https://github.com/HaoHaoP/taskproof
 或从同一个 Release 下载 wheel，装本地文件：
 
 ```bash
-pipx install ./taskproof-0.2.1-py3-none-any.whl
+pipx install ./taskproof-<version>-py3-none-any.whl
 ```
+
+wheel 的文件名里带着版本号，照你刚下载的那个 Release 写，没有不带版本号的文件名可抄。
 
 或从源码可编辑安装：
 
@@ -210,6 +216,10 @@ taskproof accept <id> --note "原因"     # failed：必须带 --note
 Pinia、vue-i18n），就是 `taskproof board` 在浏览器里服务的那份渲染层 —— 一份渲染层，
 Electron 与浏览器两处宿主。中英双语（跟随系统 locale，回退英文）。
 
+<p align="center"><img src="docs/assets/board.png" width="900" alt="看板：未通过列与完成列并列。"></p>
+
+*看板 —— agent 自称干完了的那次运行落在**未通过**列，真正改动了文件的那次落在**完成**列。*
+
 有意思的是它的进程模型：应用自己拉起本地服务 —— `taskproof api --port 0` —— 从子进程 stdout
 读回绑定的端口，退出时再关掉它。数据全部来自那个回环、**只读**的 REST API，不出 `127.0.0.1`。
 
@@ -305,6 +315,8 @@ PYTHONPATH=src python3 -m taskproof doctor
 
 CI 跑三个检查：资产扫描（`tools/scan_assets.py`）、枚举契约一致性检查
 （`PYTHONPATH=src python3 tools/gen_contract.py --check`），以及桌面构建 + 测试。
+
+本页顶部的动图可复现：`tools/demo/` 里是一次性 `/tmp` 工作区的搭建脚本与那盘 `vhs` 录像带。
 
 ## 已知限制
 
