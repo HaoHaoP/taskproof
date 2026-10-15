@@ -1,5 +1,5 @@
-import { d as defineComponent, i as useBoardStore, u as useI18n, c as createElementBlock, b as createBaseVNode, t as toDisplayString, f as unref, g as createCommentVNode, e as createVNode, l as withCtx, h as computed, p as resolveComponent, v as useRouter, s as useRoute, o as openBlock, _ as _export_sfc } from "./index-B-PLdDbR.js";
-import { T as TaskDrawer, d as duration } from "./TaskDrawer-6JoGTH0s.js";
+import { d as defineComponent, i as useBoardStore, u as useI18n, c as createElementBlock, b as createBaseVNode, t as toDisplayString, f as unref, g as createCommentVNode, e as createVNode, l as withCtx, h as computed, p as resolveComponent, v as useRouter, s as useRoute, o as openBlock, _ as _export_sfc } from "./index-Cd1EoUu-.js";
+import { T as TaskDrawer, d as duration } from "./TaskDrawer-COqi93G5.js";
 const _hoisted_1 = { class: "tasks-view" };
 const _hoisted_2 = { class: "panes" };
 const _hoisted_3 = { class: "sub" };

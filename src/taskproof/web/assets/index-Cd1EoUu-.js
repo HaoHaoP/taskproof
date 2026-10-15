@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./MatrixView-BMsawnxh.js","./TaskDrawer-6JoGTH0s.js","./TaskDrawer-N299VKzd.css","./MatrixView-BM8nu9s2.css","./ProjectsView-BcXcx5Gw.js","./ProjectsView-CqNFL-fi.css","./TasksView-BWhSHCHi.js","./TasksView-Bn08731V.css","./SettingsView-D_-waf0s.js","./SettingsView-aqTS3ubB.css"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./MatrixView-ClSEIjZm.js","./TaskDrawer-COqi93G5.js","./TaskDrawer-N299VKzd.css","./MatrixView-BM8nu9s2.css","./ProjectsView-BXWsK6eF.js","./ProjectsView-CqNFL-fi.css","./TasksView-CgOmskO0.js","./TasksView-Bn08731V.css","./SettingsView-Co6AsKsi.js","./SettingsView-aqTS3ubB.css"])))=>i.map(i=>d[i]);
 // @__NO_SIDE_EFFECTS__
 function makeMap(str) {
   const map2 = /* @__PURE__ */ Object.create(null);
@@ -73297,7 +73297,7 @@ function createClient(baseUrl) {
 }
 const statuses = [{ "id": "running", "terminal": false }, { "id": "verifying", "terminal": false }, { "id": "done", "terminal": true }, { "id": "failed", "terminal": true }, { "id": "blocked", "terminal": true }, { "id": "timeout", "terminal": true }, { "id": "cancelled", "terminal": true }];
 const verify_kinds = ["check", "build", "none"];
-const exit_codes = [{ "code": 0, "meaning": "success" }, { "code": 2, "meaning": "registry" }, { "code": 64, "meaning": "usage" }, { "code": 70, "meaning": "adapter" }, { "code": 71, "meaning": "verify" }, { "code": 75, "meaning": "concurrency" }];
+const exit_codes = [{ "code": 0, "meaning": "success" }, { "code": 2, "meaning": "registry" }, { "code": 64, "meaning": "usage" }, { "code": 70, "meaning": "adapter" }, { "code": 71, "meaning": "verify" }, { "code": 75, "meaning": "concurrency" }, { "code": 78, "meaning": "precondition" }];
 const enums = {
   statuses,
   verify_kinds,
@@ -75338,14 +75338,14 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: "/", redirect: () => "/matrix" },
-    { path: "/matrix/:taskId?", name: "matrix", component: () => __vitePreload(() => import("./MatrixView-BMsawnxh.js"), true ? __vite__mapDeps([0,1,2,3]) : void 0, import.meta.url) },
+    { path: "/matrix/:taskId?", name: "matrix", component: () => __vitePreload(() => import("./MatrixView-ClSEIjZm.js"), true ? __vite__mapDeps([0,1,2,3]) : void 0, import.meta.url) },
     {
       path: "/projects/:taskId?",
       name: "projects",
-      component: () => __vitePreload(() => import("./ProjectsView-BcXcx5Gw.js"), true ? __vite__mapDeps([4,1,2,5]) : void 0, import.meta.url)
+      component: () => __vitePreload(() => import("./ProjectsView-BXWsK6eF.js"), true ? __vite__mapDeps([4,1,2,5]) : void 0, import.meta.url)
     },
-    { path: "/tasks/:taskId?", name: "tasks", component: () => __vitePreload(() => import("./TasksView-BWhSHCHi.js"), true ? __vite__mapDeps([6,1,2,7]) : void 0, import.meta.url) },
-    { path: "/settings", name: "settings", component: () => __vitePreload(() => import("./SettingsView-D_-waf0s.js"), true ? __vite__mapDeps([8,9]) : void 0, import.meta.url) },
+    { path: "/tasks/:taskId?", name: "tasks", component: () => __vitePreload(() => import("./TasksView-CgOmskO0.js"), true ? __vite__mapDeps([6,1,2,7]) : void 0, import.meta.url) },
+    { path: "/settings", name: "settings", component: () => __vitePreload(() => import("./SettingsView-Co6AsKsi.js"), true ? __vite__mapDeps([8,9]) : void 0, import.meta.url) },
     { path: "/:pathMatch(.*)*", redirect: () => "/matrix" }
   ]
 });

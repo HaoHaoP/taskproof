@@ -1,4 +1,4 @@
-import { d as defineComponent, i as useBoardStore, j as useSettingsStore, u as useI18n, k as watch, a8 as onMounted, c as createElementBlock, b as createBaseVNode, t as toDisplayString, f as unref, g as createCommentVNode, e as createVNode, l as withCtx, a9 as openAbout, F as Fragment, r as renderList, aa as STATUS_IDS, ab as VERIFY_KINDS, ac as hasDesktopHost, h as computed, U as ref, p as resolveComponent, y as createTextVNode, n as normalizeClass, o as openBlock, _ as _export_sfc } from "./index-B-PLdDbR.js";
+import { d as defineComponent, i as useBoardStore, j as useSettingsStore, u as useI18n, k as watch, a8 as onMounted, c as createElementBlock, b as createBaseVNode, t as toDisplayString, f as unref, g as createCommentVNode, e as createVNode, l as withCtx, a9 as openAbout, F as Fragment, r as renderList, aa as STATUS_IDS, ab as VERIFY_KINDS, ac as hasDesktopHost, h as computed, U as ref, p as resolveComponent, y as createTextVNode, n as normalizeClass, o as openBlock, _ as _export_sfc } from "./index-Cd1EoUu-.js";
 const _hoisted_1 = { class: "settings-view" };
 const _hoisted_2 = { class: "panes grouped" };
 const _hoisted_3 = { class: "setwrap" };
