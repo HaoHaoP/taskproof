@@ -2,68 +2,68 @@
   <rect width="1010" height="600" fill="white"/>
   <text x="24" y="34" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="16" fill="#1f2328" text-anchor="start" font-weight="600">Figure 1  taskproof: context and the boundary of responsibility</text>
   <rect x="30" y="220" width="200" height="130" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
-  <text x="130.0" y="271.42" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="14" fill="#1f2328" text-anchor="middle" font-weight="600">Main agent / human</text>
-  <text x="130.0" y="291.47" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#6e7781" text-anchor="middle" font-weight="400">Hermes · Claude Code</text>
-  <text x="130.0" y="306.97" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#6e7781" text-anchor="middle" font-weight="400">Terminal · desktop console</text>
+  <text x="130" y="271.42" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="14" fill="#1f2328" text-anchor="middle" font-weight="600">Main agent / human</text>
+  <text x="130" y="291.47" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#6e7781" text-anchor="middle" font-weight="400">Hermes · Claude Code</text>
+  <text x="130" y="306.97" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#6e7781" text-anchor="middle" font-weight="400">Terminal · desktop console</text>
   <rect x="290" y="78" width="430" height="400" rx="10" fill="#ffffff" stroke="#8c959f" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text x="505" y="106" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="14" fill="#1f2328" text-anchor="middle" font-weight="600">taskproof: purely mechanical, no LLM</text>
   <rect x="310" y="130" width="180" height="92" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
-  <text x="400.0" y="161.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">Config</text>
-  <text x="400.0" y="180.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">projects.toml</text>
-  <text x="400.0" y="196.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">repos · lanes · acceptance</text>
+  <text x="400" y="161.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">Config</text>
+  <text x="400" y="180.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">projects.toml</text>
+  <text x="400" y="196.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">repos · lanes · acceptance</text>
   <rect x="505" y="130" width="180" height="92" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
-  <text x="595.0" y="161.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">Dispatch</text>
-  <text x="595.0" y="180.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">dispatch.py</text>
-  <text x="595.0" y="196.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">pipeline ①..⑨</text>
+  <text x="595" y="161.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">Dispatch</text>
+  <text x="595" y="180.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">dispatch.py</text>
+  <text x="595" y="196.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">pipeline ①..⑨</text>
   <rect x="310" y="240" width="180" height="92" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
-  <text x="400.0" y="271.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">Execution</text>
-  <text x="400.0" y="290.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">adapters/*</text>
-  <text x="400.0" y="306.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">template + result parsing</text>
+  <text x="400" y="271.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">Execution</text>
+  <text x="400" y="290.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">adapters/*</text>
+  <text x="400" y="306.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">template + result parsing</text>
   <rect x="505" y="240" width="180" height="92" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
-  <text x="595.0" y="271.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">Verdict</text>
-  <text x="595.0" y="290.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">verify.py</text>
-  <text x="595.0" y="306.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">acceptance + the diff gate</text>
+  <text x="595" y="271.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">Verdict</text>
+  <text x="595" y="290.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">verify.py</text>
+  <text x="595" y="306.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#0969da" text-anchor="middle" font-weight="400">acceptance + the diff gate</text>
   <rect x="310" y="352" width="375" height="96" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
   <text x="497.5" y="379.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">concurrency claims</text>
   <text x="497.5" y="397.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">transactional claims + expiry reclamation</text>
   <text x="497.5" y="412.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">one task per group · the global cap</text>
   <text x="497.5" y="427.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#9a6700" text-anchor="middle" font-weight="400">a refusal exits 75 and leaves no ledger row</text>
   <rect x="770" y="130" width="210" height="110" rx="6" fill="#ffffff" stroke="#1f2328" stroke-width="1.2"/>
-  <text x="875.0" y="164.14" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">coding agent CLI</text>
-  <text x="875.0" y="183.58" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">codex · claude · gemini</text>
-  <text x="875.0" y="198.58" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">opencode · custom:&lt;cmd&gt;</text>
-  <text x="875.0" y="213.58" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">own group, stdin=/dev/null</text>
+  <text x="875" y="164.14" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">coding agent CLI</text>
+  <text x="875" y="183.58" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">codex · claude · gemini</text>
+  <text x="875" y="198.58" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">opencode · custom:&lt;cmd&gt;</text>
+  <text x="875" y="213.58" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">own group, stdin=/dev/null</text>
   <rect x="770" y="290" width="210" height="96" rx="6" fill="#ffffff" stroke="#1f2328" stroke-width="1.2"/>
-  <text x="875.0" y="324.64" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">Target repository</text>
-  <text x="875.0" y="344.08" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">main tree / long-lived worktree</text>
-  <text x="875.0" y="359.08" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">acceptance runs in the repo</text>
+  <text x="875" y="324.64" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">Target repository</text>
+  <text x="875" y="344.08" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">main tree / long-lived worktree</text>
+  <text x="875" y="359.08" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">acceptance runs in the repo</text>
   <rect x="30" y="440" width="200" height="130" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
-  <text x="130.0" y="474.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">Storage</text>
-  <text x="130.0" y="493.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">SQLite</text>
-  <text x="130.0" y="509.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">tasks · events · claims</text>
-  <text x="130.0" y="525.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">events-YYYY-MM.jsonl</text>
-  <text x="130.0" y="541.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">append-only, never read back</text>
+  <text x="130" y="474.33" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="600">Storage</text>
+  <text x="130" y="493.28" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13.5" fill="#1f2328" text-anchor="middle" font-weight="600">SQLite</text>
+  <text x="130" y="509.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">tasks · events · claims</text>
+  <text x="130" y="525.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">events-YYYY-MM.jsonl</text>
+  <text x="130" y="541.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">append-only, never read back</text>
   <rect x="300" y="505" width="400" height="62" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
-  <text x="500.0" y="530.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">read-only REST API → board / desktop console</text>
-  <text x="500.0" y="548.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">every mutation is CLI-only; no write endpoints</text>
+  <text x="500" y="530.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">read-only REST API → board / desktop console</text>
+  <text x="500" y="548.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">every mutation is CLI-only; no write endpoints</text>
   <line x1="232" y1="265" x2="288" y2="265" stroke="#0969da" stroke-width="1.3"/>
-  <polygon points="288,265 279.0,269.2 279.0,260.8" fill="#0969da"/>
+  <polygon points="288,265 279,269.2 279,260.8" fill="#0969da"/>
   <rect x="210.8625" y="245.5" width="98.275" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
-  <text x="260.0" y="257.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">dispatch: run + brief</text>
+  <text x="260" y="257" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">dispatch: run + brief</text>
   <line x1="722" y1="190" x2="768" y2="190" stroke="#1f2328" stroke-width="1.3"/>
-  <polygon points="768,190 759.0,194.2 759.0,185.8" fill="#1f2328"/>
-  <rect x="696.725" y="170.5" width="96.55000000000003" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
-  <text x="745.0" y="182.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="400">argv + workdir</text>
+  <polygon points="768,190 759,194.2 759,185.8" fill="#1f2328"/>
+  <rect x="696.725" y="170.5" width="96.55" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="745" y="182" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="400">argv + workdir</text>
   <line x1="760" y1="330" x2="722" y2="330" stroke="#1f2328" stroke-width="1.3"/>
-  <polygon points="722,330 731.0,325.8 731.0,334.2" fill="#1f2328"/>
-  <rect x="714.0" y="310.5" width="54.0" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
-  <text x="741.0" y="322.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="400">reads and writes files</text>
+  <polygon points="722,330 731,325.8 731,334.2" fill="#1f2328"/>
+  <rect x="714" y="310.5" width="54" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="741" y="322" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle" font-weight="400">reads and writes files</text>
   <line x1="330" y1="452" x2="240" y2="492" stroke="#0969da" stroke-width="1.3"/>
-  <polygon points="240,492 246.51852238015783,484.50674530131386 249.93008549500678,492.18276230972407" fill="#0969da"/>
-  <rect x="246.5" y="476.5" width="77.0" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
-  <text x="285.0" y="488.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">state + events</text>
+  <polygon points="240,492 246.5185,484.5067 249.9301,492.1828" fill="#0969da"/>
+  <rect x="246.5" y="476.5" width="77" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="285" y="488" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">state + events</text>
   <line x1="232" y1="538" x2="298" y2="538" stroke="#1a7f37" stroke-width="1.3"/>
-  <polygon points="298,538 289.0,542.2 289.0,533.8" fill="#1a7f37"/>
+  <polygon points="298,538 289,542.2 289,533.8" fill="#1a7f37"/>
   <rect x="255.25" y="518.5" width="19.5" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
-  <text x="265.0" y="530.0" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1a7f37" text-anchor="middle" font-weight="400">read</text>
+  <text x="265" y="530" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#1a7f37" text-anchor="middle" font-weight="400">read</text>
 </svg>

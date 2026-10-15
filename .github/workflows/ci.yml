@@ -27,6 +27,15 @@ jobs:
       - name: enum contract is in sync with the Python constants
         run: PYTHONPATH=src python tools/gen_contract.py --check
 
+      # The figures committed under docs/assets are the generator's output, not
+      # hand-written SVG: regenerating them must be a no-op. This also proves the
+      # output does not depend on the interpreter (here Linux + Python 3.13).
+      - name: figures are in sync with the generator
+        run: |
+          python3 tools/make_figures.py --lang zh-CN
+          python3 tools/make_figures.py --lang en
+          git diff --exit-code -- docs/assets/figures
+
   desktop:
     runs-on: ubuntu-latest
     defaults:

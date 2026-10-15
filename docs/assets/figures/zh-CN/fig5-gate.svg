@@ -2,43 +2,43 @@
   <rect width="1010" height="620" fill="white"/>
   <text x="24" y="34" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="16" fill="#1f2328" text-anchor="start" font-weight="600">图 5  禁改闸门的判据</text>
   <rect x="40" y="80" width="240" height="110" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
-  <text x="160.0" y="115.39" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">跑前快照</text>
-  <text x="160.0" y="133.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">受保护路径的文件指纹</text>
-  <text x="160.0" y="147.94" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">git 状态（HEAD/refs/stash）</text>
-  <text x="160.0" y="162.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">文件集合</text>
+  <text x="160" y="115.39" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">跑前快照</text>
+  <text x="160" y="133.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">受保护路径的文件指纹</text>
+  <text x="160" y="147.94" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">git 状态（HEAD/refs/stash）</text>
+  <text x="160" y="162.44" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">文件集合</text>
   <rect x="40" y="230" width="240" height="110" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
-  <text x="160.0" y="272.64" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">跑后快照</text>
-  <text x="160.0" y="290.69" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">同一组探针，同一棵工作树</text>
-  <text x="160.0" y="305.19" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">（工作区模式下即该 worktree）</text>
+  <text x="160" y="272.64" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#1f2328" text-anchor="middle" font-weight="600">跑后快照</text>
+  <text x="160" y="290.69" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">同一组探针，同一棵工作树</text>
+  <text x="160" y="305.19" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" fill="#6e7781" text-anchor="middle" font-weight="400">（工作区模式下即该 worktree）</text>
   <rect x="330" y="130" width="250" height="160" rx="6" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
-  <text x="455.0" y="180.67" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="14" fill="#1f2328" text-anchor="middle" font-weight="600">差分判决</text>
-  <text x="455.0" y="201.72" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">只认两次快照之间的变化</text>
-  <text x="455.0" y="219.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">跑前就脏的未跟踪文件、</text>
-  <text x="455.0" y="233.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">第三方后台进程写的目录</text>
-  <text x="455.0" y="247.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">一律不算在本次派发头上</text>
+  <text x="455" y="180.67" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="14" fill="#1f2328" text-anchor="middle" font-weight="600">差分判决</text>
+  <text x="455" y="201.72" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">只认两次快照之间的变化</text>
+  <text x="455" y="219.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">跑前就脏的未跟踪文件、</text>
+  <text x="455" y="233.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">第三方后台进程写的目录</text>
+  <text x="455" y="247.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">一律不算在本次派发头上</text>
   <rect x="660" y="80" width="320" height="210" rx="6" fill="#ffffff" stroke="#8c959f" stroke-width="1.2"/>
-  <text x="820.0" y="147.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">三类探针，逐规则选择</text>
-  <text x="820.0" y="167.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1f2328" text-anchor="middle" font-weight="400">file 规则：指纹 + 差分，抓内容的增删改</text>
-  <text x="820.0" y="184.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1f2328" text-anchor="middle" font-weight="400">git 规则：HEAD / refs / stash，抓提交、</text>
-  <text x="820.0" y="198.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">改历史、切分支与打标签</text>
-  <text x="820.0" y="215.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1f2328" text-anchor="middle" font-weight="400">presence 规则：只比文件集合的增删</text>
-  <text x="820.0" y="229.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">改写已有文件的内容不报警</text>
+  <text x="820" y="147.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">三类探针，逐规则选择</text>
+  <text x="820" y="167.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1f2328" text-anchor="middle" font-weight="400">file 规则：指纹 + 差分，抓内容的增删改</text>
+  <text x="820" y="184.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1f2328" text-anchor="middle" font-weight="400">git 规则：HEAD / refs / stash，抓提交、</text>
+  <text x="820" y="198.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">改历史、切分支与打标签</text>
+  <text x="820" y="215.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1f2328" text-anchor="middle" font-weight="400">presence 规则：只比文件集合的增删</text>
+  <text x="820" y="229.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#6e7781" text-anchor="middle" font-weight="400">改写已有文件的内容不报警</text>
   <line x1="282" y1="135" x2="328" y2="160" stroke="#0969da" stroke-width="1.3"/>
-  <polygon points="328,160 318.08682346808365,159.39260305642594 322.0979353596105,152.01215717601653" fill="#0969da"/>
+  <polygon points="328,160 318.0868,159.3926 322.0979,152.0122" fill="#0969da"/>
   <line x1="282" y1="285" x2="328" y2="260" stroke="#0969da" stroke-width="1.3"/>
-  <polygon points="328,260 322.0979353596105,267.98784282398344 318.08682346808365,260.60739694357403" fill="#0969da"/>
+  <polygon points="328,260 322.0979,267.9878 318.0868,260.6074" fill="#0969da"/>
   <line x1="582" y1="210" x2="658" y2="185" stroke="#0969da" stroke-width="1.3"/>
-  <polygon points="658,185 650.7630653634349,191.80196861695813 648.1382704175303,183.82259198140858" fill="#0969da"/>
-  <rect x="604.5" y="178.0" width="31.0" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
-  <text x="620.0" y="189.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">命中</text>
+  <polygon points="658,185 650.7631,191.802 648.1383,183.8226" fill="#0969da"/>
+  <rect x="604.5" y="178" width="31" height="17.5" rx="2" fill="white" stroke="none" stroke-width="1.2"/>
+  <text x="620" y="189.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5" fill="#0969da" text-anchor="middle" font-weight="400">命中</text>
   <rect x="40" y="400" width="450" height="100" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
-  <text x="265.0" y="436.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">两条窄例外</text>
-  <text x="265.0" y="455.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1a7f37" text-anchor="middle" font-weight="400">__pycache__ 与 .pyc / .pyo：运行 Python 的副产物</text>
-  <text x="265.0" y="470.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1a7f37" text-anchor="middle" font-weight="400">别的工作树已检出的分支：refs 在工作树间共享</text>
+  <text x="265" y="436.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">两条窄例外</text>
+  <text x="265" y="455.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1a7f37" text-anchor="middle" font-weight="400">__pycache__ 与 .pyc / .pyo：运行 Python 的副产物</text>
+  <text x="265" y="470.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#1a7f37" text-anchor="middle" font-weight="400">别的工作树已检出的分支：refs 在工作树间共享</text>
   <rect x="520" y="400" width="450" height="100" rx="6" fill="#ffebe9" stroke="#cf222e" stroke-width="1.2"/>
-  <text x="745.0" y="436.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">结构性盲区</text>
-  <text x="745.0" y="455.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#cf222e" text-anchor="middle" font-weight="400">树本来就停在错分支、跑前就存在的未跟踪文件：</text>
-  <text x="745.0" y="470.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#cf222e" text-anchor="middle" font-weight="400">前后无变化，闸门在原理上永远看不见</text>
+  <text x="745" y="436.5" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#1f2328" text-anchor="middle" font-weight="600">结构性盲区</text>
+  <text x="745" y="455.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#cf222e" text-anchor="middle" font-weight="400">树本来就停在错分支、跑前就存在的未跟踪文件：</text>
+  <text x="745" y="470.83" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11" fill="#cf222e" text-anchor="middle" font-weight="400">前后无变化，闸门在原理上永远看不见</text>
   <rect x="40" y="520" width="930" height="62" rx="6" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.2"/>
-  <text x="505.0" y="554.36" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="400">判决与事实分离：越界记 blocked（人须复核），验收照跑；最终卡是 blocked 时，verify_exit 仍告诉人代码本身是否可用</text>
+  <text x="505" y="554.36" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" fill="#1f2328" text-anchor="middle" font-weight="400">判决与事实分离：越界记 blocked（人须复核），验收照跑；最终卡是 blocked 时，verify_exit 仍告诉人代码本身是否可用</text>
 </svg>

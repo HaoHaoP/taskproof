@@ -250,7 +250,26 @@ def esc(s):
 
 def tw(s, size):
     """Rough text width: CJK is one em wide, latin about half."""
-    return sum(size if ord(c) >= CJK_MIN else size * 0.55 for c in s)
+    # Rounded to six places so that the *geometry* is identical no matter how the
+    # interpreter sums: CPython 3.12 switched `sum()` to Neumaier compensation,
+    # which moves the last bit of this float and used to leak into the SVG.
+    return round(sum(size if ord(c) >= CJK_MIN else size * 0.55 for c in s), 6)
+
+
+def num(v):
+    """The spelling of a number that goes into an SVG attribute.
+
+    Every coordinate, size and width written by :class:`Fig` passes through
+    here, so a figure is a function of the generator and nothing else: the same
+    command must produce the same bytes on Python 3.9 and on Python 3.13, and
+    `git diff --exit-code` is a usable gate. Four decimals hold the widest
+    coordinate these figures use (677.2375); trailing zeros are dropped so an
+    integer stays an integer.
+    """
+    s = f"{float(v):.4f}"
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return "0" if s in ("", "-0") else s
 
 
 class Fig:
@@ -264,22 +283,24 @@ class Fig:
     def rect(self, x, y, w, h, fill="none", stroke=LINE, rx=6, sw=1.2, dash=None):
         d = f' stroke-dasharray="{dash}"' if dash else ""
         self.parts.append(
-            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" '
-            f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"{d}/>'
+            f'<rect x="{num(x)}" y="{num(y)}" width="{num(w)}" height="{num(h)}" '
+            f'rx="{num(rx)}" fill="{fill}" stroke="{stroke}" '
+            f'stroke-width="{num(sw)}"{d}/>'
         )
 
     def text(self, x, y, s, size=12.5, color=NAVY, anchor="start", weight="400"):
         s = translate(s)
         self.parts.append(
-            f'<text x="{x}" y="{y}" font-family="{FONT}" font-size="{size}" '
-            f'fill="{color}" text-anchor="{anchor}" font-weight="{weight}">{esc(s)}</text>'
+            f'<text x="{num(x)}" y="{num(y)}" font-family="{FONT}" '
+            f'font-size="{num(size)}" fill="{color}" text-anchor="{anchor}" '
+            f'font-weight="{weight}">{esc(s)}</text>'
         )
 
     def line(self, x1, y1, x2, y2, color=LINE, sw=1.2, dash=None):
         d = f' stroke-dasharray="{dash}"' if dash else ""
         self.parts.append(
-            f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{color}" '
-            f'stroke-width="{sw}"{d}/>'
+            f'<line x1="{num(x1)}" y1="{num(y1)}" x2="{num(x2)}" y2="{num(y2)}" '
+            f'stroke="{color}" stroke-width="{num(sw)}"{d}/>'
         )
 
     def arrow(self, x1, y1, x2, y2, color=BLUE, dash=None, label=None,
@@ -292,8 +313,8 @@ class Fig:
         bx, by = x2 - L * math.cos(ang), y2 - L * math.sin(ang)
         nx, ny = -math.sin(ang), math.cos(ang)
         self.parts.append(
-            f'<polygon points="{x2},{y2} {bx + W * nx},{by + W * ny} '
-            f'{bx - W * nx},{by - W * ny}" fill="{color}"/>'
+            f'<polygon points="{num(x2)},{num(y2)} {num(bx + W * nx)},{num(by + W * ny)} '
+            f'{num(bx - W * nx)},{num(by - W * ny)}" fill="{color}"/>'
         )
         if label:
             mx, my = (x1 + x2) / 2, (y1 + y2) / 2
@@ -336,9 +357,9 @@ class Fig:
     def save(self, path):
         body = "\n  ".join(self.parts)
         svg = (
-            f'<svg xmlns="http://www.w3.org/2000/svg" width="{self.w}" '
-            f'height="{self.h}" viewBox="0 0 {self.w} {self.h}">\n'
-            f'  <rect width="{self.w}" height="{self.h}" fill="white"/>\n'
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{num(self.w)}" '
+            f'height="{num(self.h)}" viewBox="0 0 {num(self.w)} {num(self.h)}">\n'
+            f'  <rect width="{num(self.w)}" height="{num(self.h)}" fill="white"/>\n'
             f"  {body}\n</svg>\n"
         )
         with open(path, "w", encoding="utf-8") as fh:
@@ -786,4 +807,3 @@ if __name__ == "__main__":
         if offenders:
             raise SystemExit(f"untranslated labels remain in: {', '.join(offenders)}")
         print("self-check: no CJK left in the English set")
-
