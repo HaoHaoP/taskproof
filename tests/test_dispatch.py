@@ -203,6 +203,19 @@ class HappyPathTest(DispatchBase):
         # Slot released on the success path.
         self.assertEqual(self.active_claims(), 0)
 
+    def test_pipeline_verify_event_is_marked_ran_by_run(self):
+        # Card 89: the automatic acceptance at step ⑦ records who ran it, so
+        # the ledger can tell a wind-down check from a human re-check.
+        self.write_registry(verify="exit 0")
+        task_id = dispatch(self.ws, "proj", "say hello", adapter="custom:echo hi")
+
+        verify = next(
+            e["payload"]
+            for e in task_detail(self.ws, task_id)["events"]
+            if e["event"] == "verify"
+        )
+        self.assertEqual(verify["by"], "run")
+
 
 class ChangesEventTest(DispatchBase):
     """Card 76: the run's change surface lands in the audit stream.

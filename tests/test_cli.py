@@ -431,6 +431,28 @@ class ExitCodeTest(CliBase):
         )
         self.assertEqual(code, 71)
 
+    def test_taskproof_verify_marks_the_event_ran_by_cli(self):
+        # Card 89: the human re-check path (`taskproof verify <id>`) appends a
+        # `verify` event, and that event says a human ran it — not the pipeline.
+        self.run_cli("--workspace", self.ws, "init")
+        self.write_registry(verify="exit 0")
+        code, out = self.run_cli(
+            "--workspace", self.ws, "--json", "run", "proj", "brief",
+            "--adapter", "custom:echo hi",
+        )
+        self.assertEqual(code, 0)
+        task_id = json.loads(out)["task_id"]
+
+        code, _ = self.run_cli("--workspace", self.ws, "verify", task_id)
+        self.assertEqual(code, 0)
+
+        events = [
+            e for e in dispatch.task_detail(self.ws, task_id)["events"]
+            if e["event"] == "verify"
+        ]
+        # The pipeline's step ⑦ event and the CLI's re-check event, in order.
+        self.assertEqual([e["payload"]["by"] for e in events], ["run", "cli"])
+
     def test_branch_precondition_is_78(self):
         # The lane declares a branch and its path is not a repository at all:
         # readable configuration the environment cannot satisfy (sysexits

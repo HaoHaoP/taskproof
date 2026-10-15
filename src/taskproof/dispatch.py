@@ -84,6 +84,13 @@ _ALL_STATUSES = (
 VERIFY_SKIPPED = "SKIPPED"
 
 
+#: Who ran a `verify` event: the dispatch pipeline's step ⑦ does it as the card
+#: winds down, a human re-checks afterwards (`taskproof verify <id>`). Recorded
+#: as a fact the ledger can read back, so the two cases stop looking alike.
+VERIFY_BY_RUN = "run"
+VERIFY_BY_CLI = "cli"
+
+
 #: Ceiling on the number of paths a single `changes` event carries. The audit
 #: stream is read by humans (`show`) as well as machines, so a card that sweeps
 #: thousands of files must not bloat the payload. The cut is not silent: the
@@ -913,6 +920,7 @@ def _execute(
             "exit_code": verify_exit_field,
             "note": note,
             "output_tail": outcome.output_tail if outcome is not None else "",
+            "by": VERIFY_BY_RUN,
         },
     )
 
@@ -2025,6 +2033,7 @@ def verify_task(workspace: str, task_id: str) -> verify.VerifyOutcome:
                 "exit_code": outcome.exit_code,
                 "note": outcome.note,
                 "violations": outcome.violations,
+                "by": VERIFY_BY_CLI,
             },
         )
         return outcome

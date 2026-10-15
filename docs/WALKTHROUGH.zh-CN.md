@@ -161,7 +161,7 @@ taskproof log t-20261008-001
 started        {"project": "demo-library", "group": "demo-library", "adapter": "custom:sh fix.sh", ...}
 result_schema  {"enabled": false, "path": null, "note": "structured result disabled ..."}
 adapter        {"exit_code": 0, "degraded": true, "summary": "wrote src/lib.py"}
-verify         {"status": "PASSED", "ran": true, "exit_code": 0, "note": "", "output_tail": "ok"}
+verify         {"status": "PASSED", "ran": true, "exit_code": 0, "note": "", "output_tail": "ok", "by": "run"}
 done           {"verify": "PASSED", "files_changed": 1, "summary": "wrote src/lib.py"}
 ```
 
