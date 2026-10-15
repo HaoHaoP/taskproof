@@ -2,7 +2,7 @@
 
 **English** · [简体中文](ARCHITECTURE.zh-CN.md)
 
-> Observed 2026-10-14 against v0.3.0. Sections 2 to 4 describe **current
+> Observed 2026-10-15 against v0.4.0. Sections 2 to 4 describe **current
 > behaviour** and cite `file:line`; section 5 is what was measured; section 6 is
 > proposed work, with the landings marked in place — do not read the unmarked
 > parts as shipped behaviour.
