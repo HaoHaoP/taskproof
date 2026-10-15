@@ -221,56 +221,43 @@ jobs:
 
             **English**
 
-            - **The browser board is the desktop renderer.** `taskproof board` no longer
-              serves a hand-written page: it serves the same Vue renderer the Electron
-              console loads, over the same loopback REST API, and that build is committed and
-              shipped inside the wheel. CI rebuilds it and fails on drift, so the two hosts
-              cannot diverge.
-            - **`.gz` siblings are reproducible across platforms.** The compressed assets
-              were produced by Node's bundled zlib, whose output (the gzip header's OS byte,
-              and the deflate stream across major versions) depends on the machine that built
-              it — so a Linux runner rebuilding them always saw a difference and the
-              committed-artifact check could never pass. They now come from an exact-pinned
-              pure-JS compressor, so the same source gives the same bytes everywhere. The
-              payload grows by about 2%.
-            - **A lane can set its own timeout.** Writing `timeout = 2700` on a
-              `[[taskgroup]]` used to be dropped without a word: the loader did not reject the
-              key, so nothing said so. The effective timeout is now a chain — `--timeout N` >
-              the lane's `timeout` > `[defaults] timeout` > the built-in 1800 — and it is
-              always reported together with where it came from, on the `started` event and in
-              `taskproof taskgroups`.
-            - **A card that goes quiet stops early.** A no-progress watchdog (`idle_timeout`
-              per lane, or `--idle-timeout N`) stops a run when both its log and its working
-              tree have been silent for that long, instead of burning the whole wall clock.
-              It ships off by default, and the `timeout` event says which budget fired
-              (`reason: idle` or `wall-clock`). One card produced log output for thirty
-              minutes without changing a single file; that is the case this closes.
-            - **Docs: an architecture chapter, in both languages.** `ARCHITECTURE.md` and
-              `ARCHITECTURE.zh-CN.md` now describe what the system actually does, with
-              diagrams generated from `tools/make_figures.py`; the language switch sits at the
-              top of every doc pair; and `DESIGN.md`'s status line states what has shipped.
-            - **Dispatch tooling.** `tools/check-card.py` mechanises the card checks,
-              `taskproof wait` blocks for a verdict while `tasks` shows it at a glance, and a
-              run's change surface is recorded rather than just counted.
+            - **A lane can declare the branch it belongs on.** `branch = "main"` on a
+              `[[taskgroup]]` turns the branch into a gate: a lane that runs in place is
+              refused before anything is written — exit `78`, no task row, no concurrency
+              slot — unless its tree is checked out on that branch, and a `worktree` lane is
+              created from it, detached, because a branch can be checked out by only one
+              worktree and the main tree usually holds it. A lane that declares nothing
+              behaves exactly as it did before.
+            - **A declaration nothing reads now says so.** The registry loader collects the
+              keys a block has no reader for, and `taskproof projects` / `taskgroups` warn
+              about them on stderr; no exit code changes. A lane-level `timeout` used to be
+              dropped in silence — 22 declarations' worth.
+            - **A timed-out card can be signed off.** `accept` takes `timeout` too, with the
+              same mandatory `--note`. It is a registration, never a promotion: the card
+              stays `timeout`, `verify_*` and `finished_at` are untouched, and the ledger
+              gains one `accepted` event whose `from` and `to` are both `timeout`.
+            - **The ledger records who ran a verification.** Every `verify` event now carries
+              `by` — `run` for the pipeline's own check as a card winds down, `cli` for a
+              human re-check with `taskproof verify <id>`.
+            - **The figures are a function of the generator, not of the interpreter.** The
+              diagram generator's numeric spelling depended on the Python that ran it
+              (3.12's compensated `sum()` moved the last digit), so "regenerate and compare"
+              could never be a gate. Every SVG attribute now goes through one formatting
+              helper, and CI regenerates both language sets and fails on drift.
 
             **中文**
 
-            - **浏览器看板就是桌面渲染层。** `taskproof board` 不再服务手写页面：它服务 Electron 控制台加载的
-              同一份 Vue 渲染层，走同一个 loopback 只读 API，产物进仓并随 wheel 发布。CI 会重建并在漂移时失败，
-              两个宿主因此不会分叉。
-            - **`.gz` 兄弟文件跨平台可复现。** 压缩产物此前由 Node 内置的 zlib 生成，而它的输出（gzip 头的
-              OS 字节、跨大版本的 deflate 流）取决于构建它的机器 —— 于是 Linux runner 重建总能看到差异，
-              "提交的产物必须等于重建结果"这条判据永远不可能通过。现在改由精确锁版本的纯 JS 压缩器生成，
-              同一份源码在任何平台压出同样的字节。代价是体积大约 +2%。
-            - **道可以自带超时。** 在 `[[taskgroup]]` 上写 `timeout = 2700` 以前会被无声丢弃：加载器不认这个键，
-              也不报错。现在有效值是三段链 —— `--timeout N` > 道上的 `timeout` > `[defaults] timeout` >
-              内置 1800 —— 并且永远与来源一起显示（`started` 事件与 `taskproof taskgroups`）。
-            - **卡静默就提前止损。** 新的无进展看门狗（道字段 `idle_timeout`，或 `--idle-timeout N`）在日志与
-              工作树都静默超过该预算时停手，而不是把墙钟烧完。它默认关闭；`timeout` 事件会说明是哪个预算先到
-              （`reason: idle` 或 `wall-clock`）。曾有一张卡连续三十分钟一直在输出日志、却没改动任何文件 ——
-              这就是它要闭掉的场景。
-            - **文档：多了一章架构，中英成对。** `ARCHITECTURE.md` 与 `ARCHITECTURE.zh-CN.md` 讲的是系统实际
-              怎么做（配图由 `tools/make_figures.py` 生成、可复现）；六份文档的语言切换都移到了标题下；
-              `DESIGN.md` 的状态行改成已发布的事实。
-            - **派活工具。** `tools/check-card.py` 把卡的几条检查机械化了；`taskproof wait` 等裁决、`tasks`
-              一眼看裁决；一次运行的改动面被记下来，而不只是一个计数。
+            - **道可以声明自己属于哪条分支。** `[[taskgroup]]` 上写 `branch = "main"` 就把它变成一道闸门：就地跑的
+              道，树没检出在那条分支上就**在动手前**被拒（退出码 78，不写任务行、不占并发槽位）；`workspace =
+              "worktree"` 的道按它建工作区，且是分离头 —— 一条分支只能被一棵工作树检出，而主树通常正持着它。
+              没声明的道行为与从前一字不差。
+            - **没人读的声明现在会自己说出来。** 注册表加载时会收集每个块里没有读者认领的键，`taskproof projects`
+              / `taskgroups` 在 stderr 逐条告警，退出码不变。道级 `timeout` 当年就是这样被无声丢掉的 —— 22 处。
+            - **超时的卡也能人工签收。** `accept` 现在也收 `timeout`，同样必须带 `--note`。签收是**登记不是改判**：
+              状态仍是 `timeout`，`verify_*` 与 `finished_at` 一字不动，账本只多一条 `accepted` 事件，其 `from`
+              与 `to` 都是 `timeout`。
+            - **账本会写清验收是谁跑的。** 每条 `verify` 事件现在带 `by`：`run` 是流水线在卡收尾时自己跑的，
+              `cli` 是人用 `taskproof verify <id>` 复核跑的。
+            - **配图是生成器的函数，不是解释器的函数。** 生成器的数值写法随解释器变（Python 3.12 的补偿求和会动
+              最后一位），于是"重跑生成器再比对"根本当不成判据。现在每个 SVG 属性都过一个统一的数值格式助手，
+              CI 会重生成两套并在漂移时失败。
