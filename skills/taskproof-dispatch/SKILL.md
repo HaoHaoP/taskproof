@@ -76,6 +76,9 @@ Fields are defined by `docs/REGISTRY.md`; the ones that matter at dispatch time:
 | `result_schema` | no | `"default"` | `default` / `none` / an absolute path to a JSON Schema |
 | `workspace` | no | `"none"` | `none` / `worktree` — see "a lane owns a checkout" below |
 | `link` | no | `[]` | Dependency paths (workspace-relative) symlinked from the main checkout |
+| `branch` | no | — | The branch this lane belongs on. **Declaring it is a pre-dispatch gate:** a `workspace = "none"` lane is refused unless the tree is checked out ON that branch (a detached `HEAD` counts as `HEAD` and is refused), a `worktree` lane builds its checkout from that branch — otherwise exit `78`, no ledger row, no slot. Not declaring it is no gate at all |
+| `timeout` | no | `[defaults] timeout` | Wall-clock seconds for one card; the chain is `--timeout` > lane > `[defaults]` > built-in 1800 |
+| `idle_timeout` | no | `0` | No-progress watchdog in seconds, `0` = off; both log bytes and the tree fingerprint must fall silent |
 
 Semantics to remember:
 
@@ -137,6 +140,18 @@ CARD
 
 **Source material goes in by path, never by paraphrase.** When the operator handed you a prototype, a screenshot, a design doc or a spec, the card carries its absolute path plus the exact line range and one line saying *read it yourself, do not ask me to restate it* — the shape is in [`references/token-discipline.md`](references/token-discipline.md) section 2. The codex adapter runs with `--sandbox workspace-write`, which restricts **writes**, not reads: the worker can open anything you can name. Restating the spec from memory is exactly where precision dies, and it costs tokens on both ends.
 
+### 2.2 Acceptance must run inside the worker's sandbox
+
+`--sandbox workspace-write` restricts **where it may write**. Three kinds of acceptance therefore do not belong in a card — not because they are hard, but because the worker physically cannot do them: the card ends on a blocker, or records `done` and leaves the work to a human.
+
+- **Writing outside the checkout.** The sandbox refuses with `writing outside of the project` / `Operation not permitted`. Any self-check script that must land on disk goes inside the workspace or the repository (`/tmp` is fine; the main tree and sibling repositories are not). In one 14-day window, 10 of 131 parsable cards died here.
+- **A browser or a renderer as acceptance.** The sandbox blocks Chrome's Mach ports; the worker gets `SIGABRT`, then either spins to the timeout or gives up (6/131). Real-browser and DOM measurement is the main agent's **batch review step** (section 9), never a card's acceptance.
+- **Acceptance that can only go green by breaking the card.** "Write these tests, do not touch the source" is a card defect, not strictness: the test is red, so the worker either stops or breaks the rule (5/131). Either change the source in the same card, or fire the source card first.
+
+The consequence matters more than the failures: of those cards only **3 ended `failed`; 31 recorded `done`** anyway. `done` does not mean nobody has to look — a green ledger only says that one command was green.
+
+All three have a machine check now: `python3 tools/check-card.py <card>.md --lane <lane id>` — 查5 write scope (n/a, not a failure, when `--lane` is absent), 查6 browser, 查7 contract (a `[WARN]` only, never a changed exit code: a card whose subject *is* the test is legitimate). Exit `0` fire, `1` do not fire, `2` unreadable card.
+
 ## 3. Look at in-flight state before firing
 
 ```bash
@@ -146,6 +161,12 @@ taskproof --json tasks --all
 
 `tasks --all` ignores the cwd scope and lists every lane; `--json` is for machines. Before firing, check how many are running; if you are within the concurrency cap, send the independent work out together.
 
+Then spend 30 seconds blocking three kinds of wasted run (in one 14-day window 14 of 319 cards changed nothing, and another batch had to be re-fired as "v2, fix card"):
+
+- **Does the target file exist?** Look for every file the card names, **in the lane's workspace**. A workspace parked on an old commit does not contain it: the worker either rebuilds the file from scratch or stops — both are wasted. Write "if a named file does not exist, stop and report" into the card as well.
+- **Is the baseline aligned?** `git -C <workspace> log -1 --format=%H` must equal `git -C <main tree> rev-parse <branch>`. If not, reset with `workspace-rm --force` first (the evidence procedure is in the ops card); the next card rebuilds lazily at the current HEAD.
+- **Was the previous card merged?** Merging is the main agent's job. Miss it once and the next card's `git diff` carries the previous one along, so `git apply` inserts it twice.
+
 ## 4. Fire
 
 ```bash
@@ -153,7 +174,8 @@ taskproof run my-lane --adapter codex --timeout 1800 "$(cat /tmp/cards/tp-card19
 ```
 
 - `--adapter`: `codex` / `claude` / `gemini` / `opencode` / `custom:<cmd>`.
-- `--timeout`: seconds; overrides `[defaults] timeout` in the registry.
+- `--timeout`: seconds; the chain is `--timeout` > the lane's `timeout` > `[defaults] timeout` > built-in 1800.
+- `--idle-timeout`: seconds; the no-progress watchdog, alive only while **both** log bytes and the tree fingerprint fall silent, `0` = off. Raise it whenever you raise the wall clock, or the watchdog fires first.
 - `--reasoning none`: turn the worker's reasoning off, and `--model <m>` swap the model — only for cards that are enumerable and machine-checkable (rule 11, section 9).
 - `--cap N`: a one-off global cap for this dispatch only.
 - `--worktree`: a fresh checkout beside the repository, kept when it has changes. A *one-off*: a lane that declares `workspace = "worktree"` has a long-lived checkout instead, and that one wins.

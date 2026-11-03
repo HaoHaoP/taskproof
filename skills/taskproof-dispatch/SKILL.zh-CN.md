@@ -76,6 +76,9 @@ taskproof --json register /absolute/path/to/repo --dry-run
 | `result_schema` | 否 | `"default"` | `default` / `none` / 绝对路径 JSON Schema |
 | `workspace` | 否 | `"none"` | `none` / `worktree` —— 见下面「道可以有自己的检出」 |
 | `link` | 否 | `[]` | 依赖路径（相对工作区），从主树软链进来 |
+| `branch` | 否 | — | 这条道该在哪条分支上。**声明了它就是发车前闸门**：`workspace = "none"` 的道要求树真的检在那条分支上（分离头算 `HEAD`，一样拒），`worktree` 的道从该分支建检出；不符即退出 `78`、账本不留痕、不占并发槽。不声明就完全没有这道闸门 |
+| `timeout` | 否 | `[defaults] timeout` | 一张卡的墙钟秒数；取值链 `--timeout` > 道 > `[defaults]` > 内置 1800 |
+| `idle_timeout` | 否 | `0` | 无进展看门狗秒数，`0` = 关闭；日志字节数与工作树指纹**都**静默才算停摆 |
 
 要记住的语义：
 
@@ -137,6 +140,18 @@ CARD
 
 **素材给路径，不给复述。** 操作者给过原型、截图、设计稿或口径文档时，卡里写它的绝对路径加行号范围，再附一句*自己读，不要我复述* —— 写法的样子见 [`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md) 第 2 节。codex 适配器跑的是 `--sandbox workspace-write`，限的是**写**、不是读：你指得出的东西它都打得开。凭记忆把口径重写一遍，正是精度死掉的地方，而且两边都要付钱。
 
+### 2.2 验收必须在 worker 的沙箱里跑得起来
+
+`--sandbox workspace-write` 限的是**写范围**。下面三类别写进卡的验收 —— 它们不是「难」，是物理做不到：卡会带 blocker 收场，或者记成 `done` 却把活留给人。
+
+- **写到工作区外**。沙箱一拒，worker 就停在 `writing outside of the project` / `Operation not permitted`。要落盘的自检脚本一律写进工作区或仓内路径（`/tmp` 可以，主树与兄弟仓不行）。一个 14 天窗口里，131 张可解析卡有 10 张栽在这条。
+- **拿浏览器或渲染器做验收**。沙箱挡 Chrome 的 Mach Port，worker 拿到 `SIGABRT`，然后空转到超时或直接放弃（6/131）。真浏览器与 DOM 量测是主智能体的**批量复核步骤**（第 9 节），不进卡片验收。
+- **验收只能靠越界才变绿**。「只写测试、不许改源码」是卡的缺陷不是严格：测试红了，worker 只能停工或违约（5/131）。要么同一张卡里连源码一起改，要么先发源码卡。
+
+比失败更值得记的是后果：那批卡里**只有 3 张落 `failed`，31 张照样记 `done`**。`done` 不等于不用人看 —— 账本绿只保证那条命令绿。
+
+这三条现在有机器判据：`python3 tools/check-card.py <卡>.md --lane <道 id>` —— 查5 写域（`--lane` 缺席时标 n/a，不判红）、查6 浏览器、查7 契约（命中只出 `[WARN]`，不改退出码：只写测试的卡本来就可能正当）。退出 `0` 发车、`1` 不许发车、`2` 卡读不到。
+
 ## 3. 发车前先看并发现状
 
 ```bash
@@ -146,6 +161,12 @@ taskproof --json tasks --all
 
 `tasks --all` 忽略 cwd 作用域、列出所有道；`--json` 给机器读。发车前先看现在几个在跑，在并发上限内就把独立工作一起发出去。
 
+再花 30 秒挡掉三类白跑（一个 14 天窗口里 319 张卡有 14 张改动为零，另有一批得「v2 修卡」重来）：
+
+- **目标文件在吗**：卡里点名的每个文件，在**道的工作区**里看一眼。工作区停在旧提交上时 worker 看不到它，要么从零重建、要么停工，两种都白跑。卡文里再明写一句「要改的文件不存在就停工报告」。
+- **基线对齐吗**：`git -C <工作区> log -1 --format=%H` 与 `git -C <主树> rev-parse <分支>` 相等。不等就先按运维卡的举证流程 `workspace-rm --force` 重置（下一张卡会惰性重建到当前 HEAD），别在旧树上发。
+- **上一张卡合并了吗**：合并是主智能体的活。漏一次，下一张卡的 `git diff` 会把上一张一起带上，`git apply` 时重复插入。
+
 ## 4. 发车
 
 ```bash
@@ -153,7 +174,8 @@ taskproof run my-lane --adapter codex --timeout 1800 "$(cat /tmp/cards/tp-card19
 ```
 
 - `--adapter`：`codex` / `claude` / `gemini` / `opencode` / `custom:<cmd>`。
-- `--timeout`：秒；覆盖注册表 `[defaults] timeout`。
+- `--timeout`：秒；取值链 `--timeout` > 道的 `timeout` > `[defaults] timeout` > 内置 1800。
+- `--idle-timeout`：秒；无进展看门狗，日志字节数与工作树指纹**都**静默才算停摆，`0` = 关闭。抬墙钟时别忘了同时抬它，否则看门狗先动手。
 - `--reasoning none`：关掉 worker 的思考；`--model <m>` 换模型 —— 只对**可枚举、机器可判**的卡用（铁律 11，见第 9 节）。
 - `--cap N`：只为这一次发车抬高全局上限。
 - `--worktree`：仓边上一棵一次性检出，有改动就保留。**一次性手段**：声明了 `workspace = "worktree"` 的道有长驻工作区，两者同时出现时以道的工作区为准。
