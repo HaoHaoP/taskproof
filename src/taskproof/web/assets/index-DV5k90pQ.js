@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./MatrixView-BtiTRzCT.js","./TaskDrawer-H5pnnsOg.js","./TaskDrawer-N299VKzd.css","./MatrixView-DDD564ew.css","./ProjectsView-DRmStYqt.js","./ProjectsView-CqNFL-fi.css","./TasksView-C7W6U_81.js","./TasksView-Bn08731V.css","./SettingsView-Uxps_tdz.js","./SettingsView-aqTS3ubB.css"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./MatrixView-CJ8fWUmX.js","./TaskDrawer-CUtASIW0.js","./TaskDrawer-N299VKzd.css","./MatrixView-Dgb-l684.css","./ProjectsView-Co9z_MiY.js","./ProjectsView-CqNFL-fi.css","./TasksView-B4jcl2uP.js","./TasksView-Bn08731V.css","./SettingsView-BfOnYGw6.js","./SettingsView-aqTS3ubB.css"])))=>i.map(i=>d[i]);
 // @__NO_SIDE_EFFECTS__
 function makeMap(str) {
   const map2 = /* @__PURE__ */ Object.create(null);
@@ -73599,6 +73599,21 @@ function laneProjectMap(groups) {
 function owningProject(task, laneProject) {
   return laneProject[task.project] ?? task.project;
 }
+function projectTally(tasks, projectId, laneProject) {
+  const cards = tasks.filter((task) => owningProject(task, laneProject) === projectId);
+  let flying = 0;
+  let failed = 0;
+  for (const task of cards) {
+    if (task.status === "running" || task.status === "verifying") flying += 1;
+    if (task.status === "failed" || task.status === "timeout") failed += 1;
+  }
+  return {
+    lanes: new Set(cards.map((task) => task.project)).size,
+    tasks: cards.length,
+    flying,
+    failed
+  };
+}
 function projectsWithActivity(tasks, laneProject, range3, now2) {
   const projects = [];
   const seen2 = /* @__PURE__ */ new Set();
@@ -73615,6 +73630,16 @@ function filterBoard(tasks, filter, now2, laneProject) {
   return tasks.filter(
     (task) => inRange(task, filter.range, now2) && (filter.projects === null || filter.projects.includes(owningProject(task, laneProject)))
   );
+}
+function boardTally(tasks, filter, now2, laneProject) {
+  const cards = filterBoard(tasks, filter, now2, laneProject);
+  let flying = 0;
+  let abnormal = 0;
+  for (const task of cards) {
+    if (task.status === "running" || task.status === "verifying") flying += 1;
+    if (columnFor(task.status).key === "abnormal") abnormal += 1;
+  }
+  return { tasks: cards.length, flying, abnormal };
 }
 function visibleProjects(projects, filter) {
   if (filter.projects === null) return [...projects];
@@ -75144,6 +75169,9 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     const settingsView = { name: "settings", key: "nav.settings", path: "/settings" };
     const rail = /* @__PURE__ */ ref(true);
     const isDataView = computed(() => ["matrix", "projects", "tasks"].includes(String(route.name)));
+    const tally = computed(
+      () => boardTally(store.tasks, parseBoardFilter(route.query), Date.now(), store.laneProject)
+    );
     const blank = computed(
       () => shellPlaceholder({
         connected: store.connected,
@@ -75190,15 +75218,15 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
               createBaseVNode("div", _hoisted_6, [
                 createBaseVNode("span", null, [
                   createTextVNode(toDisplayString$1(unref(t)("tally.tasks")), 1),
-                  createBaseVNode("b", null, toDisplayString$1(unref(store).tasks.length), 1)
+                  createBaseVNode("b", null, toDisplayString$1(tally.value.tasks), 1)
                 ]),
                 createBaseVNode("span", null, [
                   createTextVNode(toDisplayString$1(unref(t)("tally.flying")), 1),
-                  createBaseVNode("b", null, toDisplayString$1(unref(store).inFlightCount), 1)
+                  createBaseVNode("b", null, toDisplayString$1(tally.value.flying), 1)
                 ]),
                 createBaseVNode("span", _hoisted_7, [
                   createTextVNode(toDisplayString$1(unref(t)("tally.failed")), 1),
-                  createBaseVNode("b", null, toDisplayString$1(unref(store).abnormalCount), 1)
+                  createBaseVNode("b", null, toDisplayString$1(tally.value.abnormal), 1)
                 ])
               ]),
               createBaseVNode("div", {
@@ -75284,7 +75312,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     };
   }
 });
-const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-9e0f4443"]]);
+const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-74f3a143"]]);
 const scriptRel = /* @__PURE__ */ (function detectScriptRel() {
   const relList = typeof document !== "undefined" && document.createElement("link").relList;
   return relList && relList.supports && relList.supports("modulepreload") ? "modulepreload" : "preload";
@@ -75350,20 +75378,20 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: "/", redirect: () => "/matrix" },
-    { path: "/matrix/:taskId?", name: "matrix", component: () => __vitePreload(() => import("./MatrixView-BtiTRzCT.js"), true ? __vite__mapDeps([0,1,2,3]) : void 0, import.meta.url) },
+    { path: "/matrix/:taskId?", name: "matrix", component: () => __vitePreload(() => import("./MatrixView-CJ8fWUmX.js"), true ? __vite__mapDeps([0,1,2,3]) : void 0, import.meta.url) },
     {
       path: "/projects/:taskId?",
       name: "projects",
-      component: () => __vitePreload(() => import("./ProjectsView-DRmStYqt.js"), true ? __vite__mapDeps([4,1,2,5]) : void 0, import.meta.url)
+      component: () => __vitePreload(() => import("./ProjectsView-Co9z_MiY.js"), true ? __vite__mapDeps([4,1,2,5]) : void 0, import.meta.url)
     },
-    { path: "/tasks/:taskId?", name: "tasks", component: () => __vitePreload(() => import("./TasksView-C7W6U_81.js"), true ? __vite__mapDeps([6,1,2,7]) : void 0, import.meta.url) },
-    { path: "/settings", name: "settings", component: () => __vitePreload(() => import("./SettingsView-Uxps_tdz.js"), true ? __vite__mapDeps([8,9]) : void 0, import.meta.url) },
+    { path: "/tasks/:taskId?", name: "tasks", component: () => __vitePreload(() => import("./TasksView-B4jcl2uP.js"), true ? __vite__mapDeps([6,1,2,7]) : void 0, import.meta.url) },
+    { path: "/settings", name: "settings", component: () => __vitePreload(() => import("./SettingsView-BfOnYGw6.js"), true ? __vite__mapDeps([8,9]) : void 0, import.meta.url) },
     { path: "/:pathMatch(.*)*", redirect: () => "/matrix" }
   ]
 });
 createApp(App).use(createPinia()).use(router).use(i18n).use(element_plus_default).mount("#app");
 export {
-  formatBytes as $,
+  vShow as $,
   mergeProps as A,
   toHandlers as B,
   owningProject as C,
@@ -75379,33 +75407,34 @@ export {
   capMenuFor as M,
   hiddenTally as N,
   canGrowBudget as O,
-  projectsWithActivity as P,
-  groupColumns as Q,
+  projectTally as P,
+  projectsWithActivity as Q,
   RANGES as R,
   filterBoard as S,
-  DEFAULT_CAPS as T,
-  columnWindow as U,
-  ref as V,
-  metaFor as W,
-  onBeforeUnmount as X,
-  withDirectives as Y,
-  vShow as Z,
+  groupColumns as T,
+  DEFAULT_CAPS as U,
+  columnWindow as V,
+  ref as W,
+  metaFor as X,
+  onBeforeUnmount as Y,
+  withDirectives as Z,
   _export_sfc as _,
   withModifiers as a,
-  byteLength as a0,
-  LOG_MAX_LINES as a1,
-  highlightSegments as a2,
-  shouldStickBottom as a3,
-  nextTick as a4,
-  ABNORMAL as a5,
-  countMatches as a6,
-  matchLineIndexes as a7,
-  stripAnsi as a8,
-  onMounted as a9,
-  openAbout as aa,
-  STATUS_IDS as ab,
-  VERIFY_KINDS as ac,
-  hasDesktopHost as ad,
+  formatBytes as a0,
+  byteLength as a1,
+  LOG_MAX_LINES as a2,
+  highlightSegments as a3,
+  shouldStickBottom as a4,
+  nextTick as a5,
+  ABNORMAL as a6,
+  countMatches as a7,
+  matchLineIndexes as a8,
+  stripAnsi as a9,
+  onMounted as aa,
+  openAbout as ab,
+  STATUS_IDS as ac,
+  VERIFY_KINDS as ad,
+  hasDesktopHost as ae,
   createBaseVNode as b,
   createElementBlock as c,
   defineComponent as d,

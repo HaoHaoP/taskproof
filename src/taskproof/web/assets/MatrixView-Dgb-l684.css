@@ -102,7 +102,7 @@
 }
 }
 
-.matrix-view[data-v-d5d26efc] {
+.matrix-view[data-v-22444ff1] {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -111,7 +111,7 @@
 /* The matrix row: the project multi-select and the time range. Both scope the
    whole board, six status columns (泳道) at once; there is no third control in
    the normal state. */
-.boardbar[data-v-d5d26efc] {
+.boardbar[data-v-22444ff1] {
   flex: none;
   display: flex;
   align-items: center;
@@ -121,21 +121,21 @@
   font: 12px/1 var(--sans);
   color: var(--ink-3);
 }
-.boardbar .fld[data-v-d5d26efc] {
+.boardbar .fld[data-v-22444ff1] {
   display: inline-flex;
   align-items: center;
   gap: 7px;
 }
-.boardbar .sel[data-v-d5d26efc] {
+.boardbar .sel[data-v-22444ff1] {
   width: 128px;
 }
-.boardbar .sel-projects[data-v-d5d26efc] {
+.boardbar .sel-projects[data-v-22444ff1] {
   width: 240px;
 }
 /* The right-hand cluster: the hidden-column undo, then the capped warning.
    Both are notes, not filters, so they ride at the far end of the row rather
    than sitting inline with the two scoping controls. */
-.boardbar .rest[data-v-d5d26efc] {
+.boardbar .rest[data-v-22444ff1] {
   display: inline-flex;
   align-items: center;
   gap: 14px;
@@ -143,7 +143,7 @@
 }
 /* The undo for hidden columns: not a filter, an escape hatch. It reads as a
    button because clicking it brings every hidden column back. */
-.boardbar .hidden-lanes[data-v-d5d26efc] {
+.boardbar .hidden-lanes[data-v-22444ff1] {
   display: inline-flex;
   align-items: center;
   padding: 4px 10px;
@@ -154,21 +154,21 @@
   font: 11.5px/1 var(--sans);
   cursor: pointer;
 }
-.boardbar .hidden-lanes[data-v-d5d26efc]:hover {
+.boardbar .hidden-lanes[data-v-22444ff1]:hover {
   background: var(--raise);
 }
 /* The capped warning is a note, not an alarm: the amber of "incomplete", not
    the red of "failed". While the budget can still rise it carries its own
    "继续取回" so the reader can pull the older window; once the cap is reached
    that button would be a dead click, so the note states the limit instead. */
-.boardbar .cap[data-v-d5d26efc] {
+.boardbar .cap[data-v-22444ff1] {
   display: inline-flex;
   align-items: center;
   gap: 10px;
   font: 11.5px/1.2 var(--sans);
   color: var(--c-timeout);
 }
-.boardbar .cap .grow[data-v-d5d26efc] {
+.boardbar .cap .grow[data-v-22444ff1] {
   flex: none;
   padding: 4px 10px;
   border: 1px solid var(--rule);
@@ -178,10 +178,10 @@
   font: 11.5px/1 var(--sans);
   cursor: pointer;
 }
-.boardbar .cap .grow[data-v-d5d26efc]:hover {
+.boardbar .cap .grow[data-v-22444ff1]:hover {
   background: var(--raise);
 }
-.matrix[data-v-d5d26efc] {
+.matrix[data-v-22444ff1] {
   flex: 1;
   overflow: auto;
   min-width: 0;
@@ -196,13 +196,13 @@
    show/hide switches. This must never be re-pinned to a literal: a track count
    that disagrees with the header/cell loop pushes each project's lane into the
    next column and the rows interleave, silently. 列数 = 可见列数. */
-.grid[data-v-d5d26efc] {
+.grid[data-v-22444ff1] {
   display: grid;
   align-content: start;
   min-height: 100%;
   padding: 0 10px;
 }
-.hd[data-v-d5d26efc] {
+.hd[data-v-22444ff1] {
   position: sticky;
   top: 0;
   z-index: 3;
@@ -225,7 +225,7 @@
    -- every pixel of the seam answers `.hd` (or the `.fold` it carries) rather
    than a card. `background: inherit` keeps the zebra columns' tint, and the
    band's bottom rule moves here so the seam reads as part of the header. */
-.hd[data-v-d5d26efc]::after {
+.hd[data-v-22444ff1]::after {
   content: '';
   position: absolute;
   left: 0;
@@ -235,12 +235,12 @@
   background: inherit;
   border-bottom: 1px solid var(--rule-2);
 }
-.hd .lb[data-v-d5d26efc] {
+.hd .lb[data-v-22444ff1] {
   display: inline-flex;
   align-items: center;
   gap: 7px;
 }
-.hd .rt[data-v-d5d26efc] {
+.hd .rt[data-v-22444ff1] {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -248,19 +248,19 @@
 /* The band must answer as the header itself: the label and tally are
    decoration, so they do not intercept a hit -- only the hide switch does. The
    chip is a real control in `.hdctl`, not part of this decoration layer. */
-.hd .lb[data-v-d5d26efc],
-.hd .rt[data-v-d5d26efc] {
+.hd .lb[data-v-22444ff1],
+.hd .rt[data-v-22444ff1] {
   pointer-events: none;
 }
-.hd .rt .lane-hide[data-v-d5d26efc] {
+.hd .rt .lane-hide[data-v-22444ff1] {
   pointer-events: auto;
 }
-.hd .rt .lane-hide[data-v-d5d26efc] * {
+.hd .rt .lane-hide[data-v-22444ff1] * {
   pointer-events: none;
 }
 /* The per-column hide switch. Same shape in every header, so the row reads as
    one control repeated, not a menu. It is the header's own column it hides. */
-.hd .lane-hide[data-v-d5d26efc] {
+.hd .lane-hide[data-v-22444ff1] {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -274,7 +274,7 @@
   color: var(--ink-4);
   cursor: pointer;
 }
-.hd .lane-hide[data-v-d5d26efc]:hover {
+.hd .lane-hide[data-v-22444ff1]:hover {
   border-color: var(--rule);
   background: var(--panel);
   color: var(--ink-2);
@@ -285,7 +285,7 @@
    header's 3 and the lane's 2 -- and carry its own opaque background, so
    neither the first lane cell nor the first status column can show through
    the intersection. The background is the prototype's corner colour (--bg). */
-.hd.corner[data-v-d5d26efc] {
+.hd.corner[data-v-22444ff1] {
   position: sticky;
   top: 0;
   left: 0;
@@ -299,10 +299,10 @@
 /* Column zebra: every other status column carries a faint tint, on both the
    header and the cells, so the band runs the full height and neighbouring
    columns cannot be read into each other. */
-.zcol[data-v-d5d26efc] {
+.zcol[data-v-22444ff1] {
   background-color: var(--zebra);
 }
-.lane[data-v-d5d26efc] {
+.lane[data-v-22444ff1] {
   position: sticky;
   left: 0;
   z-index: 2;
@@ -311,17 +311,17 @@
   border-right: 1px solid var(--rule-2);
   border-bottom: 1px solid var(--rule);
 }
-.lane .name[data-v-d5d26efc] {
+.lane .name[data-v-22444ff1] {
   font: 600 12.5px/1 var(--mono);
   color: var(--ink);
 }
-.lane .pth[data-v-d5d26efc] {
+.lane .pth[data-v-22444ff1] {
   margin-top: 5px;
   font: 10.5px/1.35 var(--mono);
   color: var(--ink-4);
   overflow-wrap: anywhere;
 }
-.lane .tally[data-v-d5d26efc] {
+.lane .tally[data-v-22444ff1] {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -329,18 +329,18 @@
   font: 10.5px/1 var(--mono);
   color: var(--ink-3);
 }
-.lane .tally .bad[data-v-d5d26efc] {
+.lane .tally .bad[data-v-22444ff1] {
   color: var(--c-failed);
   font-weight: 600;
 }
 /* Row separator: the lane and the cells each draw their own bottom border, and
    because they share a grid row the two lines meet into one. */
-.mcell[data-v-d5d26efc] {
+.mcell[data-v-22444ff1] {
   min-height: 26px;
   padding: 10px 6px;
   border-bottom: 1px solid var(--rule);
 }
-.mcell .dash[data-v-d5d26efc] {
+.mcell .dash[data-v-22444ff1] {
   padding-top: 2px;
   font: 11px/1 var(--mono);
   color: var(--ink-4);
@@ -348,7 +348,7 @@
 }
 /* The per-column control band: the chip is the only thing on this full-width
    line under the label row, so the header keeps one self-describing number. */
-.hdctl[data-v-d5d26efc] {
+.hdctl[data-v-22444ff1] {
   flex: 1 0 100%;
   display: flex;
   align-items: center;
@@ -357,14 +357,14 @@
 /* Do not style Element Plus's internal `.el-tooltip__trigger` to lay out this
    control: that class also lands on .cap-chip, and its extra class selector
    outranks .cap-chip's own display rule. Own the full-width layout here. */
-.cap-dd[data-v-d5d26efc] {
+.cap-dd[data-v-22444ff1] {
   display: block;
   width: 100%;
   min-width: 0;
 }
 /* Every column's chip. Its own click stops, but the Element Plus trigger still
    sees the same click and opens the menu. */
-.cap-chip[data-v-d5d26efc] {
+.cap-chip[data-v-22444ff1] {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
@@ -380,20 +380,20 @@
   text-align: left;
   cursor: pointer;
 }
-.cap-chip[data-v-d5d26efc]:hover,
-.cap-chip[data-v-d5d26efc]:focus-visible {
+.cap-chip[data-v-22444ff1]:hover,
+.cap-chip[data-v-22444ff1]:focus-visible {
   border-color: var(--rule-2);
   background: var(--raise);
   color: var(--ink);
 }
-.cap-chip-label[data-v-d5d26efc] {
+.cap-chip-label[data-v-22444ff1] {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cap-caret[data-v-d5d26efc] {
+.cap-caret[data-v-22444ff1] {
   flex: none;
   color: var(--ink-4);
   display: inline-flex;

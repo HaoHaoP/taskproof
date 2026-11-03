@@ -1,5 +1,5 @@
-import { d as defineComponent, u as useI18n, o as openBlock, c as createElementBlock, w as withKeys, a as withModifiers, b as createBaseVNode, e as createVNode, t as toDisplayString, f as unref, g as createCommentVNode, n as normalizeClass, h as computed, _ as _export_sfc, i as useBoardStore, j as useSettingsStore, k as watch, l as withCtx, m as normalizeStyle, F as Fragment, r as renderList, p as resolveComponent, q as boardQuery, s as useRoute, v as useRouter, H as HIDE_KEY, x as createBlock, R as RANGES, y as createTextVNode, z as columnLabelKey, I as ICONS, A as mergeProps, B as toHandlers, C as owningProject, D as parseBoardFilter, E as visibleProjects, G as visibleColumns, J as gridTracks, K as COLUMNS, L as capChipLabel, M as capMenuFor, N as hiddenTally, O as canGrowBudget, P as projectsWithActivity, Q as groupColumns, S as filterBoard, T as DEFAULT_CAPS, U as columnWindow } from "./index-Wc45JReQ.js";
-import { S as StatusMark, d as duration, T as TaskDrawer } from "./TaskDrawer-H5pnnsOg.js";
+import { d as defineComponent, u as useI18n, o as openBlock, c as createElementBlock, w as withKeys, a as withModifiers, b as createBaseVNode, e as createVNode, t as toDisplayString, f as unref, g as createCommentVNode, n as normalizeClass, h as computed, _ as _export_sfc, i as useBoardStore, j as useSettingsStore, k as watch, l as withCtx, m as normalizeStyle, F as Fragment, r as renderList, p as resolveComponent, q as boardQuery, s as useRoute, v as useRouter, H as HIDE_KEY, x as createBlock, R as RANGES, y as createTextVNode, z as columnLabelKey, I as ICONS, A as mergeProps, B as toHandlers, C as owningProject, D as parseBoardFilter, E as visibleProjects, G as visibleColumns, J as gridTracks, K as COLUMNS, L as capChipLabel, M as capMenuFor, N as hiddenTally, O as canGrowBudget, P as projectTally, Q as projectsWithActivity, S as filterBoard, T as groupColumns, U as DEFAULT_CAPS, V as columnWindow } from "./index-DV5k90pQ.js";
+import { S as StatusMark, d as duration, T as TaskDrawer } from "./TaskDrawer-CUtASIW0.js";
 function acceptancePassed(task) {
   return task.status === "blocked" && task.verify_exit === 0;
 }
@@ -156,9 +156,10 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       const scoped = new Set(allProjectIds.value);
       return (filter.value.projects ?? allProjectIds.value).filter((id) => scoped.has(id));
     });
-    const columns = computed(
-      () => groupColumns(filterBoard(store.tasks, filter.value, Date.now(), store.laneProject))
+    const flat = computed(
+      () => filterBoard(store.tasks, filter.value, Date.now(), store.laneProject)
     );
+    const columns = computed(() => groupColumns(flat.value));
     function capFor(key) {
       return settings.settings.columnCaps[key] ?? DEFAULT_CAPS[key] ?? 0;
     }
@@ -198,16 +199,30 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
         (task) => owningProject(task, store.laneProject) === projectId
       );
     }
+    const rowTallies = computed(() => {
+      if (filter.value.range === "all") return null;
+      const out = {};
+      for (const group of projects.value) {
+        out[group.id] = projectTally(flat.value, group.id, store.laneProject);
+      }
+      return out;
+    });
     function laneCount(group) {
-      return group.taskgroups.length;
+      return rowTallies.value?.[group.id]?.lanes ?? group.taskgroups.length;
     }
     function groupTasks(group) {
+      const tally = rowTallies.value?.[group.id];
+      if (tally) return tally.tasks;
       return Object.values(group.summary).reduce((sum, n) => sum + (n || 0), 0);
     }
     function groupFlying(group) {
+      const tally = rowTallies.value?.[group.id];
+      if (tally) return tally.flying;
       return (group.summary.running ?? 0) + (group.summary.verifying ?? 0);
     }
     function groupFailed(group) {
+      const tally = rowTallies.value?.[group.id];
+      if (tally) return tally.failed;
       return (group.summary.failed ?? 0) + (group.summary.timeout ?? 0);
     }
     function aliasHint(group) {
@@ -490,7 +505,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     };
   }
 });
-const MatrixView = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-d5d26efc"]]);
+const MatrixView = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-22444ff1"]]);
 export {
   MatrixView as default
 };
