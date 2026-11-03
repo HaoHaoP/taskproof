@@ -372,6 +372,30 @@ export function owningProject(task: Task, laneProject: Record<string, string>): 
 }
 
 /**
+ * The projects with at least one card inside the selected range, in the order
+ * the cards first appear. Project ids are deduplicated after routing each
+ * task's lane through the same map as `filterBoard`, so a project with cards
+ * in several lanes appears once.
+ */
+export function projectsWithActivity(
+  tasks: Task[],
+  laneProject: Record<string, string>,
+  range: RangeChoice,
+  now: number
+): string[] {
+  const projects: string[] = []
+  const seen = new Set<string>()
+  for (const task of tasks) {
+    if (!inRange(task, range, now)) continue
+    const project = owningProject(task, laneProject)
+    if (seen.has(project)) continue
+    seen.add(project)
+    projects.push(project)
+  }
+  return projects
+}
+
+/**
  * The whole board's filter, applied together: range, then the *project* set.
  * A task survives when the project its lane belongs to is selected, so the one
  * `filter.projects` set drives both the project rows (`visibleProjects`) and

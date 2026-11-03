@@ -24,6 +24,7 @@ import {
   needsMoreBudget,
   owningProject,
   parseBoardFilter,
+  projectsWithActivity,
   sortColumn,
   visibleColumns,
   visibleProjects
@@ -235,6 +236,56 @@ describe('time range', () => {
       {}
     )
     expect(filtered.map((t) => t.id)).toEqual(['b'])
+  })
+})
+
+describe('projects with activity', () => {
+  const laneProject = {
+    'alpha-core': 'alpha',
+    'alpha-web': 'alpha',
+    beta: 'beta'
+  }
+
+  it('keeps only projects with a card inside today', () => {
+    const rows = [
+      task('old', {
+        project: 'beta',
+        created_at: new Date(NOW - 3 * DAY).toISOString()
+      }),
+      task('recent', {
+        project: 'alpha-core',
+        created_at: new Date(NOW - 60 * 60 * 1000).toISOString()
+      })
+    ]
+
+    expect(projectsWithActivity(rows, laneProject, 'today', NOW)).toEqual(['alpha'])
+  })
+
+  it('uses the same range boundary as filterBoard', () => {
+    const start = new Date(NOW)
+    start.setHours(0, 0, 0, 0)
+    const boundary = task('boundary', {
+      project: 'alpha-core',
+      created_at: start.toISOString()
+    })
+    const filter = { ...DEFAULT_FILTER, range: 'today' as const }
+
+    expect(projectsWithActivity([boundary], laneProject, 'today', NOW)).toEqual(['alpha'])
+    expect(filterBoard([boundary], filter, NOW, laneProject)).toEqual([boundary])
+  })
+
+  it('lists every project represented by tasks for range "all"', () => {
+    const rows = [
+      task('a', { project: 'alpha-core', created_at: '2020-01-01T00:00:00+08:00' }),
+      task('b', { project: 'beta', created_at: '2020-01-01T00:00:00+08:00' }),
+      task('c', { project: 'alpha-web', created_at: '2020-01-01T00:00:00+08:00' })
+    ]
+
+    expect(projectsWithActivity(rows, laneProject, 'all', NOW)).toEqual(['alpha', 'beta'])
+  })
+
+  it('returns an empty list for no tasks', () => {
+    expect(projectsWithActivity([], laneProject, 'today', NOW)).toEqual([])
   })
 })
 

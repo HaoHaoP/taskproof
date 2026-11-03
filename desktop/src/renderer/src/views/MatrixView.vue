@@ -34,6 +34,7 @@ import {
   hiddenTally,
   owningProject,
   parseBoardFilter,
+  projectsWithActivity,
   visibleColumns,
   visibleProjects,
   type BoardFilter,
@@ -55,11 +56,26 @@ const { t } = useI18n()
 /** The board's filter, read straight off the address bar. */
 const filter = computed(() => parseBoardFilter(route.query))
 
+/** The project registry narrowed to the selected range. `all` is the whole
+ *  registry in its original order; every other range keeps only projects with
+ *  at least one card in that range. */
+const scopedProjects = computed(() => {
+  if (filter.value.range === 'all') return store.projectGroups
+  const active = new Set(
+    projectsWithActivity(store.tasks, store.laneProject, filter.value.range, Date.now())
+  )
+  return store.projectGroups.filter((group) => active.has(group.id))
+})
+const scopedProjectIds = computed(() => new Set(scopedProjects.value.map((group) => group.id)))
+
 /** Every project row the matrix draws. This is the *same* selected set
  *  `filterBoard` keeps cards by -- so a project the multi-select drops loses
  *  its row and its cards together, never one without the other. The rows come
  *  from the grouped (D2 shape C) view: one row per project, its lanes nested. */
-const projects = computed(() => visibleProjects(store.projectGroups, filter.value))
+const projects = computed(() => {
+  if (filter.value.range === 'all') return visibleProjects(store.projectGroups, filter.value)
+  return visibleProjects(scopedProjects.value, filter.value)
+})
 
 /**
  * The status columns (泳道) the board shows: every contract column the address
@@ -75,14 +91,22 @@ const lanes = computed(() => visibleColumns(filter.value))
  *  the rest and no hidden column claims a track. */
 const gridStyle = computed(() => ({ gridTemplateColumns: gridTracks(lanes.value.length) }))
 
-/** The registry's project ids, in order: what "all selected" means.
+/** The in-scope project ids, in registry order: what "all selected" means.
  *  `filter.projects` is null in that default state, so the multi-select model
  *  falls back to this full list rather than to an empty selection. The values
  *  (and so the whole "all / none / selected N" arithmetic) are project ids. */
-const allProjectIds = computed(() => store.projectGroups.map((group) => group.id))
+const allProjectIds = computed(() =>
+  filter.value.range === 'all'
+    ? store.projectGroups.map((group) => group.id)
+    : scopedProjects.value.map((group) => group.id)
+)
 
-/** What the multi-select shows as checked. */
-const selectedProjects = computed(() => filter.value.projects ?? allProjectIds.value)
+/** What the multi-select shows as checked. A stale project in the address bar
+ *  is left there untouched but cannot render or count outside this range. */
+const selectedProjects = computed(() => {
+  const scoped = new Set(allProjectIds.value)
+  return (filter.value.projects ?? allProjectIds.value).filter((id) => scoped.has(id))
+})
 
 /** The narrowed board, grouped and ordered -- the source of every cell. The
  *  fourth argument is the lane -> project map: a task row's `project` column
@@ -249,15 +273,24 @@ function onProjects(value: string[]): void {
   applyFilter({ projects: isAll ? null : [...value] })
 }
 
-/** Already showing "every project"? `null` is the default that also counts
- *  projects registered later, so it is what "全选" means. */
-const allProjectsSelected = computed(() => filter.value.projects === null)
+/**
+ * Already showing every project in scope? Out-of-range address-bar values do
+ * not make the visible selection any less complete. This supersedes the old
+ * checks `const allProjectsSelected = computed(() => filter.value.projects === null)`
+ * and `filter.value.projects !== null && filter.value.projects.length === 0`,
+ * which only read the raw address-bar state.
+ */
+const allProjectsSelected = computed(() => {
+  const selected = new Set(selectedProjects.value)
+  return (
+    selected.size === allProjectIds.value.length &&
+    allProjectIds.value.every((id) => selected.has(id))
+  )
+})
 
-/** Already showing "none"? The explicit empty array -- different from the
- *  default, so it is a real, disable-able state of its own. */
-const noProjectsSelected = computed(
-  () => filter.value.projects !== null && filter.value.projects.length === 0
-)
+/** Already showing none in scope? This includes an explicitly empty selection
+ *  and a selection containing only projects outside the current range. */
+const noProjectsSelected = computed(() => selectedProjects.value.length === 0)
 
 function selectAllProjects(): void {
   applyFilter({ projects: null })
@@ -312,15 +345,16 @@ watch(filter, (next) => store.setRange(next.range), { immediate: true })
               </button>
             </div>
           </template>
-          <el-option
-            v-for="group in store.projectGroups"
-            :key="group.id"
-            :value="group.id"
-            :label="group.id"
-          >
-            <!-- The visible name is the project id; aliases ride a tooltip. -->
-            <span :title="aliasHint(group) || undefined">{{ group.id }}</span>
-          </el-option>
+          <template v-for="group in store.projectGroups" :key="group.id">
+            <el-option
+              v-if="scopedProjectIds.has(group.id)"
+              :value="group.id"
+              :label="group.id"
+            >
+              <!-- The visible name is the project id; aliases ride a tooltip. -->
+              <span :title="aliasHint(group) || undefined">{{ group.id }}</span>
+            </el-option>
+          </template>
         </el-select>
       </label>
       <label class="fld">
