@@ -15,7 +15,7 @@
  *    "older" means.
  */
 import type { ProjectGroup, Task } from './api/client'
-import { COLUMNS, type Column } from './contract'
+import { COLUMNS, columnFor, type Column } from './contract'
 import { CAP_MAX, CAP_MIN, DEFAULT_COLUMN_CAPS } from '../../preload/types'
 
 /** The column-window caps, one per contract column. `0` means "do not fold --
@@ -415,6 +415,27 @@ export function filterBoard(
       inRange(task, filter.range, now) &&
       (filter.projects === null || filter.projects.includes(owningProject(task, laneProject)))
   )
+}
+
+/**
+ * The mast's three tallies, over exactly the cards the board keeps. Reading the
+ * same filtered set as the matrix keeps the header from describing fetched rows
+ * that the selected range or projects have already removed.
+ */
+export function boardTally(
+  tasks: Task[],
+  filter: BoardFilter,
+  now: number,
+  laneProject: Record<string, string>
+): { tasks: number; flying: number; abnormal: number } {
+  const cards = filterBoard(tasks, filter, now, laneProject)
+  let flying = 0
+  let abnormal = 0
+  for (const task of cards) {
+    if (task.status === 'running' || task.status === 'verifying') flying += 1
+    if (columnFor(task.status).key === 'abnormal') abnormal += 1
+  }
+  return { tasks: cards.length, flying, abnormal }
 }
 
 /**

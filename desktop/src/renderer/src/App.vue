@@ -6,6 +6,7 @@ import AboutDialog from './components/AboutDialog.vue'
 import { ICONS } from './icons'
 import { shellPlaceholder } from './shell'
 import { useElementLocale } from './i18n/element'
+import { boardTally, parseBoardFilter } from './matrix'
 import { useBoardStore } from './stores/board'
 import { useSettingsStore } from './stores/settings'
 
@@ -41,6 +42,12 @@ const rail = ref(true)
  * project filter moved into the matrix's own row.
  */
 const isDataView = computed(() => ['matrix', 'projects', 'tasks'].includes(String(route.name)))
+
+/** Header tallies describe the board's selected range and projects, not the
+ *  fetched page: `filterBoard` is the one set both the mast and matrix read. */
+const tally = computed(() =>
+  boardTally(store.tasks, parseBoardFilter(route.query), Date.now(), store.laneProject)
+)
 
 /**
  * Which placeholder the matrix body shows, if any.
@@ -97,9 +104,9 @@ onBeforeUnmount(() => store.dispose())
           <i />{{ store.polling ? t('live.on') : t('live.off') }}
         </span>
         <div class="tally">
-          <span>{{ t('tally.tasks') }}<b>{{ store.tasks.length }}</b></span>
-          <span>{{ t('tally.flying') }}<b>{{ store.inFlightCount }}</b></span>
-          <span class="alarm">{{ t('tally.failed') }}<b>{{ store.abnormalCount }}</b></span>
+          <span>{{ t('tally.tasks') }}<b>{{ tally.tasks }}</b></span>
+          <span>{{ t('tally.flying') }}<b>{{ tally.flying }}</b></span>
+          <span class="alarm">{{ t('tally.failed') }}<b>{{ tally.abnormal }}</b></span>
         </div>
         <div class="svc" :data-state="store.connected ? 'on' : 'off'">
           <i></i>

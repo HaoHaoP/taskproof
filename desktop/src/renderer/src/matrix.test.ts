@@ -9,6 +9,7 @@ import {
   DONE_WINDOW,
   MAX_BUDGET,
   MIN_BUDGET,
+  boardTally,
   boardQuery,
   canGrowBudget,
   capChipLabel,
@@ -459,6 +460,77 @@ describe('rows and cards read one set', () => {
     const filter = { ...DEFAULT_FILTER, projects: [] }
     expect(visibleProjects(projects, filter)).toEqual([])
     expect(filterBoard(rows, filter, NOW, {})).toEqual([])
+  })
+})
+
+describe('board tally', () => {
+  const today = { ...DEFAULT_FILTER, range: 'today' as const }
+
+  it('counts tasks inside the selected range', () => {
+    const rows = [
+      task('today-a', { created_at: new Date(NOW - 60 * 1000).toISOString() }),
+      task('today-b', { created_at: new Date(NOW - 2 * 60 * 60 * 1000).toISOString() }),
+      task('old', { created_at: new Date(NOW - 3 * DAY).toISOString() })
+    ]
+
+    expect(boardTally(rows, today, NOW, {}).tasks).toBe(2)
+  })
+
+  it('counts only running and verifying cards as flying', () => {
+    const rows = [
+      task('running', { status: 'running' }),
+      task('verifying', { status: 'verifying' }),
+      task('done', { status: 'done' }),
+      task('failed', { status: 'failed' })
+    ]
+
+    expect(boardTally(rows, today, NOW, {}).flying).toBe(2)
+  })
+
+  it('counts the members of the contract last column as abnormal', () => {
+    const candidates = ['failed', 'blocked', 'timeout', 'cancelled']
+    const rows = candidates.map((status) => task(status, { status }))
+    const lastColumn = COLUMNS[COLUMNS.length - 1]
+    const expected = candidates.filter((status) => lastColumn.members.includes(status)).length
+
+    expect(boardTally(rows, today, NOW, {}).abnormal).toBe(expected)
+  })
+
+  it('reads every card for range all with no project narrowing', () => {
+    const rows = [
+      task('running', { status: 'running' }),
+      task('verifying', { status: 'verifying' }),
+      task('failed', { status: 'failed' }),
+      task('blocked', { status: 'blocked' }),
+      task('done', { status: 'done' })
+    ]
+
+    expect(boardTally(rows, DEFAULT_FILTER, NOW, {})).toEqual({
+      tasks: 5,
+      flying: 2,
+      abnormal: 1
+    })
+  })
+
+  it('counts only cards owned by the selected project', () => {
+    const rows = [
+      task('a-running', { project: 'lane-a', status: 'running' }),
+      task('a-failed', { project: 'lane-a', status: 'failed' }),
+      task('b-verifying', { project: 'lane-b', status: 'verifying' }),
+      task('b-failed', { project: 'lane-b', status: 'failed' })
+    ]
+    const filter = { ...DEFAULT_FILTER, projects: ['a'] }
+    const laneProject = { 'lane-a': 'a', 'lane-b': 'b' }
+
+    expect(boardTally(rows, filter, NOW, laneProject)).toEqual({
+      tasks: 2,
+      flying: 1,
+      abnormal: 1
+    })
+  })
+
+  it('returns zeroes for an empty set', () => {
+    expect(boardTally([], today, NOW, {})).toEqual({ tasks: 0, flying: 0, abnormal: 0 })
   })
 })
 
