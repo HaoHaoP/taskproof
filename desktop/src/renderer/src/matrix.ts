@@ -372,6 +372,31 @@ export function owningProject(task: Task, laneProject: Record<string, string>): 
 }
 
 /**
+ * Count one project row's cards from the already range/project-filtered flat
+ * set. A row's lane count is the distinct lanes represented by its cards in
+ * that set, not every lane registered to the project.
+ */
+export function projectTally(
+  tasks: Task[],
+  projectId: string,
+  laneProject: Record<string, string>
+): { lanes: number; tasks: number; flying: number; failed: number } {
+  const cards = tasks.filter((task) => owningProject(task, laneProject) === projectId)
+  let flying = 0
+  let failed = 0
+  for (const task of cards) {
+    if (task.status === 'running' || task.status === 'verifying') flying += 1
+    if (task.status === 'failed' || task.status === 'timeout') failed += 1
+  }
+  return {
+    lanes: new Set(cards.map((task) => task.project)).size,
+    tasks: cards.length,
+    flying,
+    failed
+  }
+}
+
+/**
  * The projects with at least one card inside the selected range, in the order
  * the cards first appear. Project ids are deduplicated after routing each
  * task's lane through the same map as `filterBoard`, so a project with cards

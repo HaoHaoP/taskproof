@@ -25,6 +25,7 @@ import {
   needsMoreBudget,
   owningProject,
   parseBoardFilter,
+  projectTally,
   projectsWithActivity,
   sortColumn,
   visibleColumns,
@@ -531,6 +532,63 @@ describe('board tally', () => {
 
   it('returns zeroes for an empty set', () => {
     expect(boardTally([], today, NOW, {})).toEqual({ tasks: 0, flying: 0, abnormal: 0 })
+  })
+})
+
+describe('project tally', () => {
+  it('counts two distinct lanes for two cards in one project', () => {
+    const rows = [
+      task('one', { project: 'lane-one', status: 'done' }),
+      task('two', { project: 'lane-two', status: 'done' })
+    ]
+    expect(projectTally(rows, 'alpha', { 'lane-one': 'alpha', 'lane-two': 'alpha' })).toEqual({
+      lanes: 2,
+      tasks: 2,
+      flying: 0,
+      failed: 0
+    })
+  })
+
+  it('counts one lane for three cards in the same lane', () => {
+    const rows = [
+      task('one', { project: 'lane-one', status: 'done' }),
+      task('two', { project: 'lane-one', status: 'done' }),
+      task('three', { project: 'lane-one', status: 'done' })
+    ]
+    expect(projectTally(rows, 'alpha', { 'lane-one': 'alpha' })).toEqual({
+      lanes: 1,
+      tasks: 3,
+      flying: 0,
+      failed: 0
+    })
+  })
+
+  it('counts flying and failure-like statuses without blocked or cancelled', () => {
+    const rows = ['running', 'verifying', 'failed', 'timeout', 'blocked', 'cancelled'].map(
+      (status) => task(status, { project: 'lane-one', status })
+    )
+    expect(projectTally(rows, 'alpha', { 'lane-one': 'alpha' })).toEqual({
+      lanes: 1,
+      tasks: 6,
+      flying: 2,
+      failed: 2
+    })
+  })
+
+  it('excludes cards owned by another project through the lane map', () => {
+    const rows = [
+      task('alpha', { project: 'alpha-lane', status: 'running' }),
+      task('beta', { project: 'beta-lane', status: 'failed' }),
+      task('unmapped-alpha', { project: 'alpha', status: 'done' })
+    ]
+    expect(
+      projectTally(rows, 'alpha', { 'alpha-lane': 'alpha', 'beta-lane': 'beta' })
+    ).toEqual({
+      lanes: 2,
+      tasks: 2,
+      flying: 1,
+      failed: 0
+    })
   })
 })
 

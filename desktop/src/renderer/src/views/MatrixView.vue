@@ -34,6 +34,7 @@ import {
   hiddenTally,
   owningProject,
   parseBoardFilter,
+  projectTally,
   projectsWithActivity,
   visibleColumns,
   visibleProjects,
@@ -108,13 +109,18 @@ const selectedProjects = computed(() => {
   return (filter.value.projects ?? allProjectIds.value).filter((id) => scoped.has(id))
 })
 
+/** Every fetched card in the selected time range and project set, before any
+ *  display column is hidden or windowed. Both the cells and the project-row
+ *  tallies read this one flat set. */
+const flat = computed(() =>
+  filterBoard(store.tasks, filter.value, Date.now(), store.laneProject)
+)
+
 /** The narrowed board, grouped and ordered -- the source of every cell. The
  *  fourth argument is the lane -> project map: a task row's `project` column
  *  is a *lane* id, so `filterBoard` and `tasksIn` below must route it through
  *  the registry to know which project row it belongs under. */
-const columns = computed(() =>
-  groupColumns(filterBoard(store.tasks, filter.value, Date.now(), store.laneProject))
-)
+const columns = computed(() => groupColumns(flat.value))
 
 
 /** One column's display cap, from App settings with the code default as the
@@ -181,25 +187,42 @@ function tasksIn(projectId: string, columnKey: string): Task[] {
   )
 }
 
+/** Row tallies for a narrowed range. Range "all" keeps reading the registry and
+ *  group summary exactly as before, so this map is only built when needed. */
+const rowTallies = computed<Record<string, ReturnType<typeof projectTally>> | null>(() => {
+  if (filter.value.range === 'all') return null
+  const out: Record<string, ReturnType<typeof projectTally>> = {}
+  for (const group of projects.value) {
+    out[group.id] = projectTally(flat.value, group.id, store.laneProject)
+  }
+  return out
+})
+
 /** How many lanes a project row carries. A single-lane project (the
  *  uncollected-registry case) reports 1 -- the row still reads as its own lane. */
 function laneCount(group: ProjectGroup): number {
-  return group.taskgroups.length
+  return rowTallies.value?.[group.id]?.lanes ?? group.taskgroups.length
 }
 
 /** The project's total card count: the grouped view's status summary summed.
  *  Same aggregate the per-lane row used to carry on its own. */
 function groupTasks(group: ProjectGroup): number {
+  const tally = rowTallies.value?.[group.id]
+  if (tally) return tally.tasks
   return Object.values(group.summary).reduce((sum, n) => sum + (n || 0), 0)
 }
 
 /** In-flight across the project's lanes (running + verifying). */
 function groupFlying(group: ProjectGroup): number {
+  const tally = rowTallies.value?.[group.id]
+  if (tally) return tally.flying
   return (group.summary.running ?? 0) + (group.summary.verifying ?? 0)
 }
 
 /** Failure-like terminals across the project's lanes (failed + timeout). */
 function groupFailed(group: ProjectGroup): number {
+  const tally = rowTallies.value?.[group.id]
+  if (tally) return tally.failed
   return (group.summary.failed ?? 0) + (group.summary.timeout ?? 0)
 }
 
