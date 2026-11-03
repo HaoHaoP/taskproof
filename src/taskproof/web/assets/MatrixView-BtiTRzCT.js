@@ -1,5 +1,5 @@
-import { d as defineComponent, u as useI18n, o as openBlock, c as createElementBlock, w as withKeys, a as withModifiers, b as createBaseVNode, e as createVNode, t as toDisplayString, f as unref, g as createCommentVNode, n as normalizeClass, h as computed, _ as _export_sfc, i as useBoardStore, j as useSettingsStore, k as watch, l as withCtx, m as normalizeStyle, F as Fragment, r as renderList, p as resolveComponent, q as boardQuery, s as useRoute, v as useRouter, H as HIDE_KEY, x as createBlock, R as RANGES, y as createTextVNode, z as columnLabelKey, I as ICONS, A as mergeProps, B as toHandlers, C as owningProject, D as parseBoardFilter, E as visibleProjects, G as visibleColumns, J as gridTracks, K as COLUMNS, L as capChipLabel, M as capMenuFor, N as hiddenTally, O as canGrowBudget, P as groupColumns, Q as filterBoard, S as DEFAULT_CAPS, T as columnWindow } from "./index-Cd1EoUu-.js";
-import { S as StatusMark, d as duration, T as TaskDrawer } from "./TaskDrawer-COqi93G5.js";
+import { d as defineComponent, u as useI18n, o as openBlock, c as createElementBlock, w as withKeys, a as withModifiers, b as createBaseVNode, e as createVNode, t as toDisplayString, f as unref, g as createCommentVNode, n as normalizeClass, h as computed, _ as _export_sfc, i as useBoardStore, j as useSettingsStore, k as watch, l as withCtx, m as normalizeStyle, F as Fragment, r as renderList, p as resolveComponent, q as boardQuery, s as useRoute, v as useRouter, H as HIDE_KEY, x as createBlock, R as RANGES, y as createTextVNode, z as columnLabelKey, I as ICONS, A as mergeProps, B as toHandlers, C as owningProject, D as parseBoardFilter, E as visibleProjects, G as visibleColumns, J as gridTracks, K as COLUMNS, L as capChipLabel, M as capMenuFor, N as hiddenTally, O as canGrowBudget, P as projectsWithActivity, Q as groupColumns, S as filterBoard, T as DEFAULT_CAPS, U as columnWindow } from "./index-Wc45JReQ.js";
+import { S as StatusMark, d as duration, T as TaskDrawer } from "./TaskDrawer-H5pnnsOg.js";
 function acceptancePassed(task) {
   return task.status === "blocked" && task.verify_exit === 0;
 }
@@ -135,11 +135,27 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     const router = useRouter();
     const { t } = useI18n();
     const filter = computed(() => parseBoardFilter(route.query));
-    const projects = computed(() => visibleProjects(store.projectGroups, filter.value));
+    const scopedProjects = computed(() => {
+      if (filter.value.range === "all") return store.projectGroups;
+      const active = new Set(
+        projectsWithActivity(store.tasks, store.laneProject, filter.value.range, Date.now())
+      );
+      return store.projectGroups.filter((group) => active.has(group.id));
+    });
+    const scopedProjectIds = computed(() => new Set(scopedProjects.value.map((group) => group.id)));
+    const projects = computed(() => {
+      if (filter.value.range === "all") return visibleProjects(store.projectGroups, filter.value);
+      return visibleProjects(scopedProjects.value, filter.value);
+    });
     const lanes = computed(() => visibleColumns(filter.value));
     const gridStyle = computed(() => ({ gridTemplateColumns: gridTracks(lanes.value.length) }));
-    const allProjectIds = computed(() => store.projectGroups.map((group) => group.id));
-    const selectedProjects = computed(() => filter.value.projects ?? allProjectIds.value);
+    const allProjectIds = computed(
+      () => filter.value.range === "all" ? store.projectGroups.map((group) => group.id) : scopedProjects.value.map((group) => group.id)
+    );
+    const selectedProjects = computed(() => {
+      const scoped = new Set(allProjectIds.value);
+      return (filter.value.projects ?? allProjectIds.value).filter((id) => scoped.has(id));
+    });
     const columns = computed(
       () => groupColumns(filterBoard(store.tasks, filter.value, Date.now(), store.laneProject))
     );
@@ -231,10 +247,11 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       const isAll = value.length === all.length && all.every((id) => value.includes(id));
       applyFilter({ projects: isAll ? null : [...value] });
     }
-    const allProjectsSelected = computed(() => filter.value.projects === null);
-    const noProjectsSelected = computed(
-      () => filter.value.projects !== null && filter.value.projects.length === 0
-    );
+    const allProjectsSelected = computed(() => {
+      const selected = new Set(selectedProjects.value);
+      return selected.size === allProjectIds.value.length && allProjectIds.value.every((id) => selected.has(id));
+    });
+    const noProjectsSelected = computed(() => selectedProjects.value.length === 0);
     function selectAllProjects() {
       applyFilter({ projects: null });
     }
@@ -279,18 +296,22 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
               ]),
               default: withCtx(() => [
                 (openBlock(true), createElementBlock(Fragment, null, renderList(unref(store).projectGroups, (group) => {
-                  return openBlock(), createBlock(_component_el_option, {
-                    key: group.id,
-                    value: group.id,
-                    label: group.id
-                  }, {
-                    default: withCtx(() => [
-                      createBaseVNode("span", {
-                        title: aliasHint(group) || void 0
-                      }, toDisplayString(group.id), 9, _hoisted_7)
-                    ]),
-                    _: 2
-                  }, 1032, ["value", "label"]);
+                  return openBlock(), createElementBlock(Fragment, {
+                    key: group.id
+                  }, [
+                    scopedProjectIds.value.has(group.id) ? (openBlock(), createBlock(_component_el_option, {
+                      key: 0,
+                      value: group.id,
+                      label: group.id
+                    }, {
+                      default: withCtx(() => [
+                        createBaseVNode("span", {
+                          title: aliasHint(group) || void 0
+                        }, toDisplayString(group.id), 9, _hoisted_7)
+                      ]),
+                      _: 2
+                    }, 1032, ["value", "label"])) : createCommentVNode("", true)
+                  ], 64);
                 }), 128))
               ]),
               _: 1
@@ -469,7 +490,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     };
   }
 });
-const MatrixView = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-6af3c04d"]]);
+const MatrixView = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-d5d26efc"]]);
 export {
   MatrixView as default
 };

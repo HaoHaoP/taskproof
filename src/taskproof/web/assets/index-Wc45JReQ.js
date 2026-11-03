@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./MatrixView-ClSEIjZm.js","./TaskDrawer-COqi93G5.js","./TaskDrawer-N299VKzd.css","./MatrixView-BM8nu9s2.css","./ProjectsView-BXWsK6eF.js","./ProjectsView-CqNFL-fi.css","./TasksView-CgOmskO0.js","./TasksView-Bn08731V.css","./SettingsView-Co6AsKsi.js","./SettingsView-aqTS3ubB.css"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./MatrixView-BtiTRzCT.js","./TaskDrawer-H5pnnsOg.js","./TaskDrawer-N299VKzd.css","./MatrixView-DDD564ew.css","./ProjectsView-DRmStYqt.js","./ProjectsView-CqNFL-fi.css","./TasksView-C7W6U_81.js","./TasksView-Bn08731V.css","./SettingsView-Uxps_tdz.js","./SettingsView-aqTS3ubB.css"])))=>i.map(i=>d[i]);
 // @__NO_SIDE_EFFECTS__
 function makeMap(str) {
   const map2 = /* @__PURE__ */ Object.create(null);
@@ -73599,6 +73599,18 @@ function laneProjectMap(groups) {
 function owningProject(task, laneProject) {
   return laneProject[task.project] ?? task.project;
 }
+function projectsWithActivity(tasks, laneProject, range3, now2) {
+  const projects = [];
+  const seen2 = /* @__PURE__ */ new Set();
+  for (const task of tasks) {
+    if (!inRange(task, range3, now2)) continue;
+    const project = owningProject(task, laneProject);
+    if (seen2.has(project)) continue;
+    seen2.add(project);
+    projects.push(project);
+  }
+  return projects;
+}
 function filterBoard(tasks, filter, now2, laneProject) {
   return tasks.filter(
     (task) => inRange(task, filter.range, now2) && (filter.projects === null || filter.projects.includes(owningProject(task, laneProject)))
@@ -75338,20 +75350,20 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: "/", redirect: () => "/matrix" },
-    { path: "/matrix/:taskId?", name: "matrix", component: () => __vitePreload(() => import("./MatrixView-ClSEIjZm.js"), true ? __vite__mapDeps([0,1,2,3]) : void 0, import.meta.url) },
+    { path: "/matrix/:taskId?", name: "matrix", component: () => __vitePreload(() => import("./MatrixView-BtiTRzCT.js"), true ? __vite__mapDeps([0,1,2,3]) : void 0, import.meta.url) },
     {
       path: "/projects/:taskId?",
       name: "projects",
-      component: () => __vitePreload(() => import("./ProjectsView-BXWsK6eF.js"), true ? __vite__mapDeps([4,1,2,5]) : void 0, import.meta.url)
+      component: () => __vitePreload(() => import("./ProjectsView-DRmStYqt.js"), true ? __vite__mapDeps([4,1,2,5]) : void 0, import.meta.url)
     },
-    { path: "/tasks/:taskId?", name: "tasks", component: () => __vitePreload(() => import("./TasksView-CgOmskO0.js"), true ? __vite__mapDeps([6,1,2,7]) : void 0, import.meta.url) },
-    { path: "/settings", name: "settings", component: () => __vitePreload(() => import("./SettingsView-Co6AsKsi.js"), true ? __vite__mapDeps([8,9]) : void 0, import.meta.url) },
+    { path: "/tasks/:taskId?", name: "tasks", component: () => __vitePreload(() => import("./TasksView-C7W6U_81.js"), true ? __vite__mapDeps([6,1,2,7]) : void 0, import.meta.url) },
+    { path: "/settings", name: "settings", component: () => __vitePreload(() => import("./SettingsView-Uxps_tdz.js"), true ? __vite__mapDeps([8,9]) : void 0, import.meta.url) },
     { path: "/:pathMatch(.*)*", redirect: () => "/matrix" }
   ]
 });
 createApp(App).use(createPinia()).use(router).use(i18n).use(element_plus_default).mount("#app");
 export {
-  byteLength as $,
+  formatBytes as $,
   mergeProps as A,
   toHandlers as B,
   owningProject as C,
@@ -75367,32 +75379,33 @@ export {
   capMenuFor as M,
   hiddenTally as N,
   canGrowBudget as O,
-  groupColumns as P,
-  filterBoard as Q,
+  projectsWithActivity as P,
+  groupColumns as Q,
   RANGES as R,
-  DEFAULT_CAPS as S,
-  columnWindow as T,
-  ref as U,
-  metaFor as V,
-  onBeforeUnmount as W,
-  withDirectives as X,
-  vShow as Y,
-  formatBytes as Z,
+  filterBoard as S,
+  DEFAULT_CAPS as T,
+  columnWindow as U,
+  ref as V,
+  metaFor as W,
+  onBeforeUnmount as X,
+  withDirectives as Y,
+  vShow as Z,
   _export_sfc as _,
   withModifiers as a,
-  LOG_MAX_LINES as a0,
-  highlightSegments as a1,
-  shouldStickBottom as a2,
-  nextTick as a3,
-  ABNORMAL as a4,
-  countMatches as a5,
-  matchLineIndexes as a6,
-  stripAnsi as a7,
-  onMounted as a8,
-  openAbout as a9,
-  STATUS_IDS as aa,
-  VERIFY_KINDS as ab,
-  hasDesktopHost as ac,
+  byteLength as a0,
+  LOG_MAX_LINES as a1,
+  highlightSegments as a2,
+  shouldStickBottom as a3,
+  nextTick as a4,
+  ABNORMAL as a5,
+  countMatches as a6,
+  matchLineIndexes as a7,
+  stripAnsi as a8,
+  onMounted as a9,
+  openAbout as aa,
+  STATUS_IDS as ab,
+  VERIFY_KINDS as ac,
+  hasDesktopHost as ad,
   createBaseVNode as b,
   createElementBlock as c,
   defineComponent as d,
