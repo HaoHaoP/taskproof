@@ -274,4 +274,8 @@ jobs:
         if: ${{ !contains(github.ref_name, '-rc') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run publish.yml --ref "${{ github.ref_name }}"
+        # `--repo` is not optional: this job never checks the repository out
+        # (it only downloads the built artefacts), and `gh` needs a repo
+        # context -- without it the call dies on "not a git repository" and
+        # the release ships without ever reaching PyPI.
+        run: gh workflow run publish.yml --ref "${{ github.ref_name }}" --repo "${{ github.repository }}"
