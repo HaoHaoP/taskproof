@@ -13,6 +13,13 @@ from taskproof import ledger
 
 
 class LedgerTest(unittest.TestCase):
+    @staticmethod
+    def _previous_month(month):
+        year, month_number = (int(part) for part in month.split("-"))
+        if month_number == 1:
+            return f"{year - 1:04d}-12"
+        return f"{year:04d}-{month_number - 1:02d}"
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = self.tmp.name
@@ -36,20 +43,30 @@ class LedgerTest(unittest.TestCase):
         self.assertIn("2026-10", p2)
 
     def test_rotate_compresses_old_months_and_keeps_current(self):
-        ledger.append(self.dir, {"event": "old", "ts": "2026-01-15T10:00:00+08:00"})
-        ledger.append(self.dir, {"event": "new", "ts": "2026-10-15T10:00:00+08:00"})
+        current_month = ledger.month_key()
+        old_month = self._previous_month(current_month)
+        ledger.append(self.dir, {"event": "old", "ts": f"{old_month}-15T10:00:00+08:00"})
+        ledger.append(self.dir, {"event": "new", "ts": f"{current_month}-15T10:00:00+08:00"})
         ledger.rotate(self.dir, keep_months=3)
-        self.assertTrue(os.path.exists(os.path.join(self.dir, "events-2026-01.jsonl.gz")))
-        self.assertTrue(os.path.exists(ledger.stream_path(self.dir, "2026-10")))
+        self.assertTrue(os.path.exists(os.path.join(self.dir, f"events-{old_month}.jsonl.gz")))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, f"events-{old_month}.jsonl")))
+        self.assertTrue(os.path.exists(ledger.stream_path(self.dir, current_month)))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, f"events-{current_month}.jsonl.gz")))
 
     def test_rotate_prunes_beyond_keep_window(self):
-        ledger.append(self.dir, {"event": "ancient", "ts": "2020-01-01T10:00:00+08:00"})
-        ledger.rotate(self.dir, keep_months=2)
-        self.assertFalse(os.path.exists(os.path.join(self.dir, "events-2020-01.jsonl.gz")))
+        current_year, current_month_number = (int(part) for part in ledger.month_key().split("-"))
+        keep_months = 2
+        ancient_month = f"{current_year - keep_months:04d}-{current_month_number:02d}"
+        ledger.append(self.dir, {"event": "ancient", "ts": f"{ancient_month}-01T10:00:00+08:00"})
+        ledger.rotate(self.dir, keep_months=keep_months)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, f"events-{ancient_month}.jsonl")))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, f"events-{ancient_month}.jsonl.gz")))
 
     def test_iter_events_reads_plain_and_gz(self):
-        ledger.append(self.dir, {"event": "old", "ts": "2026-01-15T10:00:00+08:00"})
-        ledger.append(self.dir, {"event": "new", "ts": "2026-10-15T10:00:00+08:00"})
+        current_month = ledger.month_key()
+        old_month = self._previous_month(current_month)
+        ledger.append(self.dir, {"event": "old", "ts": f"{old_month}-15T10:00:00+08:00"})
+        ledger.append(self.dir, {"event": "new", "ts": f"{current_month}-15T10:00:00+08:00"})
         ledger.rotate(self.dir, keep_months=12)
         events = list(ledger.iter_events(self.dir))
         self.assertEqual({e["event"] for e in events}, {"old", "new"})
