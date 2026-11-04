@@ -205,6 +205,8 @@ taskproof workspace-rm my-lane --force
 
 `wait <id>` polls the ledger until the card is terminal, and **it is the whole replacement for a hand-rolled `while …; do <read the ledger>; sleep N; done` loop**: exits `0` for `done`, `1` for any other terminal state, `124` when the wait itself gives up (the task is never touched). `show <id>` ends with a `changes:` block listing the paths this run left dirty, marking the ones that were **already dirty before the run** with `[跑前已脏]` — that is the part of `files_changed` which is not this card's doing. Between `tasks`, `show`, `log` and `--json`, reading the ledger with `sqlite3` is never necessary.
 
+**Firing is asynchronous: end the turn, don't hold it.** Dispatch with `background=true, notify=true` (or run `wait <id>` in the background) and then **finish your turn** — the verdict comes back as a new message. Do **not** keep the turn alive with `sleep N; taskproof tasks …` polling: it does not finish any sooner, it surfaces nothing the notification will not, and to whoever is watching it reads as idle waiting. A one-off `tasks --all --lane <id>` for a status line is fine; pairing it with `sleep` is not.
+
 `verifying` is a **real, persisted state**: while the acceptance command runs, the card is written as `verifying`, so a long build or test suite is visible on the board instead of hiding inside `running`. A card sitting there is not stuck — it is being accepted.
 
 `verify <id>` re-runs the registered acceptance command for an existing task and appends a `verify` event. That is the main agent's review step (section 9): it records the re-run as a fact instead of asserting one.
