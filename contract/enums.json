@@ -62,6 +62,10 @@
       "meaning": "concurrency"
     },
     {
+      "code": 76,
+      "meaning": "duplicate"
+    },
+    {
       "code": 78,
       "meaning": "precondition"
     }

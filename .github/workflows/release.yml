@@ -227,42 +227,30 @@ jobs:
 
             **English**
 
-            - **The board's time range now scopes the projects, not only the cards.** Picking
-              today / 7d / 30d used to narrow the cards while every registered project kept its
-              row, its option in the multi-select, and its all-time tallies -- a row could read
-              "8 lanes / 111 tasks" over a single card. The rows, the option list, the
-              "all / none" arithmetic and each row's lane and task counts now come from the
-              cards inside the range. `all` is unchanged: the whole registry, registry order.
-            - **The mast tallies count the board's set.** They used to read the fetched page
-              (`store.tasks.length`), so `range=today` claimed 200 tasks over seven cards on
-              screen. All three now run the same filter the matrix runs, and "failed" reuses the
-              contract's last column instead of restating the status list.
-            - **`check-card.py` runs on every card, not only the visual ones.** Three
-              sandbox-feasibility checks join the four reference checks: acceptance may not write
-              outside the checkout (`--lane`, skipped when the lane is unknown), may not drive a
-              browser without a budget and a stop-loss line, and "write the test, do not touch the
-              source" beside a test command now warns instead of blocking -- a card whose subject
-              *is* the test is legitimate. Exit codes keep their meaning: 0 fire, 1 do not fire.
-            - **The ledger rotation tests no longer hard-code a month.** They pinned `2026-10` as
-              "the current month" while `rotate()` reads the wall clock, so the suite went red the
-              moment November started. They now derive the month (and a month well outside the
-              retention window) from `month_key()`.
+            - **The ledger now records whether a task needs human attention.** Disposition
+              appears as a DISPO column in task listings, `--dispo` filters the ledger by it,
+              and `wait` uses four distinct exit codes to tell you whether work is finished,
+              waiting for review, blocked, or timed out.
+            - **Acceptance criteria are frozen when a card is dispatched.** Each task keeps the
+              twelve dispatch-time facts, including the card fingerprint, lane, branch, and
+              acceptance command. Changing the registry mid-run no longer changes the verdict
+              for a running card; a mismatch is recorded as `mandate_drift`, while the card
+              continues against its original criteria. `verify --current` explicitly opts into
+              the present registry values.
+            - **The same card cannot be dispatched twice.** A duplicate fingerprint exits with
+              code 76, leaves no ledger row, and does not consume a concurrency slot. `--force`
+              clearly means redispatch and records `duplicate_of` on the event. `check-card.py`
+              now warns when a literal date appears in the card body.
 
             **中文**
 
-            - **看板的时间范围现在管的是项目，不只是卡片。** 选「今天 / 7 天 / 30 天」以前只筛卡片：
-              每个注册项目照样占一行、照样出现在项目多选里，行上还挂着整库聚合的数字 —— 一行可能写着
-              「8 条道 / 111 个任务」而实际只有 1 张卡。现在行、选项列表、「全选 / 清空」的口径、以及每行的
-              道数与任务数，都从范围内的卡片算出来。`all` 不变：整份注册表，注册顺序。
-            - **右上角三个数数的是看板上的集合。** 以前读的是取回的行数（`store.tasks.length`），所以范围选
-              「今天」时写着 200 个任务、而屏幕上只有 7 张卡。现在三个数都跑看板用的同一个过滤器，「未通过」
-              复用契约最后一列，不再自己列状态名。
-            - **`check-card.py` 现在对每张卡都跑，不再只管观感卡。** 四条参照物检查之外加了三条沙箱可行性
-              检查：验收不许写到检出之外（要 `--lane`，道未知时标不适用）、不许把浏览器量测当验收（除
-              非卡里写了预算与止损），以及「只写测试、别动源码」配测试命令时只告警不拦车 —— 卡本身就该改
-              测试的那种是正当的。退出码语义不变：0 发车、1 不许发车。
-            - **账本轮转测试不再把月份写死。** 它们把 `2026-10` 当成「本月」，而 `rotate()` 读的是真实时钟，
-              于是日历一进 11 月整套测试就红。现在从 `month_key()` 推导本月（以及一个远在保留窗口之外的月份）。
+            - **账本现在会记下每个任务要不要人看。** 任务列表新增 DISPO 列显示 disposition，
+              `--dispo` 可按它过滤账本，`wait` 用四种不同退出码区分「已完成 / 待人看 / 阻塞 / 超时」。
+            - **发车时就把验收判据冻结下来。** 每个任务会保留卡指纹、道、分支、验收命令等十二项发车时的
+              信息，中途修改注册表不再改写正在运行的卡的判定；对不上会记一条 `mandate_drift`，但仍按发车时
+              的判据继续跑。`verify --current` 则明确要求按现在的注册表值验收。
+            - **同一张卡不会被重复派发。** 撞指纹时返回 76，不写账本，也不占并发位；`--force` 明确表示
+              要重派，并在事件里记下 `duplicate_of`。`check-card.py` 遇到卡文正文里的日期会给出 WARN。
 
       # `release: published` cannot route here on its own: this Release is created
       # with the run's automatic GITHUB_TOKEN, and events raised by that token do
