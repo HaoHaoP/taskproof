@@ -312,6 +312,18 @@ add a lane, but hand-editing is fine — the file is read on every run.
 Runtime state never lands here. Tasks, events and verdicts live in the SQLite
 store; the audit stream is JSONL.
 
+## Task rows
+
+The `tasks` table keeps the machine lifecycle in `status` and the independent
+human-review answer in `disposition`, with a one-line `disposition_reason`
+beside it. `disposition` is one of `disputed`, `awaiting_review`, `blocked`,
+`failed`, `settled`, or `unknown`; it is derived when dispatch, `verify`, or
+`accept` records a result. Old rows without a value are read as `unknown` and
+the textual `tasks` table renders that absent value as `—`.
+
+Both `/api/tasks` and `/api/tasks/<id>` include `disposition` and
+`disposition_reason` in every task projection.
+
 ## REST surface
 
 The local API is **read-only**. Every mutation lives in the CLI

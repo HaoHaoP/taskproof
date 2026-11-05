@@ -223,8 +223,8 @@ class WaitCliTest(CliBase):
     """Card 75: `taskproof wait` blocks on the ledger and reports the verdict.
 
     It polls the task row (like `log --follow`), never forks a helper, and the
-    exit code is the contract: done 0, any other terminal state 1, and a wait
-    that gives up 124 -- without ever touching the task's own state.
+    exit code is the contract: settled 0, waiting 3, an unknown disposition 1,
+    and a wait that gives up 124 -- without ever touching the task's own state.
     """
 
     def setUp(self):
@@ -241,24 +241,26 @@ class WaitCliTest(CliBase):
         )
         return code, out
 
-    def test_wait_on_done_exits_zero_and_leads_with_id_and_status(self):
+    def test_wait_on_unstructured_done_is_unknown_and_exits_one(self):
         _code, out = self._dispatch("done card")
         task_id = json.loads(out)["task_id"]
         code, stdout = self.run_cli("--workspace", self.ws, "wait", task_id)
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 1)
         first = stdout.splitlines()[0]
         self.assertIn(task_id, first)
         self.assertIn("done", first)
+        self.assertIn("disposition: unknown", stdout)
 
     def test_wait_json_is_the_show_shape(self):
         _code, out = self._dispatch("done card")
         task_id = json.loads(out)["task_id"]
         code, stdout = self.run_cli("--workspace", self.ws, "--json", "wait", task_id)
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 1)
         payload = json.loads(stdout)
         self.assertEqual(set(payload), {"task", "events"})
         self.assertEqual(payload["task"]["id"], task_id)
         self.assertEqual(payload["task"]["status"], "done")
+        self.assertEqual(payload["task"]["disposition"], "unknown")
 
     def test_wait_on_failed_exits_one(self):
         # A verify failure makes `run` exit non-zero, so the card is seeded

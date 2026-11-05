@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from .. import __version__, concurrency, dispatch, registry, storage, verify
 from ..errors import RegistryError, UsageError
+from ..models import DISPO_UNKNOWN
 
 #: Loopback only. Do not make this configurable to a routable address.
 HOST = "127.0.0.1"
@@ -270,8 +271,10 @@ def _live_files_changed(row):
 
 
 def _with_live_files(row):
-    """Copy ``row`` and add the derived ``files_changed_live`` field."""
+    """Copy ``row`` and add the API's live/projection-only fields."""
     row = dict(row)
+    row["disposition"] = row.get("disposition") or DISPO_UNKNOWN
+    row["disposition_reason"] = row.get("disposition_reason") or ""
     row["files_changed_live"] = _live_files_changed(row)
     return row
 

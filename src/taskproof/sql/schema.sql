@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     verify_cmd    TEXT,
     verify_exit   INTEGER,
     files_changed INTEGER,
+    disposition   TEXT,
+    disposition_reason TEXT,
     created_at    TEXT NOT NULL,
     started_at    TEXT,
     finished_at   TEXT

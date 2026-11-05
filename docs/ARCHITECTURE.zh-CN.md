@@ -120,8 +120,8 @@ taskproof 是一层不产生判断的调度与验收设施：它不决定要做�
 
     tasks     id / project / group_name / brief / status / adapter / model /
               reasoning / attempt / exit_code / pid / pgid / workdir / result_path /
-              verify_cmd / verify_exit / files_changed / created_at / started_at /
-              finished_at
+              verify_cmd / verify_exit / files_changed / disposition /
+              disposition_reason / created_at / started_at / finished_at
     events    审计镜像，与 JSONL 同源：id / task_id / ts / event / payload
     claims    并发守卫：scope（group:<组> | global） / task_id / pid / claimed_at /
               expires_at
@@ -152,6 +152,21 @@ taskproof 是一层不产生判断的调度与验收设施：它不决定要做�
     blocked     受保护路径被移动，需要人工复核
     timeout     撞上硬超时，进程树被杀，验收从未执行
     cancelled   人工停止（只杀本次派发自己的进程组）
+
+`status` 仍是机器判定的生命周期结论，语义不变：尤其 `done` 依旧表示验收通过或
+验收被记录为 `SKIPPED`。另有一列独立的第二维回答「这卡还要不要人看」：
+
+    disputed          contract_dispute 非空
+    awaiting_review   验收通过，但 needs_approval 非空，或结构化报告自称 partial
+    blocked           blockers 非空，或生命周期状态是 blocked
+    failed            生命周期状态是 failed 或 timeout
+    settled           验收通过且上面几条都不命中；cancelled 也算已了结，
+                      因为人已经主动停过它
+    unknown           没有可用的结构化结果，或没有规则命中
+
+规则按上表自上而下判断，第一条命中即返回。没有报告绝不默认成已了结。老行不回填；
+库中没值读到 `unknown`，文本表显示为 `—`。`wait` 的退出码：`settled` 为 0，
+四个待人标签为 3，`unknown` 或其它终态为 1，等待超时为 124。
 
 ### 3.4 终态语义与人工收尾
 

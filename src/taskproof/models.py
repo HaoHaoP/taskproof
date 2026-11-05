@@ -24,6 +24,70 @@ TERMINAL_STATUSES = (
     STATUS_CANCELLED,
 )
 
+# Human disposition is a second dimension beside the machine lifecycle status.
+# It answers "does this card still need a person?", never "what happened to the
+# process?".
+DISPO_DISPUTED = "disputed"
+DISPO_AWAITING_REVIEW = "awaiting_review"
+DISPO_BLOCKED = "blocked"
+DISPO_FAILED = "failed"
+DISPO_SETTLED = "settled"
+DISPO_UNKNOWN = "unknown"
+
+
+def _report_items(payload: Optional[Dict[str, Any]], key: str) -> list:
+    """Return a structured report's list field, ignoring malformed shapes."""
+    if not isinstance(payload, dict):
+        return []
+    value = payload.get(key)
+    return value if isinstance(value, list) else []
+
+
+def derive_disposition(
+    status: str, verify_exit: Optional[int], payload: Optional[Dict[str, Any]]
+) -> tuple[str, str]:
+    """Derive the human disposition from status, acceptance, and result fields.
+
+    The rules are evaluated in the design's order; the first match wins. This is
+    a pure function: it reads only its arguments and never touches the
+    filesystem or database.
+    """
+    report = payload if isinstance(payload, dict) and payload else None
+
+    contract_dispute = report.get("contract_dispute") if report else ""
+    if isinstance(contract_dispute, str) and contract_dispute.strip():
+        reason = " ".join(contract_dispute.split())
+        return DISPO_DISPUTED, f"contract_dispute: {reason}"
+
+    needs_approval = _report_items(report, "needs_approval")
+    report_status = report.get("status") if report else None
+    if verify_exit == 0 and (needs_approval or report_status == "partial"):
+        if needs_approval:
+            return (
+                DISPO_AWAITING_REVIEW,
+                f"needs_approval: {len(needs_approval)} 项",
+            )
+        return DISPO_AWAITING_REVIEW, "report status: partial"
+
+    blockers = _report_items(report, "blockers")
+    if blockers:
+        return DISPO_BLOCKED, f"blockers: {len(blockers)} 项"
+    if status == STATUS_BLOCKED:
+        return DISPO_BLOCKED, "status: blocked"
+
+    if status in (STATUS_FAILED, STATUS_TIMEOUT):
+        return DISPO_FAILED, f"status: {status}"
+
+    if status == STATUS_CANCELLED:
+        return DISPO_SETTLED, "status: cancelled"
+
+    if report is not None and verify_exit == 0:
+        return DISPO_SETTLED, "verify_exit: 0"
+
+    if report is None:
+        return DISPO_UNKNOWN, "missing structured result"
+    return DISPO_UNKNOWN, "no disposition rule matched"
+
 
 @dataclass
 class Project:

@@ -42,6 +42,7 @@ from .errors import (
     VerifyError,
 )
 from .models import (
+    DISPO_UNKNOWN,
     STATUS_BLOCKED,
     STATUS_CANCELLED,
     STATUS_DONE,
@@ -51,6 +52,7 @@ from .models import (
     STATUS_VERIFYING,
     TERMINAL_STATUSES,
     Task,
+    derive_disposition,
 )
 
 #: Seconds to wait after SIGTERM before escalating to SIGKILL for a task tree.
@@ -946,7 +948,7 @@ def _execute(
         # and "how this command ended" are deliberately different values.
         # Layer 3's `accept <id>` is what clears a blocked card; this pipeline
         # never auto-promotes it to `done`, even when acceptance passed.
-        _finish_task(conn, task_id, status=STATUS_BLOCKED, **common)
+        _finish_task(conn, task_id, status=STATUS_BLOCKED, result=result, **common)
         storage.append_event(
             conn,
             task_id,
@@ -966,7 +968,7 @@ def _execute(
         )
 
     if verify_status == "FAILED":
-        _finish_task(conn, task_id, status=STATUS_FAILED, **common)
+        _finish_task(conn, task_id, status=STATUS_FAILED, result=result, **common)
         storage.append_event(
             conn,
             task_id,
@@ -982,7 +984,7 @@ def _execute(
             hint=f"output: {outcome.output_tail}" if outcome and outcome.output_tail else None,
         )
 
-    _finish_task(conn, task_id, status=STATUS_DONE, **common)
+    _finish_task(conn, task_id, status=STATUS_DONE, result=result, **common)
     storage.append_event(
         conn,
         task_id,
@@ -1012,6 +1014,18 @@ def _task_cancelled(conn, task_id: str) -> bool:
     return row is not None and row[0] == STATUS_CANCELLED
 
 
+def _payload_from_result_path(path) -> Optional[dict]:
+    """Read a structured result file; any unreadable/invalid shape is unknown."""
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) and payload else None
+
+
 def _finish_task(
     conn,
     task_id: str,
@@ -1023,6 +1037,7 @@ def _finish_task(
     files_changed=None,
     workdir=None,
     result_path=None,
+    result=None,
 ) -> None:
     """Patch the terminal columns of a task. Only non-None fields are written.
 
@@ -1044,6 +1059,12 @@ def _finish_task(
         fields["workdir"] = workdir
     if result_path is not None:
         fields["result_path"] = result_path
+    payload = result.payload if result is not None else None
+    disposition, disposition_reason = derive_disposition(
+        status, verify_exit, payload
+    )
+    fields["disposition"] = disposition
+    fields["disposition_reason"] = disposition_reason
     storage.update_task(conn, task_id, **fields)
 
 
@@ -2023,6 +2044,17 @@ def verify_task(workspace: str, task_id: str) -> verify.VerifyOutcome:
         if outcome.files_changed is not None:
             fields["files_changed"] = outcome.files_changed
         storage.update_task(conn, task_id, **fields)
+        updated = storage.get_task(conn, task_id)
+        payload = _payload_from_result_path(updated["result_path"])
+        disposition, disposition_reason = derive_disposition(
+            updated["status"], updated["verify_exit"], payload
+        )
+        storage.update_task(
+            conn,
+            task_id,
+            disposition=disposition,
+            disposition_reason=disposition_reason,
+        )
         storage.append_event(
             conn,
             task_id,
@@ -2048,6 +2080,9 @@ def task_detail(workspace: str, task_id: str) -> dict:
         storage.migrate(conn)
         row = storage.get_task(conn, task_id)
         task = dict(row) if row is not None else None
+        if task is not None:
+            task["disposition"] = task.get("disposition") or DISPO_UNKNOWN
+            task["disposition_reason"] = task.get("disposition_reason") or ""
 
         events = []
         for event in storage.list_events(conn, task_id):
@@ -2103,11 +2138,17 @@ def cancel_task(workspace: str, task_id: str) -> dict:
         # dispatcher observes `cancelled` (via `_task_cancelled`) before its
         # adapter dies, so it returns without appending a contradictory
         # `failed`/`timeout` event for a task the user deliberately stopped.
+        payload = _payload_from_result_path(row["result_path"])
+        disposition, disposition_reason = derive_disposition(
+            STATUS_CANCELLED, row["verify_exit"], payload
+        )
         storage.update_task(
             conn,
             task_id,
             status=STATUS_CANCELLED,
             finished_at=storage.now_iso(),
+            disposition=disposition,
+            disposition_reason=disposition_reason,
         )
         storage.append_event(
             conn,
@@ -2303,10 +2344,20 @@ def accept_task(
             if agent_summary:
                 payload["summary"] = agent_summary[:_SUMMARY_TAIL_CHARS]
 
-        # A timeout is never promoted, so its row is not written at all; every
-        # other path moves `status` (and only `status`).
+        # Re-derive the human disposition after the sign-off. A timeout is never
+        # promoted; the disposition columns are still refreshed from the same
+        # structured result path used by `verify`.
+        result_payload = _payload_from_result_path(row["result_path"])
+        disposition, disposition_reason = derive_disposition(
+            new_status, verify_exit, result_payload
+        )
+        changes = {
+            "disposition": disposition,
+            "disposition_reason": disposition_reason,
+        }
         if new_status != status:
-            storage.update_task(conn, task_id, status=new_status)
+            changes["status"] = new_status
+        storage.update_task(conn, task_id, **changes)
         storage.append_event(conn, task_id, "accepted", payload)
         return dict(storage.get_task(conn, task_id))
     finally:

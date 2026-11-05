@@ -44,7 +44,7 @@ def connect(path: str) -> sqlite3.Connection:
 
 #: Schema level this build writes. Bump it whenever `migrate()` learns a new
 #: step that `schema.sql` alone cannot perform on an existing database.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: Columns added after v1. `schema.sql` is all ``CREATE TABLE IF NOT EXISTS``,
 #: so it can never add a column to a table that already exists — these are the
@@ -54,6 +54,8 @@ SCHEMA_VERSION = 2
 _ADDED_COLUMNS = (
     ("tasks", "pgid", "INTEGER"),
     ("tasks", "queue_seq", "INTEGER"),
+    ("tasks", "disposition", "TEXT"),
+    ("tasks", "disposition_reason", "TEXT"),
 )
 
 
@@ -66,7 +68,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     """Bring `conn`'s database up to the current schema (idempotent).
 
     `schema.sql` builds a fresh database in full; the probes below are what
-    upgrade a database created before `pgid`/`queue_seq` existed. Both halves are
+    upgrade a database created before the added columns existed. Both halves are
     safe to run any number of times, and every step either applies cleanly or is
     skipped because it is already present.
     """
@@ -84,11 +86,12 @@ def migrate(conn: sqlite3.Connection) -> None:
             "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
             (1, now_iso()),
         )
-    if current < SCHEMA_VERSION:
-        # PRIMARY KEY on `version` makes the recording itself idempotent.
+    # Record each schema level crossed by this migration. An old database at
+    # version 1 jumps straight to 3 here, but keeps an auditable 2 row as well.
+    for version in range(max(current + 1, 1), SCHEMA_VERSION + 1):
         conn.execute(
             "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
-            (SCHEMA_VERSION, now_iso()),
+            (version, now_iso()),
         )
 
 
@@ -119,6 +122,8 @@ TASK_COLUMNS = frozenset(
         "verify_cmd",
         "verify_exit",
         "files_changed",
+        "disposition",
+        "disposition_reason",
         "created_at",
         "started_at",
         "finished_at",

@@ -23,9 +23,35 @@ from . import (
     storage,
 )
 from .errors import RegistryError, UsageError
-from .models import STATUS_DONE, TERMINAL_STATUSES
+from .models import (
+    DISPO_AWAITING_REVIEW,
+    DISPO_BLOCKED,
+    DISPO_DISPUTED,
+    DISPO_FAILED,
+    DISPO_SETTLED,
+    DISPO_UNKNOWN,
+    TERMINAL_STATUSES,
+)
 
 DEFAULT_WORKSPACE = os.path.join(os.path.expanduser("~"), ".taskproof")
+
+_DISPO_LABELS = {
+    DISPO_DISPUTED: "卡边界有争议",
+    DISPO_AWAITING_REVIEW: "待批",
+    DISPO_BLOCKED: "受阻等人",
+    DISPO_FAILED: "需人看一眼",
+    DISPO_SETTLED: "已了结",
+    DISPO_UNKNOWN: "未知",
+}
+_DISPO_FILTER_VALUES = {
+    value: value for value in _DISPO_LABELS
+} | {label: value for value, label in _DISPO_LABELS.items()}
+_DISPO_WAITING = (
+    DISPO_DISPUTED,
+    DISPO_AWAITING_REVIEW,
+    DISPO_BLOCKED,
+    DISPO_FAILED,
+)
 
 
 class _UsageErrorParser(argparse.ArgumentParser):
@@ -130,6 +156,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p = sub.add_parser("tasks", help="list tasks")
     p.add_argument("--status")
+    p.add_argument(
+        "--dispo",
+        metavar="VALUE",
+        help="only this human disposition (English value or Chinese label)",
+    )
     p.add_argument("--project", help="project id, alias, or path (overrides cwd)")
     p.add_argument("--all", dest="all_projects", action="store_true",
                    help="every project, ignoring the cwd scope (overrides cwd)")
@@ -700,12 +731,19 @@ def _row_files(task) -> str:
     return "-" if files_changed is None else str(files_changed)
 
 
+def _row_disposition(task) -> str:
+    value = task.get("disposition")
+    if not value:
+        return "—"
+    return _DISPO_LABELS.get(value, str(value))
+
+
 def _tasks_header(*, with_project: bool) -> str:
-    # Column order is contractual: ID STATUS [PROJECT] VERIFY FILES BRIEF. The
-    # single-project view drops PROJECT (it is constant there) and keeps its
+    # Column order is contractual: ID STATUS DISPO [PROJECT] VERIFY FILES BRIEF.
+    # The single-project view drops PROJECT (it is constant there) and keeps its
     # compact shape; either way BRIEF stays last and keeps its 45-char cap
-    # (`_row_brief`), so the new columns never squeeze it out.
-    cells = [f"{'ID':<18}", f"{'STATUS':<10}"]
+    # (`_row_brief`).
+    cells = [f"{'ID':<18}", f"{'STATUS':<10}", f"{'DISPO':<14}"]
     if with_project:
         cells.append(f"{'PROJECT':<16}")
     cells += [f"{'VERIFY':<8}", f"{'FILES':<6}", "BRIEF"]
@@ -713,7 +751,11 @@ def _tasks_header(*, with_project: bool) -> str:
 
 
 def _tasks_row(task, *, with_project: bool) -> str:
-    cells = [f"{str(task.get('id') or ''):<18}", f"{str(task.get('status') or ''):<10}"]
+    cells = [
+        f"{str(task.get('id') or ''):<18}",
+        f"{str(task.get('status') or ''):<10}",
+        f"{_row_disposition(task):<14}",
+    ]
     if with_project:
         cells.append(f"{str(task.get('project') or ''):<16}")
     cells += [f"{_row_verify(task):<8}", f"{_row_files(task):<6}", _row_brief(task)]
@@ -759,6 +801,18 @@ def cmd_tasks(args):
         tid.strip() for tid in (getattr(args, "ids", None) or "").split(",") if tid.strip()
     }
     lane = getattr(args, "lane", None)
+    raw_disposition = getattr(args, "dispo", None)
+    disposition_filter = None
+    if raw_disposition is not None:
+        disposition_filter = _DISPO_FILTER_VALUES.get(raw_disposition.strip())
+        if disposition_filter is None:
+            accepted = " / ".join(
+                [*_DISPO_LABELS, *list(_DISPO_LABELS.values())]
+            )
+            raise UsageError(
+                f"unknown disposition: {raw_disposition}",
+                hint=f"accepted values: {accepted}",
+            )
 
     conn = storage.connect(storage.db_path(args.workspace))
     try:
@@ -770,6 +824,12 @@ def cmd_tasks(args):
     finally:
         conn.close()
 
+    if disposition_filter is not None:
+        tasks = [
+            task
+            for task in tasks
+            if (task.get("disposition") or DISPO_UNKNOWN) == disposition_filter
+        ]
     if id_filter:
         tasks = [task for task in tasks if task.get("id") in id_filter]
     if lane:
@@ -812,6 +872,8 @@ def cmd_show(args):
         f"id:       {task.get('id')}",
         f"project:  {task.get('project')}",
         f"status:   {task.get('status')}",
+        f"disposition: {task.get('disposition')}",
+        f"disposition_reason: {task.get('disposition_reason') or '—'}",
         f"adapter:  {task.get('adapter')}",
         f"brief:    {task.get('brief')}",
         f"verify:   {task.get('verify_cmd')} (exit {task.get('verify_exit')})",
@@ -854,6 +916,8 @@ def _wait_human(task) -> str:
         [
             f"{task.get('id')}  {task.get('status') or ''}  {task.get('project') or ''}",
             f"status:   {task.get('status')}",
+            f"disposition: {task.get('disposition')}",
+            f"disposition_reason: {task.get('disposition_reason') or '—'}",
             f"exit:     {task.get('exit_code')}",
             f"verify:   {task.get('verify_cmd')} (exit {task.get('verify_exit')})",
             f"files:    {task.get('files_changed')}",
@@ -889,7 +953,12 @@ def cmd_wait(args):
     status = task.get("status")
     if status not in TERMINAL_STATUSES:
         return 124  # the wait gave up; the task state was never touched
-    return 0 if status == STATUS_DONE else 1
+    disposition = task.get("disposition")
+    if disposition == DISPO_SETTLED:
+        return 0
+    if disposition in _DISPO_WAITING:
+        return 3
+    return 1
 
 
 #: `log --follow` polls the audit stream instead of blocking on a `tail -f`.

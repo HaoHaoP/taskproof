@@ -273,6 +273,17 @@ warning: unknown key 'concurency' in [defaults]
 
 运行期状态从不落在这里。任务、事件与判定在 SQLite 存储里；审计流是 JSONL。
 
+## 任务行
+
+`tasks` 表用 `status` 保存机器生命周期，用独立的一列 `disposition` 保存「还要不要
+人看」，旁边一列 `disposition_reason` 写一句话原因。`disposition` 取值为
+`disputed`、`awaiting_review`、`blocked`、`failed`、`settled` 或 `unknown`；
+派发收尾、`verify` 与 `accept` 记录结果时都会重新推导。没有值的老行按 `unknown`
+读取，文本版 `tasks` 表把这种缺失值显示为 `—`。
+
+`/api/tasks` 与 `/api/tasks/<id>` 的每条任务投影都包含 `disposition` 和
+`disposition_reason`。
+
 ## REST 表面
 
 本地 API 是**只读**的。所有写操作都留在 CLI 里（`taskproof register`、

@@ -150,8 +150,8 @@ slots" unanswerable.
 
     tasks     id / project / group_name / brief / status / adapter / model /
               reasoning / attempt / exit_code / pid / pgid / workdir / result_path /
-              verify_cmd / verify_exit / files_changed / created_at / started_at /
-              finished_at
+              verify_cmd / verify_exit / files_changed / disposition /
+              disposition_reason / created_at / started_at / finished_at
     events    the audit mirror, same origin as JSONL: id / task_id / ts / event / payload
     claims    the concurrency guard: scope (group:<g> | global) / task_id / pid /
               claimed_at / expires_at
@@ -188,6 +188,25 @@ Five terminal states: `done` / `failed` / `blocked` / `timeout` / `cancelled`.
     timeout      the hard timeout fired, the process tree was killed, acceptance
                  never ran
     cancelled    a human stopped it (only this dispatch's own process group dies)
+
+`status` remains the machine lifecycle verdict, unchanged: in particular,
+`done` still means acceptance passed or was recorded `SKIPPED`. A second,
+independent column answers whether a person is still needed:
+
+    disputed          contract_dispute is non-empty
+    awaiting_review   acceptance passed, but needs_approval is non-empty or the
+                      structured report says partial
+    blocked           blockers is non-empty, or the lifecycle state is blocked
+    failed            the lifecycle state is failed or timeout
+    settled           acceptance passed with nothing above; cancelled also
+                      settles because a human already stopped it
+    unknown           no usable structured result, or no rule matched
+
+The rules run in that order and the first match wins. A missing report is never
+treated as settled. Existing rows are not backfilled; a missing stored value is
+read as `unknown` while the text table renders it as `—`. `wait` exits 0 for
+`settled`, 3 for the four review-oriented dispositions, 1 for `unknown` or any
+other terminal row, and 124 when the wait times out.
 
 ### 3.4 Terminal states and human sign-off
 
