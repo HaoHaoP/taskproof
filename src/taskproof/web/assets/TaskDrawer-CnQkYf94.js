@@ -1,4 +1,4 @@
-import { d as defineComponent, c as createElementBlock, F as Fragment, y as createTextVNode, t as toDisplayString, h as computed, o as openBlock, X as metaFor, _ as _export_sfc, i as useBoardStore, u as useI18n, k as watch, Y as onBeforeUnmount, x as createBlock, l as withCtx, f as unref, W as ref, p as resolveComponent, b as createBaseVNode, e as createVNode, w as withKeys, a as withModifiers, n as normalizeClass, Z as withDirectives, $ as vShow, r as renderList, g as createCommentVNode, a0 as formatBytes, a1 as byteLength, a2 as LOG_MAX_LINES, a3 as highlightSegments, a4 as shouldStickBottom, a5 as nextTick, s as useRoute, v as useRouter, a6 as ABNORMAL, a7 as countMatches, a8 as matchLineIndexes, a9 as stripAnsi } from "./index-DV5k90pQ.js";
+import { d as defineComponent, c as createElementBlock, F as Fragment, y as createTextVNode, t as toDisplayString, h as computed, o as openBlock, X as metaFor, _ as _export_sfc, i as useBoardStore, u as useI18n, k as watch, Y as onBeforeUnmount, x as createBlock, l as withCtx, f as unref, W as ref, p as resolveComponent, b as createBaseVNode, e as createVNode, g as createCommentVNode, w as withKeys, a as withModifiers, n as normalizeClass, Z as withDirectives, $ as vShow, r as renderList, a0 as formatBytes, a1 as byteLength, a2 as LOG_MAX_LINES, a3 as highlightSegments, a4 as shouldStickBottom, a5 as nextTick, s as useRoute, v as useRouter, a6 as ABNORMAL, a7 as countMatches, a8 as matchLineIndexes, a9 as stripAnsi } from "./index-CpE_Q7S0.js";
 const _hoisted_1$1 = ["data-status", "data-shape"];
 const _hoisted_2$1 = {
   key: 0,
@@ -41,6 +41,11 @@ function duration(startedAt, finishedAt) {
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
   return `${minutes}m${String(seconds).padStart(2, "0")}s`;
+}
+function dispositionText(value, translate, hasMessage) {
+  if (!value) return "—";
+  const key = `dispo.${value}`;
+  return hasMessage(key) ? translate(key) : value;
 }
 function payloadLine(payload) {
   if (payload == null) return "";
@@ -100,83 +105,124 @@ function shouldRetryDrawerMount(state, retries = DRAWER_MOUNT_RETRIES) {
 function drawerMountKey(attempt) {
   return `drawer-${attempt}`;
 }
+function mandateText(value) {
+  return typeof value === "string" && value.trim() ? value : "—";
+}
+function mandateSummary(raw, events = [], currentVerify) {
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const mandate = parsed;
+  const verify = typeof mandate.verify === "string" ? mandate.verify : null;
+  return {
+    lane: mandateText(mandate.lane),
+    branch: mandateText(mandate.branch),
+    verify: mandateText(verify),
+    // Prefer the lane's current command. The event is the fallback when the
+    // drawer has no project snapshot (for example, projects failed to load).
+    drifted: currentVerify !== void 0 ? verify !== currentVerify : events.some((event) => event.event === "mandate_drift")
+  };
+}
 const _hoisted_1 = { class: "dh" };
 const _hoisted_2 = ["data-status"];
 const _hoisted_3 = { class: "cid" };
 const _hoisted_4 = { class: "dur" };
 const _hoisted_5 = ["aria-label"];
 const _hoisted_6 = {
+  key: 0,
+  class: "disposition"
+};
+const _hoisted_7 = { class: "disposition-label" };
+const _hoisted_8 = { class: "disposition-value" };
+const _hoisted_9 = {
+  key: 0,
+  class: "disposition-reason"
+};
+const _hoisted_10 = {
   class: "dtabs",
   role: "tablist"
 };
-const _hoisted_7 = ["aria-selected"];
-const _hoisted_8 = ["aria-selected"];
-const _hoisted_9 = { class: "dbody" };
-const _hoisted_10 = { class: "sec" };
-const _hoisted_11 = { class: "full" };
-const _hoisted_12 = { class: "sec" };
-const _hoisted_13 = ["data-off"];
-const _hoisted_14 = { class: "tl" };
-const _hoisted_15 = { class: "t" };
-const _hoisted_16 = { class: "k" };
-const _hoisted_17 = { class: "g" };
-const _hoisted_18 = {
+const _hoisted_11 = ["aria-selected"];
+const _hoisted_12 = ["aria-selected"];
+const _hoisted_13 = { class: "dbody" };
+const _hoisted_14 = { class: "sec" };
+const _hoisted_15 = { class: "full" };
+const _hoisted_16 = { class: "sec" };
+const _hoisted_17 = ["data-off"];
+const _hoisted_18 = { class: "tl" };
+const _hoisted_19 = { class: "t" };
+const _hoisted_20 = { class: "k" };
+const _hoisted_21 = { class: "g" };
+const _hoisted_22 = {
   key: 0,
   class: "d"
 };
-const _hoisted_19 = {
+const _hoisted_23 = {
   key: 0,
   class: "ev"
 };
-const _hoisted_20 = {
+const _hoisted_24 = {
   key: 0,
   class: "sec"
 };
-const _hoisted_21 = { class: "vrow" };
-const _hoisted_22 = { class: "vlabel" };
-const _hoisted_23 = {
+const _hoisted_25 = { class: "vrow" };
+const _hoisted_26 = { class: "vlabel" };
+const _hoisted_27 = {
   key: 0,
   class: "vcmd"
 };
-const _hoisted_24 = {
+const _hoisted_28 = {
+  key: 1,
+  class: "sec mandate"
+};
+const _hoisted_29 = {
+  key: 0,
+  class: "mandate-drift"
+};
+const _hoisted_30 = {
   key: 0,
   class: "side claim"
 };
-const _hoisted_25 = { class: "body" };
-const _hoisted_26 = {
+const _hoisted_31 = { class: "body" };
+const _hoisted_32 = {
   key: 1,
   class: "rule"
 };
-const _hoisted_27 = { class: "side ev" };
-const _hoisted_28 = { class: "logpanel" };
-const _hoisted_29 = { class: "logbar" };
-const _hoisted_30 = ["value", "placeholder", "aria-label"];
-const _hoisted_31 = { class: "logcount" };
-const _hoisted_32 = ["aria-label", "disabled"];
-const _hoisted_33 = ["aria-label", "disabled"];
-const _hoisted_34 = { class: "logscope" };
-const _hoisted_35 = {
+const _hoisted_33 = { class: "side ev" };
+const _hoisted_34 = { class: "logpanel" };
+const _hoisted_35 = { class: "logbar" };
+const _hoisted_36 = ["value", "placeholder", "aria-label"];
+const _hoisted_37 = { class: "logcount" };
+const _hoisted_38 = ["aria-label", "disabled"];
+const _hoisted_39 = ["aria-label", "disabled"];
+const _hoisted_40 = { class: "logscope" };
+const _hoisted_41 = {
   key: 0,
   class: "lognone"
 };
-const _hoisted_36 = {
+const _hoisted_42 = {
   key: 0,
   class: "lognote"
 };
-const _hoisted_37 = {
+const _hoisted_43 = {
   key: 1,
   class: "lognote"
 };
-const _hoisted_38 = {
+const _hoisted_44 = {
   key: 2,
   class: "logerr"
 };
-const _hoisted_39 = {
+const _hoisted_45 = {
   key: 0,
   class: "logempty"
 };
-const _hoisted_40 = ["data-line"];
-const _hoisted_41 = {
+const _hoisted_46 = ["data-line"];
+const _hoisted_47 = {
   key: 1,
   class: "none"
 };
@@ -190,6 +236,13 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     const open = computed(() => typeof route.params.taskId === "string" && route.params.taskId !== "");
     const task = computed(() => store.detail?.task ?? null);
     const events = computed(() => store.detail?.events ?? []);
+    const currentLane = computed(
+      () => store.projects.find((project) => project.id === task.value?.project)
+    );
+    const mandate = computed(
+      () => mandateSummary(task.value?.mandate, events.value, currentLane.value?.verify)
+    );
+    const dispositionReason = computed(() => task.value?.disposition_reason?.trim() || "");
     const tab = computed(() => route.query.tab === "log" ? "log" : "overview");
     const liveTask = computed(() => {
       const status = task.value?.status;
@@ -402,7 +455,12 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
                 onClick: close
               }, "✕", 8, _hoisted_5)
             ]),
-            createBaseVNode("div", _hoisted_6, [
+            task.value.disposition != null ? (openBlock(), createElementBlock("div", _hoisted_6, [
+              createBaseVNode("span", _hoisted_7, toDisplayString(unref(t)("drawer.disposition")), 1),
+              createBaseVNode("span", _hoisted_8, toDisplayString(unref(dispositionText)(task.value.disposition, unref(t), unref(te))), 1),
+              dispositionReason.value ? (openBlock(), createElementBlock("span", _hoisted_9, toDisplayString(dispositionReason.value), 1)) : createCommentVNode("", true)
+            ])) : createCommentVNode("", true),
+            createBaseVNode("div", _hoisted_10, [
               createBaseVNode("button", {
                 role: "tab",
                 type: "button",
@@ -413,7 +471,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
                   _cache[1] || (_cache[1] = withKeys(withModifiers(($event) => go("overview"), ["prevent"]), ["enter"])),
                   _cache[2] || (_cache[2] = withKeys(withModifiers(($event) => go("overview"), ["prevent"]), ["space"]))
                 ]
-              }, toDisplayString(unref(t)("drawer.tab.overview")), 43, _hoisted_7),
+              }, toDisplayString(unref(t)("drawer.tab.overview")), 43, _hoisted_11),
               createBaseVNode("button", {
                 role: "tab",
                 type: "button",
@@ -424,14 +482,14 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
                   _cache[4] || (_cache[4] = withKeys(withModifiers(($event) => go("log"), ["prevent"]), ["enter"])),
                   _cache[5] || (_cache[5] = withKeys(withModifiers(($event) => go("log"), ["prevent"]), ["space"]))
                 ]
-              }, toDisplayString(unref(t)("drawer.tab.log")), 43, _hoisted_8)
+              }, toDisplayString(unref(t)("drawer.tab.log")), 43, _hoisted_12)
             ]),
-            withDirectives(createBaseVNode("div", _hoisted_9, [
-              createBaseVNode("section", _hoisted_10, [
+            withDirectives(createBaseVNode("div", _hoisted_13, [
+              createBaseVNode("section", _hoisted_14, [
                 createBaseVNode("h4", null, toDisplayString(unref(t)("drawer.brief")), 1),
-                createBaseVNode("pre", _hoisted_11, toDisplayString(task.value.brief), 1)
+                createBaseVNode("pre", _hoisted_15, toDisplayString(task.value.brief), 1)
               ]),
-              createBaseVNode("section", _hoisted_12, [
+              createBaseVNode("section", _hoisted_16, [
                 createBaseVNode("h4", null, [
                   createTextVNode(toDisplayString(unref(t)("drawer.timeline")) + " ", 1),
                   createBaseVNode("span", {
@@ -440,52 +498,68 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
                   }, [
                     _cache[9] || (_cache[9] = createBaseVNode("i", null, null, -1)),
                     createTextVNode(toDisplayString(unref(store).polling ? unref(t)("live.on") : unref(t)("live.off")), 1)
-                  ], 8, _hoisted_13)
+                  ], 8, _hoisted_17)
                 ]),
-                createBaseVNode("ol", _hoisted_14, [
+                createBaseVNode("ol", _hoisted_18, [
                   (openBlock(true), createElementBlock(Fragment, null, renderList(timeline.value, (entry, index) => {
                     return openBlock(), createElementBlock("li", {
                       key: index,
                       class: normalizeClass(["ev", { now: liveTask.value && index === timeline.value.length - 1, isbad: entry.bad }])
                     }, [
                       _cache[10] || (_cache[10] = createBaseVNode("span", { class: "dot" }, null, -1)),
-                      createBaseVNode("span", _hoisted_15, toDisplayString(entry.t), 1),
-                      createBaseVNode("span", _hoisted_16, toDisplayString(entry.k), 1),
-                      createBaseVNode("span", _hoisted_17, toDisplayString(entry.g), 1),
-                      entry.d ? (openBlock(), createElementBlock("span", _hoisted_18, toDisplayString(entry.d), 1)) : createCommentVNode("", true)
+                      createBaseVNode("span", _hoisted_19, toDisplayString(entry.t), 1),
+                      createBaseVNode("span", _hoisted_20, toDisplayString(entry.k), 1),
+                      createBaseVNode("span", _hoisted_21, toDisplayString(entry.g), 1),
+                      entry.d ? (openBlock(), createElementBlock("span", _hoisted_22, toDisplayString(entry.d), 1)) : createCommentVNode("", true)
                     ], 2);
                   }), 128)),
-                  !timeline.value.length ? (openBlock(), createElementBlock("li", _hoisted_19, [..._cache[11] || (_cache[11] = [
+                  !timeline.value.length ? (openBlock(), createElementBlock("li", _hoisted_23, [..._cache[11] || (_cache[11] = [
                     createBaseVNode("span", { class: "dot" }, null, -1),
                     createBaseVNode("span", { class: "t" }, "—", -1)
                   ])])) : createCommentVNode("", true)
                 ])
               ]),
-              verify.value != null ? (openBlock(), createElementBlock("section", _hoisted_20, [
+              verify.value != null ? (openBlock(), createElementBlock("section", _hoisted_24, [
                 createBaseVNode("h4", null, [
                   createTextVNode(toDisplayString(unref(t)("drawer.verdict")), 1),
                   createBaseVNode("em", null, "— " + toDisplayString(unref(t)("verdict.by")), 1)
                 ]),
-                createBaseVNode("div", _hoisted_21, [
+                createBaseVNode("div", _hoisted_25, [
                   createBaseVNode("span", {
                     class: normalizeClass(["vdot", { bad: verify.value !== 0 }])
                   }, null, 2),
-                  createBaseVNode("span", _hoisted_22, toDisplayString(unref(t)(verify.value === 0 ? "verdict.passed" : "verdict.failed")), 1),
+                  createBaseVNode("span", _hoisted_26, toDisplayString(unref(t)(verify.value === 0 ? "verdict.passed" : "verdict.failed")), 1),
                   createBaseVNode("span", {
                     class: normalizeClass(["vcode", { bad: verify.value !== 0 }])
                   }, "exit " + toDisplayString(verify.value), 3)
                 ]),
-                task.value.verify_cmd ? (openBlock(), createElementBlock("p", _hoisted_23, toDisplayString(task.value.verify_cmd), 1)) : createCommentVNode("", true)
+                task.value.verify_cmd ? (openBlock(), createElementBlock("p", _hoisted_27, toDisplayString(task.value.verify_cmd), 1)) : createCommentVNode("", true)
+              ])) : createCommentVNode("", true),
+              mandate.value ? (openBlock(), createElementBlock("section", _hoisted_28, [
+                createBaseVNode("h4", null, toDisplayString(unref(t)("drawer.mandate.title")), 1),
+                createBaseVNode("dl", null, [
+                  createBaseVNode("dt", null, toDisplayString(unref(t)("drawer.mandate.lane")), 1),
+                  createBaseVNode("dd", null, toDisplayString(mandate.value.lane), 1),
+                  createBaseVNode("dt", null, toDisplayString(unref(t)("drawer.mandate.branch")), 1),
+                  createBaseVNode("dd", null, toDisplayString(mandate.value.branch), 1),
+                  createBaseVNode("dt", null, toDisplayString(unref(t)("drawer.mandate.verify")), 1),
+                  createBaseVNode("dd", null, toDisplayString(mandate.value.verify), 1),
+                  createBaseVNode("dt", null, toDisplayString(unref(t)("drawer.mandate.drift")), 1),
+                  createBaseVNode("dd", {
+                    class: normalizeClass({ bad: mandate.value.drifted })
+                  }, toDisplayString(unref(t)(mandate.value.drifted ? "drawer.mandate.drifted" : "drawer.mandate.inSync")), 3)
+                ]),
+                mandate.value.drifted ? (openBlock(), createElementBlock("p", _hoisted_29, toDisplayString(unref(t)("drawer.mandate.driftedNotice")), 1)) : createCommentVNode("", true)
               ])) : createCommentVNode("", true),
               createBaseVNode("div", {
                 class: normalizeClass(["duel", { solo: !showClaim.value }])
               }, [
-                showClaim.value ? (openBlock(), createElementBlock("div", _hoisted_24, [
+                showClaim.value ? (openBlock(), createElementBlock("div", _hoisted_30, [
                   createBaseVNode("h5", null, toDisplayString(unref(t)("drawer.claim")), 1),
-                  createBaseVNode("p", _hoisted_25, toDisplayString(task.value.reasoning || unref(t)("drawer.noClaim")), 1)
+                  createBaseVNode("p", _hoisted_31, toDisplayString(task.value.reasoning || unref(t)("drawer.noClaim")), 1)
                 ])) : createCommentVNode("", true),
-                showClaim.value ? (openBlock(), createElementBlock("div", _hoisted_26)) : createCommentVNode("", true),
-                createBaseVNode("div", _hoisted_27, [
+                showClaim.value ? (openBlock(), createElementBlock("div", _hoisted_32)) : createCommentVNode("", true),
+                createBaseVNode("div", _hoisted_33, [
                   createBaseVNode("h5", null, toDisplayString(unref(t)("drawer.evidence")), 1),
                   createBaseVNode("dl", null, [
                     createBaseVNode("dt", null, toDisplayString(unref(t)("ev.exit")), 1),
@@ -508,8 +582,8 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
             ], 512), [
               [vShow, tab.value === "overview"]
             ]),
-            withDirectives(createBaseVNode("div", _hoisted_28, [
-              createBaseVNode("div", _hoisted_29, [
+            withDirectives(createBaseVNode("div", _hoisted_34, [
+              createBaseVNode("div", _hoisted_35, [
                 createBaseVNode("input", {
                   class: "logq",
                   type: "search",
@@ -517,22 +591,22 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
                   placeholder: unref(t)("log.search.placeholder"),
                   "aria-label": unref(t)("log.search.placeholder"),
                   onInput: _cache[6] || (_cache[6] = ($event) => onQuery($event.target.value))
-                }, null, 40, _hoisted_30),
-                createBaseVNode("span", _hoisted_31, toDisplayString(hitPosition.value) + " / " + toDisplayString(matchCount.value), 1),
+                }, null, 40, _hoisted_36),
+                createBaseVNode("span", _hoisted_37, toDisplayString(hitPosition.value) + " / " + toDisplayString(matchCount.value), 1),
                 createBaseVNode("button", {
                   type: "button",
                   class: "lognav",
                   "aria-label": unref(t)("log.search.prev"),
                   disabled: !matchCount.value,
                   onClick: prevHit
-                }, " ↑ ", 8, _hoisted_32),
+                }, " ↑ ", 8, _hoisted_38),
                 createBaseVNode("button", {
                   type: "button",
                   class: "lognav",
                   "aria-label": unref(t)("log.search.next"),
                   disabled: !matchCount.value,
                   onClick: nextHit
-                }, " ↓ ", 8, _hoisted_33),
+                }, " ↓ ", 8, _hoisted_39),
                 createBaseVNode("button", {
                   type: "button",
                   class: "logact",
@@ -544,20 +618,20 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
                   onClick: _cache[7] || (_cache[7] = ($event) => unref(store).refreshLog())
                 }, toDisplayString(unref(t)("log.refresh")), 1)
               ]),
-              createBaseVNode("p", _hoisted_34, [
+              createBaseVNode("p", _hoisted_40, [
                 createTextVNode(toDisplayString(unref(t)("log.search.scope", { n: unref(formatBytes)(unref(byteLength)(unref(store).logText)) })) + " ", 1),
-                query.value && !matchCount.value ? (openBlock(), createElementBlock("span", _hoisted_35, toDisplayString(unref(t)("log.search.none")), 1)) : createCommentVNode("", true)
+                query.value && !matchCount.value ? (openBlock(), createElementBlock("span", _hoisted_41, toDisplayString(unref(t)("log.search.none")), 1)) : createCommentVNode("", true)
               ]),
-              unref(store).logOmitted > 0 ? (openBlock(), createElementBlock("p", _hoisted_36, toDisplayString(unref(t)("log.omitted", { n: unref(formatBytes)(unref(store).logOmitted) })), 1)) : createCommentVNode("", true),
-              unref(store).logTruncated ? (openBlock(), createElementBlock("p", _hoisted_37, toDisplayString(unref(t)("log.truncated", { n: unref(LOG_MAX_LINES) })), 1)) : createCommentVNode("", true),
-              unref(store).logError ? (openBlock(), createElementBlock("p", _hoisted_38, toDisplayString(unref(store).logError), 1)) : createCommentVNode("", true),
+              unref(store).logOmitted > 0 ? (openBlock(), createElementBlock("p", _hoisted_42, toDisplayString(unref(t)("log.omitted", { n: unref(formatBytes)(unref(store).logOmitted) })), 1)) : createCommentVNode("", true),
+              unref(store).logTruncated ? (openBlock(), createElementBlock("p", _hoisted_43, toDisplayString(unref(t)("log.truncated", { n: unref(LOG_MAX_LINES) })), 1)) : createCommentVNode("", true),
+              unref(store).logError ? (openBlock(), createElementBlock("p", _hoisted_44, toDisplayString(unref(store).logError), 1)) : createCommentVNode("", true),
               createBaseVNode("div", {
                 ref_key: "logEl",
                 ref: logEl,
                 class: "logscroll",
                 onScroll: onLogScroll
               }, [
-                !logLines.value.length && !unref(store).logError ? (openBlock(), createElementBlock("p", _hoisted_39, toDisplayString(unref(t)("log.empty")), 1)) : createCommentVNode("", true),
+                !logLines.value.length && !unref(store).logError ? (openBlock(), createElementBlock("p", _hoisted_45, toDisplayString(unref(t)("log.empty")), 1)) : createCommentVNode("", true),
                 (openBlock(true), createElementBlock(Fragment, null, renderList(logLines.value, (line, index) => {
                   return openBlock(), createElementBlock("div", {
                     key: index,
@@ -570,7 +644,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
                         class: normalizeClass({ hit: seg.hit })
                       }, toDisplayString(seg.text), 3);
                     }), 128))
-                  ], 10, _hoisted_40);
+                  ], 10, _hoisted_46);
                 }), 128))
               ], 544),
               !stuck.value ? (openBlock(), createElementBlock("button", {
@@ -582,16 +656,17 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
             ], 512), [
               [vShow, tab.value === "log"]
             ])
-          ], 64)) : (openBlock(), createElementBlock("p", _hoisted_41, toDisplayString(unref(t)("drawer.noTask")), 1))
+          ], 64)) : (openBlock(), createElementBlock("p", _hoisted_47, toDisplayString(unref(t)("drawer.noTask")), 1))
         ]),
         _: 1
       }, 8, ["model-value"]);
     };
   }
 });
-const TaskDrawer = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-10de8666"]]);
+const TaskDrawer = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-21c27ce9"]]);
 export {
   StatusMark as S,
   TaskDrawer as T,
+  dispositionText as a,
   duration as d
 };

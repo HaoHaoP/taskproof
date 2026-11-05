@@ -1,0 +1,63 @@
+
+.tasks-view[data-v-acb0a256] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.tp-table[data-v-acb0a256] .el-table__row {
+  cursor: pointer;
+}
+.tp-table[data-v-acb0a256] .el-table__header,
+.tp-table[data-v-acb0a256] .el-table__body {
+  width: 100% !important;
+  table-layout: fixed !important;
+}
+.tp-table[data-v-acb0a256] .el-table .cell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Element Plus parses column props as pixels, so responsive percentages live
+   on the generated col elements; the sum is exactly 100% and never scrolls. */
+.tp-table[data-v-acb0a256] colgroup > col:nth-child(1) {
+  width: var(--task-col-status) !important;
+}
+.tp-table[data-v-acb0a256] colgroup > col:nth-child(2) {
+  width: var(--task-col-dispo) !important;
+}
+.tp-table[data-v-acb0a256] colgroup > col:nth-child(3) {
+  width: var(--task-col-id) !important;
+}
+.tp-table[data-v-acb0a256] colgroup > col:nth-child(4) {
+  width: var(--task-col-project) !important;
+}
+.tp-table[data-v-acb0a256] colgroup > col:nth-child(5) {
+  width: var(--task-col-brief) !important;
+}
+.tp-table[data-v-acb0a256] colgroup > col:nth-child(6) {
+  width: var(--task-col-adapter) !important;
+}
+.tp-table[data-v-acb0a256] colgroup > col:nth-child(7) {
+  width: var(--task-col-duration) !important;
+}
+.taken[data-v-acb0a256] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 10px;
+  font: 11.5px/1 var(--mono);
+  color: var(--ink-3);
+}
+.taken button[data-v-acb0a256] {
+  font: 11.5px/1 var(--sans);
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-ctl);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.taken button[data-v-acb0a256]:hover {
+  background: var(--raise);
+}

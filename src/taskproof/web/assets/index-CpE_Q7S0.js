@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./MatrixView-CJ8fWUmX.js","./TaskDrawer-CUtASIW0.js","./TaskDrawer-N299VKzd.css","./MatrixView-Dgb-l684.css","./ProjectsView-Co9z_MiY.js","./ProjectsView-CqNFL-fi.css","./TasksView-B4jcl2uP.js","./TasksView-Bn08731V.css","./SettingsView-BfOnYGw6.js","./SettingsView-aqTS3ubB.css"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./MatrixView-Bdi2urU9.js","./TaskDrawer-CnQkYf94.js","./TaskDrawer-DhWNYS9M.css","./MatrixView-Dgb-l684.css","./ProjectsView-Boab6qUs.js","./ProjectsView-CqNFL-fi.css","./TasksView-Dc18bpLo.js","./TasksView-WUoVDFmt.css","./SettingsView-CW1Dp_Iz.js","./SettingsView-aqTS3ubB.css"])))=>i.map(i=>d[i]);
 // @__NO_SIDE_EFFECTS__
 function makeMap(str) {
   const map2 = /* @__PURE__ */ Object.create(null);
@@ -73297,7 +73297,7 @@ function createClient(baseUrl) {
 }
 const statuses = [{ "id": "running", "terminal": false }, { "id": "verifying", "terminal": false }, { "id": "done", "terminal": true }, { "id": "failed", "terminal": true }, { "id": "blocked", "terminal": true }, { "id": "timeout", "terminal": true }, { "id": "cancelled", "terminal": true }];
 const verify_kinds = ["check", "build", "none"];
-const exit_codes = [{ "code": 0, "meaning": "success" }, { "code": 2, "meaning": "registry" }, { "code": 64, "meaning": "usage" }, { "code": 70, "meaning": "adapter" }, { "code": 71, "meaning": "verify" }, { "code": 75, "meaning": "concurrency" }, { "code": 78, "meaning": "precondition" }];
+const exit_codes = [{ "code": 0, "meaning": "success" }, { "code": 2, "meaning": "registry" }, { "code": 64, "meaning": "usage" }, { "code": 70, "meaning": "adapter" }, { "code": 71, "meaning": "verify" }, { "code": 75, "meaning": "concurrency" }, { "code": 76, "meaning": "duplicate" }, { "code": 78, "meaning": "precondition" }];
 const enums = {
   statuses,
   verify_kinds,
@@ -74119,7 +74119,15 @@ const en = {
   tasks: {
     title: "All tasks",
     sub: "Click any row for detail and the verdict.",
-    col: { brief: "Task", adapter: "Adapter", dur: "Duration" }
+    col: { brief: "Task", dispo: "Disposition", adapter: "Adapter", dur: "Duration" }
+  },
+  dispo: {
+    disputed: "Card boundary disputed",
+    awaiting_review: "Awaiting review",
+    blocked: "Blocked, awaiting a person",
+    failed: "Needs attention",
+    settled: "Settled",
+    unknown: "Unknown"
   },
   projects: {
     title: "Projects",
@@ -74258,6 +74266,17 @@ const en = {
     noClaim: "(no result from the worker)",
     noTask: "No such task",
     verdict: "Verdict",
+    disposition: "Human disposition",
+    mandate: {
+      title: "Dispatch mandate",
+      lane: "lane",
+      branch: "branch",
+      verify: "acceptance",
+      drift: "drifted from current",
+      drifted: "yes",
+      inSync: "no",
+      driftedNotice: "The registry acceptance command changed; this run is still judged by the command captured at dispatch."
+    },
     tab: { overview: "Overview", log: "Log" }
   },
   /* The log panel: live tail, local search and its notices. The scope is
@@ -74357,7 +74376,15 @@ const zhCN = {
   tasks: {
     title: "全部任务",
     sub: "点任意一行看详情与判定。",
-    col: { brief: "任务", adapter: "适配器", dur: "耗时" }
+    col: { brief: "任务", dispo: "判定", adapter: "适配器", dur: "耗时" }
+  },
+  dispo: {
+    disputed: "卡边界有争议",
+    awaiting_review: "待批",
+    blocked: "受阻等人",
+    failed: "需人看一眼",
+    settled: "已了结",
+    unknown: "未知"
   },
   projects: {
     title: "项目总览",
@@ -74496,6 +74523,17 @@ const zhCN = {
     noClaim: "（worker 未给出结果）",
     noTask: "没有这个任务",
     verdict: "验收判定",
+    disposition: "人看判定",
+    mandate: {
+      title: "发车判据",
+      lane: "道",
+      branch: "分支",
+      verify: "验收命令",
+      drift: "与现值漂移",
+      drifted: "是",
+      inSync: "否",
+      driftedNotice: "注册表的验收命令已变化；本次仍按发车时命令判定。"
+    },
     tab: { overview: "概览", log: "日志" }
   },
   /* The log panel: live tail, local search, the notices. The search scope is
@@ -75378,14 +75416,14 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: "/", redirect: () => "/matrix" },
-    { path: "/matrix/:taskId?", name: "matrix", component: () => __vitePreload(() => import("./MatrixView-CJ8fWUmX.js"), true ? __vite__mapDeps([0,1,2,3]) : void 0, import.meta.url) },
+    { path: "/matrix/:taskId?", name: "matrix", component: () => __vitePreload(() => import("./MatrixView-Bdi2urU9.js"), true ? __vite__mapDeps([0,1,2,3]) : void 0, import.meta.url) },
     {
       path: "/projects/:taskId?",
       name: "projects",
-      component: () => __vitePreload(() => import("./ProjectsView-Co9z_MiY.js"), true ? __vite__mapDeps([4,1,2,5]) : void 0, import.meta.url)
+      component: () => __vitePreload(() => import("./ProjectsView-Boab6qUs.js"), true ? __vite__mapDeps([4,1,2,5]) : void 0, import.meta.url)
     },
-    { path: "/tasks/:taskId?", name: "tasks", component: () => __vitePreload(() => import("./TasksView-B4jcl2uP.js"), true ? __vite__mapDeps([6,1,2,7]) : void 0, import.meta.url) },
-    { path: "/settings", name: "settings", component: () => __vitePreload(() => import("./SettingsView-BfOnYGw6.js"), true ? __vite__mapDeps([8,9]) : void 0, import.meta.url) },
+    { path: "/tasks/:taskId?", name: "tasks", component: () => __vitePreload(() => import("./TasksView-Dc18bpLo.js"), true ? __vite__mapDeps([6,1,2,7]) : void 0, import.meta.url) },
+    { path: "/settings", name: "settings", component: () => __vitePreload(() => import("./SettingsView-CW1Dp_Iz.js"), true ? __vite__mapDeps([8,9]) : void 0, import.meta.url) },
     { path: "/:pathMatch(.*)*", redirect: () => "/matrix" }
   ]
 });

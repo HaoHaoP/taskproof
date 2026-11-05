@@ -1,4 +1,4 @@
-import { d as defineComponent, i as useBoardStore, j as useSettingsStore, u as useI18n, k as watch, aa as onMounted, c as createElementBlock, b as createBaseVNode, t as toDisplayString, f as unref, g as createCommentVNode, e as createVNode, l as withCtx, ab as openAbout, F as Fragment, r as renderList, ac as STATUS_IDS, ad as VERIFY_KINDS, ae as hasDesktopHost, h as computed, W as ref, p as resolveComponent, y as createTextVNode, n as normalizeClass, o as openBlock, _ as _export_sfc } from "./index-DV5k90pQ.js";
+import { d as defineComponent, i as useBoardStore, j as useSettingsStore, u as useI18n, k as watch, aa as onMounted, c as createElementBlock, b as createBaseVNode, t as toDisplayString, f as unref, g as createCommentVNode, e as createVNode, l as withCtx, ab as openAbout, F as Fragment, r as renderList, ac as STATUS_IDS, ad as VERIFY_KINDS, ae as hasDesktopHost, h as computed, W as ref, p as resolveComponent, y as createTextVNode, n as normalizeClass, o as openBlock, _ as _export_sfc } from "./index-CpE_Q7S0.js";
 const _hoisted_1 = { class: "settings-view" };
 const _hoisted_2 = { class: "panes grouped" };
 const _hoisted_3 = { class: "setwrap" };
