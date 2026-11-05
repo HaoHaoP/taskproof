@@ -17,8 +17,8 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import StatusMark from './StatusMark.vue'
 import { ABNORMAL } from '../contract'
-import { drawerMountKey, shouldRetryDrawerMount } from '../drawer'
-import { duration, eventSummary, isBadEvent, shortTime } from '../format'
+import { drawerMountKey, mandateSummary, shouldRetryDrawerMount } from '../drawer'
+import { dispositionText, duration, eventSummary, isBadEvent, shortTime } from '../format'
 import {
   byteLength,
   countMatches,
@@ -38,6 +38,13 @@ const { t, te } = useI18n()
 const open = computed(() => typeof route.params.taskId === 'string' && route.params.taskId !== '')
 const task = computed(() => store.detail?.task ?? null)
 const events = computed(() => store.detail?.events ?? [])
+const currentLane = computed(() =>
+  store.projects.find((project) => project.id === task.value?.project)
+)
+const mandate = computed(() =>
+  mandateSummary(task.value?.mandate, events.value, currentLane.value?.verify)
+)
+const dispositionReason = computed(() => task.value?.disposition_reason?.trim() || '')
 
 /** Which drawer tab is showing. Only an exact `?tab=log` selects the log;
  *  anything else -- absent, or a stale hand-edited value -- is the default
@@ -337,6 +344,14 @@ watch([open, mountAttempt], async () => {
         <button class="x" type="button" :aria-label="t('drawer.close')" @click="close">✕</button>
       </div>
 
+      <div v-if="task.disposition != null" class="disposition">
+        <span class="disposition-label">{{ t('drawer.disposition') }}</span>
+        <span class="disposition-value">
+          {{ dispositionText(task.disposition, t, te) }}
+        </span>
+        <span v-if="dispositionReason" class="disposition-reason">{{ dispositionReason }}</span>
+      </div>
+
       <!-- Selected state lives in `?tab=`; the default board has no `tab` key.
            Real buttons, so Tab reaches both and Enter / Space switch (the
            explicit handlers keep the behaviour even where a native click is
@@ -409,6 +424,25 @@ watch([open, mountAttempt], async () => {
             <span class="vcode" :class="{ bad: verify !== 0 }">exit {{ verify }}</span>
           </div>
           <p v-if="task.verify_cmd" class="vcmd">{{ task.verify_cmd }}</p>
+        </section>
+
+        <section v-if="mandate" class="sec mandate">
+          <h4>{{ t('drawer.mandate.title') }}</h4>
+          <dl>
+            <dt>{{ t('drawer.mandate.lane') }}</dt>
+            <dd>{{ mandate.lane }}</dd>
+            <dt>{{ t('drawer.mandate.branch') }}</dt>
+            <dd>{{ mandate.branch }}</dd>
+            <dt>{{ t('drawer.mandate.verify') }}</dt>
+            <dd>{{ mandate.verify }}</dd>
+            <dt>{{ t('drawer.mandate.drift') }}</dt>
+            <dd :class="{ bad: mandate.drifted }">
+              {{ t(mandate.drifted ? 'drawer.mandate.drifted' : 'drawer.mandate.inSync') }}
+            </dd>
+          </dl>
+          <p v-if="mandate.drifted" class="mandate-drift">
+            {{ t('drawer.mandate.driftedNotice') }}
+          </p>
         </section>
 
         <!-- What the worker said vs what taskproof observed. They sit side by
@@ -577,6 +611,27 @@ watch([open, mountAttempt], async () => {
   color: var(--ink);
   background: var(--raise);
 }
+.disposition {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--rule-2);
+  font: 11.5px/1.5 var(--sans);
+}
+.disposition-label {
+  color: var(--ink-3);
+  font-weight: 600;
+}
+.disposition-value {
+  color: var(--ink);
+}
+.disposition-reason {
+  color: var(--ink-4);
+  font-family: var(--mono);
+  word-break: break-word;
+}
 .dbody {
   overflow: auto;
   padding: 0 0 26px;
@@ -599,6 +654,32 @@ watch([open, mountAttempt], async () => {
   font-style: normal;
   font-weight: 400;
   color: var(--ink-4);
+}
+.mandate dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 14px;
+}
+.mandate dt {
+  font: 11px/1.5 var(--sans);
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+.mandate dd {
+  margin: 0;
+  font: 11px/1.5 var(--mono);
+  color: var(--ink);
+  word-break: break-word;
+}
+.mandate dd.bad {
+  color: var(--c-failed);
+  font-weight: 600;
+}
+.mandate-drift {
+  margin: 9px 0 0;
+  font: 11px/1.5 var(--sans);
+  color: var(--c-failed);
 }
 .full {
   margin: 0;

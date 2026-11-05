@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { Project, ProjectGroup, Task } from './api/client'
 import { COLUMNS, type Column } from './contract'
+import { dispositionText } from './format'
+import en from './i18n/en'
+import zhCN from './i18n/zh-CN'
 import {
   CAP_MAX,
   CAP_MIN,
@@ -32,6 +36,15 @@ import {
   visibleProjects
 } from './matrix'
 import { COLUMN_CAP_KEYS } from '../../preload/types'
+
+const tasksView = readFileSync(new URL('./views/TasksView.vue', import.meta.url), 'utf-8')
+
+function at(messages: Record<string, unknown>, path: string): unknown {
+  return path.split('.').reduce<unknown>((node, part) => {
+    if (node && typeof node === 'object') return (node as Record<string, unknown>)[part]
+    return undefined
+  }, messages)
+}
 
 /** A task with only the fields these rules read; the rest are inert. */
 function task(id: string, fields: Partial<Task> = {}): Task {
@@ -824,5 +837,63 @@ describe('a wider contract does not cross the lanes', () => {
     eight.forEach((column, i) => {
       expect(grouped[column.key].map((t) => t.id)).toEqual([`t${i}`])
     })
+  })
+})
+
+describe('the tasks table disposition column', () => {
+  const labels = { en, 'zh-CN': zhCN } as const
+  const dispositionValues = [
+    'disputed',
+    'awaiting_review',
+    'blocked',
+    'failed',
+    'settled',
+    'unknown'
+  ] as const
+
+  it('renders empty, unknown and all six known dispositions without failing', () => {
+    for (const messages of Object.values(labels)) {
+      const source = messages as Record<string, unknown>
+      const translate = (key: string): string => {
+        const value = at(source, key)
+        return typeof value === 'string' ? value : key
+      }
+      const hasMessage = (key: string): boolean => typeof at(source, key) === 'string'
+
+      expect(dispositionText(undefined, translate, hasMessage)).toBe('—')
+      expect(dispositionText(null, translate, hasMessage)).toBe('—')
+      expect(dispositionText('', translate, hasMessage)).toBe('—')
+      for (const value of dispositionValues) {
+        expect(dispositionText(value, translate, hasMessage), `${value}`).toBeTruthy()
+        expect(dispositionText(value, translate, hasMessage)).not.toBe(value)
+      }
+      expect(dispositionText('new_disposition', translate, hasMessage)).toBe('new_disposition')
+    }
+  })
+
+  it('puts DISPO directly after status in the table', () => {
+    const status = tasksView.indexOf("t('status.label')")
+    const dispo = tasksView.indexOf("t('tasks.col.dispo')")
+    const id = tasksView.indexOf('label="id"')
+    expect(status).toBeGreaterThan(-1)
+    expect(dispo).toBeGreaterThan(status)
+    expect(id).toBeGreaterThan(dispo)
+  })
+
+  it('uses seven percentage widths that sum to exactly 100%', () => {
+    const declaration = tasksView.match(/const TASK_COLUMN_WIDTHS = \[([^\]]+)\] as const/)
+    expect(declaration).not.toBeNull()
+    const widths = [...declaration![1].matchAll(/'(\d+)%'/g)].map((match) => Number(match[1]))
+    expect(widths).toEqual([10, 14, 14, 13, 30, 11, 8])
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBe(100)
+    expect(tasksView).not.toMatch(/<el-table-column[^>]*\b(?:min-)?width="\d+"/)
+  })
+
+  it('lets the table fill its pane and clips every cell instead of growing sideways', () => {
+    expect(tasksView).toContain('width: 100% !important;')
+    expect(tasksView).toContain('table-layout: fixed !important;')
+    expect(tasksView).toMatch(
+      /\.tp-table :deep\(\.el-table \.cell\) \{\s*white-space: nowrap;\s*overflow: hidden;\s*text-overflow: ellipsis;/
+    )
   })
 })

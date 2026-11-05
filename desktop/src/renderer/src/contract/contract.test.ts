@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ABNORMAL,
   COLUMNS,
+  EXIT_MEANINGS,
   STATUS_IDS,
   columnFor,
   columnLabelKey,
@@ -9,6 +10,15 @@ import {
   metaFor,
   unknownStatuses
 } from './index'
+import en from '../i18n/en'
+import zhCN from '../i18n/zh-CN'
+
+function at(messages: Record<string, unknown>, path: string): unknown {
+  return path.split('.').reduce<unknown>((node, part) => {
+    if (node && typeof node === 'object') return (node as Record<string, unknown>)[part]
+    return undefined
+  }, messages)
+}
 
 describe('the status contract', () => {
   it('covers every status the generated contract declares', () => {
@@ -89,6 +99,30 @@ describe('the status contract', () => {
     expect(columnLabelKey('blocked')).toBe('column.blocked')
     expect(columnLabelKey('running')).toBe('status.running')
     expect(columnLabelKey('abnormal')).toBe('status.abnormal')
+  })
+})
+
+describe('the two-dimensional task projection', () => {
+  it('keeps a generated meaning for exit 76', () => {
+    // The mapping itself is generated; this guards the generator dropping the
+    // duplicate code, without hard-coding its display meaning in the renderer.
+    expect(EXIT_MEANINGS[76]).toBeTruthy()
+    expect(EXIT_MEANINGS[76].trim()).not.toBe('')
+  })
+
+  it('has a label for all six Python dispositions in both locales', () => {
+    const labels = {
+      disputed: '卡边界有争议',
+      awaiting_review: '待批',
+      blocked: '受阻等人',
+      failed: '需人看一眼',
+      settled: '已了结',
+      unknown: '未知'
+    }
+    for (const [value, label] of Object.entries(labels)) {
+      expect(at(en as Record<string, unknown>, `dispo.${value}`), `en:${value}`).toBeTruthy()
+      expect(at(zhCN as Record<string, unknown>, `dispo.${value}`), `zh:${value}`).toBe(label)
+    }
   })
 })
 

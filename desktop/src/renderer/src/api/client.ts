@@ -11,6 +11,10 @@ export interface Task {
   id: string
   project: string
   status: string
+  /** Human disposition; absent on task rows from older APIs. */
+  disposition?: string
+  /** Why taskproof assigned that disposition; absent on older APIs. */
+  disposition_reason?: string | null
   brief: string
   adapter: string | null
   model: string | null
@@ -24,6 +28,8 @@ export interface Task {
   exit_code: number | null
   verify_cmd: string | null
   verify_exit: number | null
+  /** JSON captured at dispatch time; absent on tasks written before mandates. */
+  mandate?: string | null
   files_changed: number | null
   /** Live diff count while a task is running/verifying; null otherwise. */
   files_changed_live: number | null

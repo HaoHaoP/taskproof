@@ -55,7 +55,16 @@ export default {
   tasks: {
     title: '全部任务',
     sub: '点任意一行看详情与判定。',
-    col: { brief: '任务', adapter: '适配器', dur: '耗时' }
+    col: { brief: '任务', dispo: '判定', adapter: '适配器', dur: '耗时' }
+  },
+
+  dispo: {
+    disputed: '卡边界有争议',
+    awaiting_review: '待批',
+    blocked: '受阻等人',
+    failed: '需人看一眼',
+    settled: '已了结',
+    unknown: '未知'
   },
 
   projects: {
@@ -206,6 +215,17 @@ export default {
     noClaim: '（worker 未给出结果）',
     noTask: '没有这个任务',
     verdict: '验收判定',
+    disposition: '人看判定',
+    mandate: {
+      title: '发车判据',
+      lane: '道',
+      branch: '分支',
+      verify: '验收命令',
+      drift: '与现值漂移',
+      drifted: '是',
+      inSync: '否',
+      driftedNotice: '注册表的验收命令已变化；本次仍按发车时命令判定。'
+    },
     tab: { overview: '概览', log: '日志' }
   },
 

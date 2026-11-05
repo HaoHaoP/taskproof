@@ -45,3 +45,49 @@ export function shouldRetryDrawerMount(
 export function drawerMountKey(attempt: number): string {
   return `drawer-${attempt}`
 }
+
+/** The four facts the drawer shows from the dispatch mandate. */
+export interface MandateSummary {
+  lane: string
+  branch: string
+  verify: string
+  drifted: boolean
+}
+
+function mandateText(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value : '—'
+}
+
+/**
+ * Project the stored mandate JSON to the fields an operator needs. The API's
+ * mandate is a twelve-key audit snapshot; pasting it into the drawer would bury
+ * the four facts that explain the dispatch. A missing or malformed snapshot
+ * yields `null`, so older task rows render no mandate block at all.
+ */
+export function mandateSummary(
+  raw: string | null | undefined,
+  events: ReadonlyArray<{ event: string }> = [],
+  currentVerify?: string | null
+): MandateSummary | null {
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const mandate = parsed as Record<string, unknown>
+  const verify = typeof mandate.verify === 'string' ? mandate.verify : null
+  return {
+    lane: mandateText(mandate.lane),
+    branch: mandateText(mandate.branch),
+    verify: mandateText(verify),
+    // Prefer the lane's current command. The event is the fallback when the
+    // drawer has no project snapshot (for example, projects failed to load).
+    drifted:
+      currentVerify !== undefined
+        ? verify !== currentVerify
+        : events.some((event) => event.event === 'mandate_drift')
+  }
+}

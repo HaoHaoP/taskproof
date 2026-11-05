@@ -63,7 +63,16 @@ export default {
   tasks: {
     title: 'All tasks',
     sub: 'Click any row for detail and the verdict.',
-    col: { brief: 'Task', adapter: 'Adapter', dur: 'Duration' }
+    col: { brief: 'Task', dispo: 'Disposition', adapter: 'Adapter', dur: 'Duration' }
+  },
+
+  dispo: {
+    disputed: 'Card boundary disputed',
+    awaiting_review: 'Awaiting review',
+    blocked: 'Blocked, awaiting a person',
+    failed: 'Needs attention',
+    settled: 'Settled',
+    unknown: 'Unknown'
   },
 
   projects: {
@@ -215,6 +224,17 @@ export default {
     noClaim: '(no result from the worker)',
     noTask: 'No such task',
     verdict: 'Verdict',
+    disposition: 'Human disposition',
+    mandate: {
+      title: 'Dispatch mandate',
+      lane: 'lane',
+      branch: 'branch',
+      verify: 'acceptance',
+      drift: 'drifted from current',
+      drifted: 'yes',
+      inSync: 'no',
+      driftedNotice: 'The registry acceptance command changed; this run is still judged by the command captured at dispatch.'
+    },
     tab: { overview: 'Overview', log: 'Log' }
   },
 

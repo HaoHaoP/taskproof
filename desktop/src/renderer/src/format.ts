@@ -20,6 +20,21 @@ export function duration(startedAt: string | null, finishedAt: string | null): s
   return `${minutes}m${String(seconds).padStart(2, '0')}s`
 }
 
+/**
+ * A task's disposition, following the CLI's row rule: an empty value is an
+ * em dash, a known value uses its translated label, and an unknown value is
+ * shown verbatim so a new Python-side word cannot disappear.
+ */
+export function dispositionText(
+  value: string | null | undefined,
+  translate: (key: string) => string,
+  hasMessage: (key: string) => boolean
+): string {
+  if (!value) return '—'
+  const key = `dispo.${value}`
+  return hasMessage(key) ? translate(key) : value
+}
+
 /** Renders an event payload as one readable line without dropping anything --
  *  an unrecognised key is still shown, which is how a new Python-side field
  *  becomes visible instead of silently ignored. */
