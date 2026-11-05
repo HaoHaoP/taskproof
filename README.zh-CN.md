@@ -216,6 +216,12 @@ taskproof accept <id> --note "原因"     # failed：必须带 --note
 
 看板上 `blocked` 独立成**「待复核」**列，不混进失败列。
 
+## 账本保留了什么
+
+- **要不要人看是独立一维。** `DISPO` 紧跟在 `STATUS` 后，回答这张卡是否还需要人处理，而不是运行走到哪一步。取值为 `disputed`、`awaiting_review`、`blocked`、`failed`、`settled`、`unknown`；`--dispo <值>` 可过滤。老账不回填，显示 `—`。
+- **验收判据在发车时冻结。** 卡启动时记下道的验收设置，之后注册表怎么改都移不走它的终点线；两者不一致时记 `mandate_drift`。要让老卡按注册表当前值验收，用 `taskproof verify <id> --current`。
+- **同一张卡只发一次。** `dispatch_key` 按道、分支与卡文取指纹，改文件名不会变成另一张卡。重复 `run` 退出 `76`，账本不新增任务；要重派加 `--force`，要重跑一张已终态的卡用 `rerun <id>`，原卡与新卡会双向关联。
+
 ## 桌面看板
 
 `desktop/` 是 stage 2 的看板：一个 **Electron + Vue 3** 应用（Element Plus、UnoCSS、

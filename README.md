@@ -261,6 +261,12 @@ both ways (`rerun_of` / `rerun_as`).
 On the board, `blocked` gets its own **Needs review** column, kept out of the
 failure column.
 
+## What the ledger preserves
+
+- **Human review is its own dimension.** `DISPO` sits after `STATUS` and answers whether a person still has to act, not how far the run got. The values are `disputed`, `awaiting_review`, `blocked`, `failed`, `settled`, and `unknown`; `--dispo <value>` filters them. Old rows are not backfilled and display `—`.
+- **Acceptance is frozen at dispatch.** A card records the lane's acceptance setup when it starts, so later registry edits cannot move its finish line; a mismatch is recorded as `mandate_drift`. Use `taskproof verify <id> --current` to judge an old card by the current registry value.
+- **A card is sent once.** `dispatch_key` fingerprints lane, branch, and card text, so renaming a file does not create a new card. A duplicate `run` exits `76` without adding a task; re-dispatch with `--force`, or rerun a terminal card with `rerun <id>`, which links the old and new cards.
+
 ## The desktop console
 
 `desktop/` is the stage-2 console: an **Electron + Vue 3** app (Element Plus,

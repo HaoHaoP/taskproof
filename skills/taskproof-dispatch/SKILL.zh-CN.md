@@ -161,6 +161,8 @@ taskproof --json tasks --all
 
 `tasks --all` 忽略 cwd 作用域、列出所有道；`--json` 给机器读。发车前先看现在几个在跑，在并发上限内就把独立工作一起发出去。
 
+`tasks` 表的列序是 `ID / STATUS / DISPO / ...`。**DISPO** 答的是要不要人看，`STATUS` 答的是跑到哪一步。取值为 `disputed`（卡边界有争议）、`awaiting_review`（待批）、`blocked`（受阻等人）、`failed`（需人看一眼）、`settled`（已了结）、`unknown`（未知）。用 `--dispo <值>` 过滤，英文值或中文标签都可以。老账不回填，缺失值显示为 `—`。
+
 再花 30 秒挡掉三类白跑（一个 14 天窗口里 319 张卡有 14 张改动为零，另有一批得「v2 修卡」重来）：
 
 - **目标文件在吗**：卡里点名的每个文件，在**道的工作区**里看一眼。工作区停在旧提交上时 worker 看不到它，要么从零重建、要么停工，两种都白跑。卡文里再明写一句「要改的文件不存在就停工报告」。
@@ -183,6 +185,18 @@ taskproof run my-lane --adapter codex --timeout 1800 "$(cat /tmp/cards/tp-card19
 
 **没有"入队"这个状态。** `run` 当场发车。上限满了就是退出 **75**、账本不留痕：等一会儿重发、给这次发车抬高上限（`--cap N`）、或改持久配置（`config --concurrency N`）。
 
+同一张卡第二次无 `--force` 的 `run` 会以 **76** 退出，账本不新增任务。「同一张卡」判的是道 + 分支 + 卡文的指纹，不是文件名。要重派就加 `--force`：新行的 `dispatch_key` 记 `NULL`，`started` 事件记 `duplicate_of`。想按新的 mandate 和道的当前设置重跑一张已终态的卡，用 `rerun <id>`；账本用 `rerun_of` / `rerun_as` 双向链接原卡与新卡。
+
+## 4.1 发车即冻结验收判据
+
+`run` 会把道当时的验收命令、分支、适配器、禁改清单、超时与签发时间快照进 `tasks.mandate`（12 个键：`card_sha256`、`lane`、`branch`、`verify`、`verify_kind`、`forbidden_paths`、`adapter`、`model`、`reasoning`、`timeout`、`idle_timeout`、`issued_at`）。验收默认按这份快照执行。
+
+发车之后再改道的 `verify`，**不会**移走已在跑的卡的终点线：它按发车那一刻的快照验收。注册表当前值与快照不一致时，taskproof 记一条 `mandate_drift` 事件，但仍按 mandate 执行。
+
+想让老卡改用注册表**当前**的验收值，运行 `taskproof verify <id> --current`。
+
+这条边界是刻意的：验收判据发车前可改，发车后不可改。否则同一张卡的两次运行可以按不同终点线判决，结果就不可比。
+
 ## 5. 查状态与读日志
 
 ```bash
@@ -201,7 +215,7 @@ taskproof workspace-rm my-lane --force
 
 `log` 打印该任务的完整事件流；`--follow` 会一直跟到终态。
 
-`tasks --lane <id>` 只筛一条道，`--id <id,id>` 按 id 挑行。表里带着判决：`VERIFY` 列是 `exit=N`，没记到退出码是 `?`，**验收从没跑过是 `–`**（`SKIPPED` 绝不能看起来像通过）。`FILES` 是改动文件数。
+`tasks --lane <id>` 只筛一条道，`--id <id,id>` 按 id 挑行，`--dispo <值>` 过滤要不要人看这一维。`DISPO` 紧跟 `STATUS`：后者是机器跑到哪一步，前者是还要不要人处理。表里也带着判决：`VERIFY` 列是 `exit=N`，没记到退出码是 `?`，**验收从没跑过是 `–`**（`SKIPPED` 绝不能看起来像通过）。`FILES` 是改动文件数。DISPO 出现之前的老账不回填，显示 `—`。
 
 `wait <id>` 轮询账本直到终态，**它就是手写 `while …; do 读账本; sleep N; done` 的整段替代**：`done` 退 `0`、其它终态退 `1`、等待自己超时退 `124`（任务本身一个字节都不动）。`show <id>` 末尾的 `changes:` 段列出这次跑完留下的脏路径，其中**跑前就已经脏**的标 `[跑前已脏]` —— 那正是 `files_changed` 里不属于本卡的那部分。有了 `tasks` / `show` / `log` / `--json`，**没有哪件事需要直读 `sqlite3`**。
 
@@ -277,4 +291,4 @@ worker 报 done 不算证据 —— 你自己再跑一遍机器已经跑过的�
 - 派活的省钱纪律 —— 复核、素材、TDD、闭环/待办、模型降级：[`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md)
 - 观感卡的纪律 —— 参照物、状态真值表、红绿探针、对拍页、收敛预算：[`references/visual-cards.zh-CN.md`](references/visual-cards.zh-CN.md)
 - 可直接复制的卡模板：[`templates/card.zh-CN.md`](templates/card.zh-CN.md)（简体中文）/ [`templates/card.md`](templates/card.md)（English）
-- 退出码：0 成功 / 2 注册表问题 / 64 用法错误 / 70 适配器失败 / 71 验收失败 / 75 并发受限
+- 退出码：0 成功 / 2 注册表问题 / 64 用法错误 / 70 适配器失败 / 71 验收失败 / 75 并发受限 / 76 重复卡

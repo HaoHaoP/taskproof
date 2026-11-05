@@ -161,6 +161,8 @@ taskproof --json tasks --all
 
 `tasks --all` ignores the cwd scope and lists every lane; `--json` is for machines. Before firing, check how many are running; if you are within the concurrency cap, send the independent work out together.
 
+The `tasks` table is ordered `ID / STATUS / DISPO / ...`. **DISPO** is the human-review answer — whether this card still needs a person — while `STATUS` says how far the run got. Its values are `disputed` (卡边界有争议), `awaiting_review` (待批), `blocked` (受阻等人), `failed` (需人看一眼), `settled` (已了结), and `unknown` (未知). Filter with `--dispo <value>` using either the English value or the Chinese label. Old rows are not backfilled; a missing disposition renders as `—`.
+
 Then spend 30 seconds blocking three kinds of wasted run (in one 14-day window 14 of 319 cards changed nothing, and another batch had to be re-fired as "v2, fix card"):
 
 - **Does the target file exist?** Look for every file the card names, **in the lane's workspace**. A workspace parked on an old commit does not contain it: the worker either rebuilds the file from scratch or stops — both are wasted. Write "if a named file does not exist, stop and report" into the card as well.
@@ -183,6 +185,18 @@ taskproof run my-lane --adapter codex --timeout 1800 "$(cat /tmp/cards/tp-card19
 
 **There is no parked state.** `run` starts the card there and then. If the cap is full it exits **75** and records nothing: wait and retry, raise the cap for this dispatch (`--cap N`), or persist a new one (`config --concurrency N`).
 
+An unforced second `run` of the same card exits **76** and adds no task row. "The same card" is the fingerprint of lane + branch + card text, not the filename. To dispatch it again, add `--force`: the new row keeps `dispatch_key` as `NULL` and its `started` event records `duplicate_of`. To rerun a terminal card under a fresh mandate and the lane's current settings, use `rerun <id>`; the ledger links the pair both ways with `rerun_of` / `rerun_as`.
+
+## 4.1 Acceptance is frozen at dispatch
+
+`run` snapshots the lane's acceptance command, branch, adapter, forbidden paths, timeouts, and issue time into `tasks.mandate` (12 keys: `card_sha256`, `lane`, `branch`, `verify`, `verify_kind`, `forbidden_paths`, `adapter`, `model`, `reasoning`, `timeout`, `idle_timeout`, `issued_at`). Acceptance follows that snapshot by default.
+
+Changing the lane's `verify` after dispatch **does not** move the finish line for a card already in flight: the card is accepted against the value captured when it was fired. If the registry's current value differs, taskproof records a `mandate_drift` event and still follows the mandate.
+
+To make an old card use the registry's **current** acceptance value, run `taskproof verify <id> --current`.
+
+This boundary is deliberate: acceptance criteria may change before dispatch, but never after it. Otherwise two runs of the same card could be judged by different finish lines and their results would not be comparable.
+
 ## 5. Check status and read logs
 
 ```bash
@@ -201,7 +215,7 @@ taskproof workspace-rm my-lane --force
 
 `log` prints the task's full event stream; `--follow` follows it all the way to the terminal state.
 
-`tasks --lane <id>` narrows to one lane, `--id <id,id>` picks rows out by id. The table carries the verdict: `VERIFY` reads `exit=N`, `?` when no exit was recorded, and an en dash when acceptance never ran (`SKIPPED`) — a skipped check must never look like a pass. `FILES` is the changed-file count.
+`tasks --lane <id>` narrows to one lane, `--id <id,id>` picks rows out by id, and `--dispo <value>` filters the human-review dimension. `DISPO` sits immediately after `STATUS`: the latter is the machine's progress, the former is whether a person still has to act. The table also carries the verdict: `VERIFY` reads `exit=N`, `?` when no exit was recorded, and an en dash when acceptance never ran (`SKIPPED`) — a skipped check must never look like a pass. `FILES` is the changed-file count. Rows from before DISPO existed are not backfilled and display `—`.
 
 `wait <id>` polls the ledger until the card is terminal, and **it is the whole replacement for a hand-rolled `while …; do <read the ledger>; sleep N; done` loop**: exits `0` for `done`, `1` for any other terminal state, `124` when the wait itself gives up (the task is never touched). `show <id>` ends with a `changes:` block listing the paths this run left dirty, marking the ones that were **already dirty before the run** with `[跑前已脏]` — that is the part of `files_changed` which is not this card's doing. Between `tasks`, `show`, `log` and `--json`, reading the ledger with `sqlite3` is never necessary.
 
@@ -277,4 +291,4 @@ The three habits this checklist leans on without repeating — closure rework is
 - Dispatch economy — review, source material, TDD, closure/backlog, model downgrade: [`references/token-discipline.md`](references/token-discipline.md)
 - Visual cards — references, status truth table, red-to-green probe, comparison page, convergence budget: [`references/visual-cards.md`](references/visual-cards.md)
 - Card templates to copy: [`templates/card.md`](templates/card.md) (English) / [`templates/card.zh-CN.md`](templates/card.zh-CN.md) (简体中文)
-- Exit codes: 0 success / 2 registry problem / 64 usage error / 70 adapter failure / 71 verification failure / 75 concurrency limit
+- Exit codes: 0 success / 2 registry problem / 64 usage error / 70 adapter failure / 71 verification failure / 75 concurrency limit / 76 duplicate card
