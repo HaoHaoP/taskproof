@@ -528,6 +528,7 @@ class RerunTest(_Base):
 
 
 class VerifyRegressionTest(_Base):
+    # Default verify follows the mandate; only explicit --current reads the live registry value.
     def test_verify_reruns_acceptance_without_touching_the_status(self):
         self.write_registry(verify="exit 1")
         with self.assertRaises(VerifyError):
@@ -538,7 +539,7 @@ class VerifyRegressionTest(_Base):
 
         # Acceptance is now green, but the terminal state must NOT follow it.
         self.write_registry(verify="exit 0")
-        code, out, err = self.run_cli("verify", task_id)
+        code, out, err = self.run_cli("verify", "--current", task_id)
         self.assertEqual(code, 0, err)
         payload = json.loads(out)
         self.assertTrue(payload["ran"])

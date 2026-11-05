@@ -281,6 +281,10 @@ warning: unknown key 'concurency' in [defaults]
 派发收尾、`verify` 与 `accept` 记录结果时都会重新推导。没有值的老行按 `unknown`
 读取，文本版 `tasks` 表把这种缺失值显示为 `—`。
 
+`mandate` 列是发车时捕获的 JSON 快照：卡文哈希、道、分支、验收命令与类型、禁改
+清单、适配器设置、超时和签发时间。默认验收跟随其中的 `verify`；
+`taskproof verify --current` 才是显式改用注册表现值的入口。
+
 `/api/tasks` 与 `/api/tasks/<id>` 的每条任务投影都包含 `disposition` 和
 `disposition_reason`。
 

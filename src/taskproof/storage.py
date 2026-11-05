@@ -44,7 +44,7 @@ def connect(path: str) -> sqlite3.Connection:
 
 #: Schema level this build writes. Bump it whenever `migrate()` learns a new
 #: step that `schema.sql` alone cannot perform on an existing database.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: Columns added after v1. `schema.sql` is all ``CREATE TABLE IF NOT EXISTS``,
 #: so it can never add a column to a table that already exists — these are the
@@ -56,6 +56,7 @@ _ADDED_COLUMNS = (
     ("tasks", "queue_seq", "INTEGER"),
     ("tasks", "disposition", "TEXT"),
     ("tasks", "disposition_reason", "TEXT"),
+    ("tasks", "mandate", "TEXT"),
 )
 
 
@@ -87,7 +88,7 @@ def migrate(conn: sqlite3.Connection) -> None:
             (1, now_iso()),
         )
     # Record each schema level crossed by this migration. An old database at
-    # version 1 jumps straight to 3 here, but keeps an auditable 2 row as well.
+    # version 1 jumps straight to 4 here, but keeps auditable 2 and 3 rows too.
     for version in range(max(current + 1, 1), SCHEMA_VERSION + 1):
         conn.execute(
             "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
@@ -121,6 +122,7 @@ TASK_COLUMNS = frozenset(
         "result_path",
         "verify_cmd",
         "verify_exit",
+        "mandate",
         "files_changed",
         "disposition",
         "disposition_reason",

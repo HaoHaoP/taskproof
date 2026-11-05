@@ -354,11 +354,14 @@ rather than `shlex.split`). Convention one: no acceptance command is not a pass,
 is recorded SKIPPED. Convention two: an acceptance timeout is a failure (exit code
 NULL, explained in the note), not an error.
 
-Acceptance reads the registry **live** (`dispatch.py:753`), which the protected-path
-rules do not: those are snapshotted into the task's `started` event at dispatch
-time, so editing them later cannot affect a card already in flight — whereas
-editing `verify` immediately changes the acceptance command of a card that is
-already running.
+At dispatch, taskproof writes a `mandate` JSON snapshot into the task row and a
+`mandate` event in the same transaction. Acceptance runs the snapshot's
+`verify` command by default, so a registry edit cannot move the finish line for
+a card already in flight. If the registry's current value differs, taskproof
+records a `mandate_drift` event and still follows the mandate;
+`taskproof verify --current` is the explicit override that uses the live value.
+Protected-path rules continue to come from the lane object loaded for that run,
+not from the mandate.
 
 ### 4.6 The structured result contract
 
@@ -700,7 +703,7 @@ Limitations:
     src/taskproof/dispatch.py:548       the timeout terminal row (exit_code 71)
     src/taskproof/dispatch.py:908       _terminate_tree: SIGTERM -> 5s -> SIGKILL
     src/taskproof/dispatch.py:980       _terminate_recorded_group: kill by the persisted pgid
-    src/taskproof/dispatch.py:753       acceptance reads the registry live
+    src/taskproof/dispatch.py:753       acceptance follows the dispatch mandate
     src/taskproof/dispatch.py:754       acceptance shares the task's timeout
     src/taskproof/dispatch.py:1922      accept takes blocked / failed only
     src/taskproof/verify.py:76-140      independent acceptance and its timeout semantics

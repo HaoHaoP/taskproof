@@ -184,6 +184,7 @@ class Task:
     result_path: Optional[str] = None
     verify_cmd: Optional[str] = None
     verify_exit: Optional[int] = None
+    mandate: Optional[str] = None
     files_changed: Optional[int] = None
     created_at: Optional[str] = None
     started_at: Optional[str] = None

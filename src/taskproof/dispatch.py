@@ -20,6 +20,7 @@ inside a ``finally`` — passing it through anything lossy (e.g. a bare scope
 string) would strip the proof of ownership and silently leak the slot.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -38,6 +39,7 @@ from .errors import (
     AdapterError,
     ConcurrencyError,
     PreconditionError,
+    TaskproofError,
     UsageError,
     VerifyError,
 )
@@ -91,6 +93,51 @@ VERIFY_SKIPPED = "SKIPPED"
 #: as a fact the ledger can read back, so the two cases stop looking alike.
 VERIFY_BY_RUN = "run"
 VERIFY_BY_CLI = "cli"
+
+
+def _mandate_mapping(mandate):
+    """Decode a stored mandate, tolerating rows written before card 99."""
+    if isinstance(mandate, dict):
+        return mandate
+    if not isinstance(mandate, str) or not mandate:
+        return None
+    try:
+        decoded = json.loads(mandate)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return decoded if isinstance(decoded, dict) else None
+
+
+def _mandated_verify(mandate, taskgroup) -> tuple:
+    """Return ``(command, drifted)`` for acceptance.
+
+    A task with a mandate is judged by the command captured at dispatch time.
+    Rows from before mandates existed fall back to the live lane value, as do
+    malformed values so an unreadable audit snapshot cannot strand a task.
+    """
+    captured = _mandate_mapping(mandate)
+    if captured is None or "verify" not in captured:
+        return taskgroup.verify, False
+    mandated = captured.get("verify")
+    return mandated, mandated != taskgroup.verify
+
+
+def _append_mandate_drift(conn, task_id: str, mandated, current, *, forced=False):
+    """Record a mismatch without changing which command acceptance will run."""
+    payload = {"field": "verify", "mandated": mandated, "current": current}
+    if forced:
+        payload["forced"] = True
+    storage.append_event(conn, task_id, "mandate_drift", payload)
+
+
+def _current_taskgroup(workspace: str, fallback):
+    """Best-effort live lane for drift reporting during an in-flight run."""
+    try:
+        return registry.load(registry.workspace_registry_path(workspace)).require(
+            fallback.id
+        )
+    except TaskproofError:
+        return fallback
 
 
 #: Ceiling on the number of paths a single `changes` event carries. The audit
@@ -361,6 +408,21 @@ def dispatch(
         # ownership token, so this can only ever drop our own claim.
         try:
             # ④ the task row + the `started` event.
+            issued_at = storage.now_iso()
+            mandate = {
+                "card_sha256": hashlib.sha256(brief.encode("utf-8")).hexdigest(),
+                "lane": taskgroup.id,
+                "branch": taskgroup.branch or _head_branch(taskgroup.path) or None,
+                "verify": taskgroup.verify,
+                "verify_kind": taskgroup.verify_kind,
+                "forbidden_paths": list(taskgroup.forbidden_paths or []),
+                "adapter": adapter,
+                "model": model,
+                "reasoning": reasoning,
+                "timeout": effective_timeout,
+                "idle_timeout": effective_idle_timeout,
+                "issued_at": issued_at,
+            }
             task = Task(
                 id=task_id,
                 project=taskgroup.id,
@@ -371,41 +433,50 @@ def dispatch(
                 model=model,
                 reasoning=reasoning,
                 pid=os.getpid(),
-                created_at=storage.now_iso(),
-                started_at=storage.now_iso(),
+                mandate=json.dumps(mandate, ensure_ascii=False, sort_keys=True),
+                created_at=issued_at,
+                started_at=issued_at,
             )
-            storage.insert_task(conn, task)
-            storage.append_event(
-                conn,
-                task_id,
-                "started",
-                {
-                    "project": taskgroup.id,
-                    "group": taskgroup.group,
-                    "adapter": adapter,
-                    "read_only": read_only,
-                    "worktree": worktree,
-                    "skip_verify": skip_verify,
-                    # The hard timeout this run enforces, and where it came
-                    # from (card 81). The value has no column, so it rides in
-                    # the event: `rerun` reads it back to reuse the same flag
-                    # (See `_run_options`). `timeout_source` is shaped like the
-                    # `cap_source` beside it — cli / lane / toml / default.
-                    "timeout": effective_timeout,
-                    "timeout_source": timeout_setting.source,
-                    # The no-progress watchdog budget this run enforces and
-                    # where it came from (card 83). `idle_timeout_source` is
-                    # shaped like `timeout_source` beside it — cli / lane /
-                    # default — and `0` means the watchdog is off for this run.
-                    "idle_timeout": effective_idle_timeout,
-                    "idle_timeout_source": idle_setting.source,
-                    # The effective global cap *and its source* (card 42), so the
-                    # event stream can explain why a card was admitted — e.g. a
-                    # one-off `--cap 5` that let a fourth card run.
-                    "cap": setting.value,
-                    "cap_source": setting.source,
-                },
-            )
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                storage.insert_task(conn, task)
+                storage.append_event(conn, task_id, "mandate", mandate)
+                storage.append_event(
+                    conn,
+                    task_id,
+                    "started",
+                    {
+                        "project": taskgroup.id,
+                        "group": taskgroup.group,
+                        "adapter": adapter,
+                        "read_only": read_only,
+                        "worktree": worktree,
+                        "skip_verify": skip_verify,
+                        # The hard timeout this run enforces, and where it came
+                        # from (card 81). The value has no column, so it rides in
+                        # the event: `rerun` reads it back to reuse the same flag
+                        # (See `_run_options`). `timeout_source` is shaped like the
+                        # `cap_source` beside it — cli / lane / toml / default.
+                        "timeout": effective_timeout,
+                        "timeout_source": timeout_setting.source,
+                        # The no-progress watchdog budget this run enforces and
+                        # where it came from (card 83). `idle_timeout_source` is
+                        # shaped like `timeout_source` beside it — cli / lane /
+                        # default — and `0` means the watchdog is off for this run.
+                        "idle_timeout": effective_idle_timeout,
+                        "idle_timeout_source": idle_setting.source,
+                        # The effective global cap *and its source* (card 42), so the
+                        # event stream can explain why a card was admitted — e.g. a
+                        # one-off `--cap 5` that let a fourth card run.
+                        "cap": setting.value,
+                        "cap_source": setting.source,
+                    },
+                )
+                conn.execute("COMMIT")
+            except BaseException:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
 
             if rerun_of:
                 _link_rerun(conn, task_id, rerun_of)
@@ -423,6 +494,7 @@ def dispatch(
                 skip_verify=skip_verify,
                 timeout=effective_timeout,
                 idle_timeout=effective_idle_timeout,
+                mandate=mandate,
             )
             return task_id
         finally:
@@ -445,6 +517,7 @@ def _execute_claimed(
     skip_verify: bool,
     timeout: int,
     idle_timeout: int,
+    mandate: dict,
 ) -> None:
     """Steps 5-8 for a task that is already `running` and holds a slot.
 
@@ -495,6 +568,7 @@ def _execute_claimed(
             skip_verify=skip_verify,
             timeout=timeout,
             idle_timeout=idle_timeout,
+            mandate=mandate,
         )
     finally:
         # Decide the worktree's fate on every exit path. A run that left changes
@@ -596,6 +670,7 @@ def _execute(
     skip_verify: bool,
     timeout: int,
     idle_timeout: int = 0,
+    mandate=None,
 ) -> None:
     """Steps ⑤-⑧: run the adapter, gate on forbidden paths, verify, then record.
 
@@ -879,8 +954,19 @@ def _execute(
 
     # ⑦ acceptance, run in the PROJECT workdir — never the workspace. A run that
     # is skipped (read-only, --no-verify, or no configured command) is recorded
-    # as SKIPPED, never as a pass.
-    skip_reason = _skip_reason(read_only, skip_verify, taskgroup.verify)
+    # as SKIPPED, never as a pass. The command comes from the dispatch-time
+    # mandate; a live registry edit is recorded as drift but cannot move the
+    # finish line for a card already in flight.
+    current_taskgroup = _current_taskgroup(workspace, taskgroup)
+    verify_cmd, mandate_drifted = _mandated_verify(mandate, current_taskgroup)
+    if mandate_drifted:
+        _append_mandate_drift(
+            conn,
+            task_id,
+            verify_cmd,
+            current_taskgroup.verify,
+        )
+    skip_reason = _skip_reason(read_only, skip_verify, verify_cmd)
     outcome = None
     if skip_reason is not None:
         verify_status = VERIFY_SKIPPED
@@ -896,11 +982,9 @@ def _execute(
         # recorded as `verifying` rather than a stale `running`.
         storage.update_task(conn, task_id, status=STATUS_VERIFYING)
         storage.append_event(
-            conn, task_id, "verifying", {"command": taskgroup.verify}
+            conn, task_id, "verifying", {"command": verify_cmd}
         )
-        outcome = verify.run_acceptance(
-            run_dir, taskgroup.verify, timeout=timeout
-        )
+        outcome = verify.run_acceptance(run_dir, verify_cmd, timeout=timeout)
         ran = outcome.ran
         if not outcome.ran:
             verify_status = VERIFY_SKIPPED
@@ -908,7 +992,7 @@ def _execute(
             verify_exit_field = None
         else:
             verify_status = "PASSED" if outcome.passed else "FAILED"
-            verify_cmd_field = taskgroup.verify
+            verify_cmd_field = verify_cmd
             verify_exit_field = outcome.exit_code
         note = outcome.note
 
@@ -2021,8 +2105,15 @@ def remove_workspace(workspace: str, lane_key: str, *, force: bool = False) -> d
 # ---------------------------------------------------------------------------
 
 
-def verify_task(workspace: str, task_id: str) -> verify.VerifyOutcome:
-    """Re-run acceptance for an existing task (`taskproof verify <id>`)."""
+def verify_task(
+    workspace: str, task_id: str, *, current: bool = False
+) -> verify.VerifyOutcome:
+    """Re-run acceptance for an existing task (`taskproof verify <id>`).
+
+    The default is the command captured in the task's mandate. ``current=True``
+    is the explicit override that uses the registry value now, and records that
+    force on any resulting drift event.
+    """
     conn = storage.connect(storage.db_path(workspace))
     try:
         storage.migrate(conn)
@@ -2034,11 +2125,22 @@ def verify_task(workspace: str, task_id: str) -> verify.VerifyOutcome:
         ).require(row["project"])
         workdir = row["workdir"] or taskgroup.path
 
-        outcome = verify.run_acceptance(workdir, taskgroup.verify)
+        mandated, drifted = _mandated_verify(row["mandate"], taskgroup)
+        command = taskgroup.verify if current else mandated
+        if drifted:
+            _append_mandate_drift(
+                conn,
+                task_id,
+                mandated,
+                taskgroup.verify,
+                forced=current,
+            )
+
+        outcome = verify.run_acceptance(workdir, command)
         status = VERIFY_SKIPPED if not outcome.ran else (
             "PASSED" if outcome.passed else "FAILED"
         )
-        fields = {"verify_cmd": taskgroup.verify if outcome.ran else VERIFY_SKIPPED}
+        fields = {"verify_cmd": command if outcome.ran else VERIFY_SKIPPED}
         if outcome.exit_code is not None:
             fields["verify_exit"] = outcome.exit_code
         if outcome.files_changed is not None:

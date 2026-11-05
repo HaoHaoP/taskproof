@@ -186,6 +186,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("verify", help="re-run acceptance for a task")
     p.add_argument("task_id")
+    p.add_argument(
+        "--current",
+        action="store_true",
+        help="use the registry's current verify command instead of the mandate",
+    )
 
     p = sub.add_parser(
         "accept",
@@ -863,6 +868,31 @@ def cmd_tasks(args):
     return 0
 
 
+def _mandate_summary(workspace, task) -> str:
+    """One readable line: what the card was issued against, not raw JSON."""
+    mandate = dispatch._mandate_mapping(task.get("mandate"))
+    if mandate is None:
+        return "mandate:  (none)"
+
+    drift = "unknown"
+    try:
+        taskgroup = registry.load(
+            registry.workspace_registry_path(workspace)
+        ).require(task.get("project"))
+    except errors.TaskproofError:
+        taskgroup = None
+    if taskgroup is not None:
+        _mandated, drifted = dispatch._mandated_verify(mandate, taskgroup)
+        drift = "yes" if drifted else "no"
+
+    branch = mandate.get("branch") or "—"
+    verify_cmd = json.dumps(mandate.get("verify"), ensure_ascii=False)
+    return (
+        f"mandate:  lane={mandate.get('lane') or '—'} branch={branch} "
+        f"verify={verify_cmd} drift={drift}"
+    )
+
+
 def cmd_show(args):
     detail = dispatch.task_detail(args.workspace, args.task_id)
     if detail.get("task") is None:
@@ -875,6 +905,7 @@ def cmd_show(args):
         f"disposition: {task.get('disposition')}",
         f"disposition_reason: {task.get('disposition_reason') or '—'}",
         f"adapter:  {task.get('adapter')}",
+        _mandate_summary(args.workspace, task),
         f"brief:    {task.get('brief')}",
         f"verify:   {task.get('verify_cmd')} (exit {task.get('verify_exit')})",
         f"created:  {task.get('created_at')}",
@@ -1015,7 +1046,9 @@ def cmd_log(args):
 
 
 def cmd_verify(args):
-    outcome = dispatch.verify_task(args.workspace, args.task_id)
+    outcome = dispatch.verify_task(
+        args.workspace, args.task_id, current=args.current
+    )
     payload = {
         "task_id": args.task_id,
         "ran": outcome.ran,

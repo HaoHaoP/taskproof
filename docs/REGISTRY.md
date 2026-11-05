@@ -321,6 +321,12 @@ beside it. `disposition` is one of `disputed`, `awaiting_review`, `blocked`,
 `accept` records a result. Old rows without a value are read as `unknown` and
 the textual `tasks` table renders that absent value as `—`.
 
+The `mandate` column is the JSON snapshot captured at dispatch: the card hash,
+lane, branch, acceptance command and kind, forbidden paths, adapter settings,
+timeouts, and issue time. Acceptance follows its `verify` value by default;
+`taskproof verify --current` is the explicit opt-in to the registry's current
+value.
+
 Both `/api/tasks` and `/api/tasks/<id>` include `disposition` and
 `disposition_reason` in every task projection.
 

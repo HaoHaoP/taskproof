@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     result_path   TEXT,
     verify_cmd    TEXT,
     verify_exit   INTEGER,
+    mandate       TEXT,
     files_changed INTEGER,
     disposition   TEXT,
     disposition_reason TEXT,

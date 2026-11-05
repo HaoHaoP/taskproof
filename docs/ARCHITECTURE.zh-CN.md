@@ -273,9 +273,11 @@ Python 虚拟环境刻意不参与依赖探测：其配置与控制台脚本写�
 因此用显式 shell 字符串而非 `shlex.split`）。约定一：没有验收命令不等于通过，记 SKIPPED。
 约定二：验收超时是失败（退出码记 NULL 并在注记中说明），不是错误。
 
-验收命令**运行时现读注册表**（`dispatch.py:753`），这与禁改规则不同：禁改规则在发车那一刻
-被快照进任务的 `started` 事件，之后改它对在飞卡无效；而改 `verify` 会立即改掉在飞卡的
-验收命令。
+发车时，taskproof 在同一事务里把 `mandate` JSON 快照写进任务行，并追加一条
+`mandate` 事件。验收默认执行快照里的 `verify`，所以改注册表不会移走在飞卡的终点线。
+若注册表现值不同，taskproof 记一条 `mandate_drift` 事件，但仍按 mandate 执行；
+`taskproof verify --current` 才是显式改用现值的入口。禁改规则仍取本次运行加载的
+道对象，不从 mandate 读取。
 
 ### 4.6 结构化结果契约
 
@@ -552,7 +554,7 @@ Python 虚拟环境刻意不参与依赖探测：其配置与控制台脚本写�
     src/taskproof/dispatch.py:548       timeout 终态（exit_code 沿用 71）
     src/taskproof/dispatch.py:908       _terminate_tree：SIGTERM -> 5 秒 -> SIGKILL
     src/taskproof/dispatch.py:980       _terminate_recorded_group：按落库 pgid 杀
-    src/taskproof/dispatch.py:753       验收命令现读注册表
+    src/taskproof/dispatch.py:753       验收按发车 mandate 执行
     src/taskproof/dispatch.py:754       验收与任务共用同一条超时
     src/taskproof/dispatch.py:1922      accept 只受理 blocked / failed
     src/taskproof/verify.py:76-140      独立验收与超时语义
