@@ -227,30 +227,17 @@ jobs:
 
             **English**
 
-            - **The ledger now records whether a task needs human attention.** Disposition
-              appears as a DISPO column in task listings, `--dispo` filters the ledger by it,
-              and `wait` uses four distinct exit codes to tell you whether work is finished,
-              waiting for review, blocked, or timed out.
-            - **Acceptance criteria are frozen when a card is dispatched.** Each task keeps the
-              twelve dispatch-time facts, including the card fingerprint, lane, branch, and
-              acceptance command. Changing the registry mid-run no longer changes the verdict
-              for a running card; a mismatch is recorded as `mandate_drift`, while the card
-              continues against its original criteria. `verify --current` explicitly opts into
-              the present registry values.
-            - **The same card cannot be dispatched twice.** A duplicate fingerprint exits with
-              code 76, leaves no ledger row, and does not consume a concurrency slot. `--force`
-              clearly means redispatch and records `duplicate_of` on the event. `check-card.py`
-              now warns when a literal date appears in the card body.
+            - **The web board now matches the 0.5.0 interface.** The board bundled in the
+              0.5.0 wheel still showed the previous UI and was missing the new DISPO column.
+              This release includes the updated board. The terminal and desktop installers in
+              0.5.0 were already current; only the board opened with `taskproof board` after a
+              `pip install` was affected.
 
             **中文**
 
-            - **账本现在会记下每个任务要不要人看。** 任务列表新增 DISPO 列显示 disposition，
-              `--dispo` 可按它过滤账本，`wait` 用四种不同退出码区分「已完成 / 待人看 / 阻塞 / 超时」。
-            - **发车时就把验收判据冻结下来。** 每个任务会保留卡指纹、道、分支、验收命令等十二项发车时的
-              信息，中途修改注册表不再改写正在运行的卡的判定；对不上会记一条 `mandate_drift`，但仍按发车时
-              的判据继续跑。`verify --current` 则明确要求按现在的注册表值验收。
-            - **同一张卡不会被重复派发。** 撞指纹时返回 76，不写账本，也不占并发位；`--force` 明确表示
-              要重派，并在事件里记下 `duplicate_of`。`check-card.py` 遇到卡文正文里的日期会给出 WARN。
+            - **网页看板现已与 0.5.0 的界面一致。** 0.5.0 的 wheel 中随附的看板仍是旧界面，
+              缺少新增的 DISPO 列；本版已更新这份看板。0.5.0 的终端和桌面安装包已经是新版本，
+              只有通过 `pip install` 安装后运行 `taskproof board` 打开的看板受影响。
 
       # `release: published` cannot route here on its own: this Release is created
       # with the run's automatic GITHUB_TOKEN, and events raised by that token do
