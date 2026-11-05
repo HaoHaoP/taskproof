@@ -25,6 +25,7 @@ import json
 import os
 import shutil
 import signal
+import sqlite3
 import subprocess
 import threading
 import time
@@ -38,6 +39,7 @@ from .errors import (
     EXIT_VERIFY,
     AdapterError,
     ConcurrencyError,
+    DuplicateError,
     PreconditionError,
     TaskproofError,
     UsageError,
@@ -313,6 +315,38 @@ def _check_branch_precondition(taskgroup) -> None:
         )
 
 
+def _dispatch_key(lane_id: str, branch: Optional[str], brief: str) -> str:
+    """Fingerprint the card identity: lane, branch and brief, in that order."""
+    material = "\0".join((lane_id, branch or "", brief))
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _find_dispatch_key(conn, key: str) -> Optional[str]:
+    row = conn.execute(
+        "SELECT id FROM tasks WHERE dispatch_key = ?", (key,)
+    ).fetchone()
+    return row["id"] if row is not None else None
+
+
+def _duplicate_error(existing_id: str) -> DuplicateError:
+    return DuplicateError(
+        f"duplicate of {existing_id}（要重派加 --force，要重跑用 rerun）"
+    )
+
+
+def _check_duplicate(conn, key: str, force: bool) -> Optional[str]:
+    """Return the existing card id for a forced copy, or refuse cleanly.
+
+    Runs before the task row and concurrency claim. A normal collision is a
+    DuplicateError (exit 76); ``--force`` returns the id so the started event
+    can name what it duplicated.
+    """
+    existing_id = _find_dispatch_key(conn, key)
+    if existing_id is not None and not force:
+        raise _duplicate_error(existing_id)
+    return existing_id
+
+
 def dispatch(
     workspace: str,
     project_key: str,
@@ -327,6 +361,7 @@ def dispatch(
     timeout: Optional[int] = None,
     idle_timeout: Optional[int] = None,
     rerun_of: Optional[str] = None,
+    force: bool = False,
     cap: Optional[int] = None,
 ) -> str:
     """Run one task end to end and return its id.
@@ -337,8 +372,8 @@ def dispatch(
     link survives even a failed rerun. ``taskproof rerun`` is the only caller.
 
     Raises the typed errors in `errors.py` so the CLI can map them to exit codes:
-      ConcurrencyError -> 75, AdapterError -> 70, VerifyError -> 71,
-      RegistryError -> 2, PreconditionError -> 78
+      DuplicateError -> 76, ConcurrencyError -> 75, AdapterError -> 70,
+      VerifyError -> 71, RegistryError -> 2, PreconditionError -> 78
 
     Rules that must survive any refactor:
       * the acceptance command runs in the PROJECT workdir, never the workspace
@@ -359,6 +394,8 @@ def dispatch(
     # task id or a slot exists, so a refusal is a PreconditionError (exit 78)
     # with no ledger trace and no cap slot taken.
     _check_branch_precondition(taskgroup)
+    dispatch_branch = taskgroup.branch or _head_branch(taskgroup.path) or None
+    dispatch_key = _dispatch_key(taskgroup.id, dispatch_branch, brief)
 
     # The effective per-run timeout and where it came from (card 81): a
     # `--timeout` wins over the lane's own `timeout`, which wins over
@@ -388,6 +425,16 @@ def dispatch(
     try:
         storage.migrate(conn)
 
+        # A duplicate refusal is like the branch gate: it lands before the task
+        # id, task row and concurrency claim, so it leaves no ledger trace and
+        # takes no cap slot. A rerun is explicitly exempt, but still records
+        # which keyed card it duplicates. A forced copy records that link on
+        # its started event and deliberately leaves dispatch_key NULL.
+        if rerun_of:
+            duplicate_of = _find_dispatch_key(conn, dispatch_key)
+        else:
+            duplicate_of = _check_duplicate(conn, dispatch_key, force)
+
         # ② allocate the task id before claiming a slot, so the claim row can
         # name the task it is protecting.
         prefix_date = datetime.now().strftime("%Y%m%d")
@@ -412,7 +459,7 @@ def dispatch(
             mandate = {
                 "card_sha256": hashlib.sha256(brief.encode("utf-8")).hexdigest(),
                 "lane": taskgroup.id,
-                "branch": taskgroup.branch or _head_branch(taskgroup.path) or None,
+                "branch": dispatch_branch,
                 "verify": taskgroup.verify,
                 "verify_kind": taskgroup.verify_kind,
                 "forbidden_paths": list(taskgroup.forbidden_paths or []),
@@ -432,6 +479,9 @@ def dispatch(
                 adapter=adapter,
                 model=model,
                 reasoning=reasoning,
+                dispatch_key=(
+                    dispatch_key if not force and not rerun_of else None
+                ),
                 pid=os.getpid(),
                 mandate=json.dumps(mandate, ensure_ascii=False, sort_keys=True),
                 created_at=issued_at,
@@ -439,38 +489,52 @@ def dispatch(
             )
             conn.execute("BEGIN IMMEDIATE")
             try:
-                storage.insert_task(conn, task)
+                try:
+                    storage.insert_task(conn, task)
+                except sqlite3.IntegrityError:
+                    # The partial unique index closes the race between two
+                    # dispatchers that both passed the pre-claim check.
+                    if conn.in_transaction:
+                        conn.execute("ROLLBACK")
+                    existing_id = _find_dispatch_key(conn, dispatch_key)
+                    if existing_id is not None and not force and not rerun_of:
+                        raise _duplicate_error(existing_id) from None
+                    raise
                 storage.append_event(conn, task_id, "mandate", mandate)
+                started_payload = {
+                    "project": taskgroup.id,
+                    "group": taskgroup.group,
+                    "adapter": adapter,
+                    "read_only": read_only,
+                    "worktree": worktree,
+                    "skip_verify": skip_verify,
+                    # The hard timeout this run enforces, and where it came
+                    # from (card 81). The value has no column, so it rides in
+                    # the event: `rerun` reads it back to reuse the same flag
+                    # (See `_run_options`). `timeout_source` is shaped like the
+                    # `cap_source` beside it — cli / lane / toml / default.
+                    "timeout": effective_timeout,
+                    "timeout_source": timeout_setting.source,
+                    # The no-progress watchdog budget this run enforces and
+                    # where it came from (card 83). `idle_timeout_source` is
+                    # shaped like `timeout_source` beside it — cli / lane /
+                    # default — and `0` means the watchdog is off for this run.
+                    "idle_timeout": effective_idle_timeout,
+                    "idle_timeout_source": idle_setting.source,
+                    # The effective global cap *and its source* (card 42), so
+                    # the event stream can explain why a card was admitted —
+                    # e.g. a one-off `--cap 5` that let a fourth card run.
+                    "cap": setting.value,
+                    "cap_source": setting.source,
+                }
+                if force:
+                    started_payload["forced"] = True
+                    started_payload["duplicate_of"] = duplicate_of
                 storage.append_event(
                     conn,
                     task_id,
                     "started",
-                    {
-                        "project": taskgroup.id,
-                        "group": taskgroup.group,
-                        "adapter": adapter,
-                        "read_only": read_only,
-                        "worktree": worktree,
-                        "skip_verify": skip_verify,
-                        # The hard timeout this run enforces, and where it came
-                        # from (card 81). The value has no column, so it rides in
-                        # the event: `rerun` reads it back to reuse the same flag
-                        # (See `_run_options`). `timeout_source` is shaped like the
-                        # `cap_source` beside it — cli / lane / toml / default.
-                        "timeout": effective_timeout,
-                        "timeout_source": timeout_setting.source,
-                        # The no-progress watchdog budget this run enforces and
-                        # where it came from (card 83). `idle_timeout_source` is
-                        # shaped like `timeout_source` beside it — cli / lane /
-                        # default — and `0` means the watchdog is off for this run.
-                        "idle_timeout": effective_idle_timeout,
-                        "idle_timeout_source": idle_setting.source,
-                        # The effective global cap *and its source* (card 42), so the
-                        # event stream can explain why a card was admitted — e.g. a
-                        # one-off `--cap 5` that let a fourth card run.
-                        "cap": setting.value,
-                        "cap_source": setting.source,
-                    },
+                    started_payload,
                 )
                 conn.execute("COMMIT")
             except BaseException:
@@ -479,7 +543,7 @@ def dispatch(
                 raise
 
             if rerun_of:
-                _link_rerun(conn, task_id, rerun_of)
+                _link_rerun(conn, task_id, rerun_of, duplicate_of=duplicate_of)
 
             _execute_claimed(
                 conn,
@@ -610,7 +674,9 @@ def _execute_claimed(
                     )
 
 
-def _link_rerun(conn, new_id: str, old_id: str) -> None:
+def _link_rerun(
+    conn, new_id: str, old_id: str, *, duplicate_of: Optional[str] = None
+) -> None:
     """Record the two-way link between a rerun and the card it was copied from.
 
     Written through `storage.append_event`, so it lands in BOTH the `events`
@@ -618,7 +684,10 @@ def _link_rerun(conn, new_id: str, old_id: str) -> None:
     stream, which is why the link has to be an event and not a column. The new
     card carries ``rerun_of``, the old card carries ``rerun_as``.
     """
-    storage.append_event(conn, new_id, "rerun", {"rerun_of": old_id})
+    payload = {"rerun_of": old_id}
+    if duplicate_of is not None:
+        payload["duplicate_of"] = duplicate_of
+    storage.append_event(conn, new_id, "rerun", payload)
     storage.append_event(conn, old_id, "rerun", {"rerun_as": new_id})
 
 

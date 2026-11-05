@@ -285,6 +285,9 @@ warning: unknown key 'concurency' in [defaults]
 清单、适配器设置、超时和签发时间。默认验收跟随其中的 `verify`；
 `taskproof verify --current` 才是显式改用注册表现值的入口。
 
+`dispatch_key` 是「道 + 分支 + 卡文」的一张卡一指纹。只有首次、未被 force 的
+`run` 会写它；`run --force` 与 `rerun` 留 `NULL`，用事件记录重派或重跑关系。
+
 `/api/tasks` 与 `/api/tasks/<id>` 的每条任务投影都包含 `disposition` 和
 `disposition_reason`。
 

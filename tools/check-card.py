@@ -66,6 +66,7 @@ NO_SOURCE_RE = re.compile(
     re.S,
 )
 TEST_COMMAND_RE = re.compile(r"unittest|pytest|npm\s+test|node\s+--test", re.I)
+BODY_DATE_RE = re.compile(r"20\d\d-\d\d-\d\d|今天|昨天")
 WRITE_SECTION_KEYS = ("要做的事", "落点")
 ACCEPTANCE_SECTION_KEYS = ("验收", "acceptance")
 CONSTRAINT_SECTION_KEYS = ("硬约束", "hard constraint")
@@ -415,6 +416,14 @@ def check_contract(text: str) -> tuple:
     return True, "没有「只写测试 + 测试命令」的冲突契约"
 
 
+def check_body_dates(text: str) -> tuple:
+    """Warn when a body date makes the dispatch fingerprint unstable."""
+    body = re.sub(r"\A\s*#{1,6}[ \t]+[^\n]*(?:\n|$)", "", text, count=1)
+    if BODY_DATE_RE.search(body):
+        return WARN, "卡文带日期会让重复检查失效，日期挪到文件名"
+    return True, "卡文正文没有日期"
+
+
 def _judge(ok_flag) -> str:
     """True → PASS、False → FAIL、None → N/A、WARN → WARN。"""
     if ok_flag is None:
@@ -484,6 +493,8 @@ def main() -> int:
     add(browser_flag, "查6 浏览器：", browser_detail)
     contract_flag, contract_detail = check_contract(text)
     add(contract_flag, "查7 契约：", contract_detail)
+    date_flag, date_detail = check_body_dates(text)
+    add(date_flag, "查8 日期：", date_detail)
 
     applied = [r for r in results if r[0] in ("pass", "fail")]
     if args.json:

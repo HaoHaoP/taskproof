@@ -327,6 +327,10 @@ timeouts, and issue time. Acceptance follows its `verify` value by default;
 `taskproof verify --current` is the explicit opt-in to the registry's current
 value.
 
+`dispatch_key` is the one-per-card fingerprint of lane + branch + brief. Only
+the first unforced `run` writes it; `run --force` and `rerun` leave it `NULL`
+and record the relationship as events instead.
+
 Both `/api/tasks` and `/api/tasks/<id>` include `disposition` and
 `disposition_reason` in every task projection.
 

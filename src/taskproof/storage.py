@@ -44,7 +44,7 @@ def connect(path: str) -> sqlite3.Connection:
 
 #: Schema level this build writes. Bump it whenever `migrate()` learns a new
 #: step that `schema.sql` alone cannot perform on an existing database.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: Columns added after v1. `schema.sql` is all ``CREATE TABLE IF NOT EXISTS``,
 #: so it can never add a column to a table that already exists — these are the
@@ -57,6 +57,7 @@ _ADDED_COLUMNS = (
     ("tasks", "disposition", "TEXT"),
     ("tasks", "disposition_reason", "TEXT"),
     ("tasks", "mandate", "TEXT"),
+    ("tasks", "dispatch_key", "TEXT"),
 )
 
 
@@ -73,9 +74,18 @@ def migrate(conn: sqlite3.Connection) -> None:
     safe to run any number of times, and every step either applies cleanly or is
     skipped because it is already present.
     """
+    # `schema.sql` creates the partial unique index over dispatch_key. On an
+    # existing database CREATE TABLE IF NOT EXISTS cannot add that column, so
+    # backfill it before executing the schema (and therefore before the index).
+    if _table_columns(conn, "tasks"):
+        if "dispatch_key" not in _table_columns(conn, "tasks"):
+            conn.execute("ALTER TABLE tasks ADD COLUMN dispatch_key TEXT")
+
     with open(os.path.join(SCHEMA_DIR, "schema.sql"), encoding="utf-8") as fh:
         conn.executescript(fh.read())
 
+    # The remaining columns have no index that executes before this loop, so
+    # they can be added after `schema.sql` has ensured the table exists.
     for table, column, column_type in _ADDED_COLUMNS:
         if column not in _table_columns(conn, table):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
@@ -88,7 +98,7 @@ def migrate(conn: sqlite3.Connection) -> None:
             (1, now_iso()),
         )
     # Record each schema level crossed by this migration. An old database at
-    # version 1 jumps straight to 4 here, but keeps auditable 2 and 3 rows too.
+    # version 1 jumps straight to 5 here, but keeps each crossed level auditable.
     for version in range(max(current + 1, 1), SCHEMA_VERSION + 1):
         conn.execute(
             "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
@@ -114,6 +124,7 @@ TASK_COLUMNS = frozenset(
         "adapter",
         "model",
         "reasoning",
+        "dispatch_key",
         "attempt",
         "exit_code",
         "pid",

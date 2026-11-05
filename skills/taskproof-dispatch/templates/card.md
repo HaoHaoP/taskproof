@@ -1,6 +1,7 @@
 # <CARD-ID> · <what this card does, in one line>
 
 <!-- Copy this file, fill every section, delete the comments.
+     Put dates in the title, not in the card body: a body date changes the duplicate-check fingerprint.
      An empty section is a card defect, not a style choice: a missing source-material
      line sends the worker guessing, a missing constraint invites it to wander.
      Keep the card under one root cause, one file range, one acceptance command.

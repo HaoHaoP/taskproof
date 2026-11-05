@@ -425,7 +425,8 @@ A second timeout with the same name is unrelated: `taskproof wait --timeout`
 
     0 success / 2-3 a registry problem / 64 a usage error / 70 the adapter failed /
     71 acceptance or an artefact self-check failed / 75 the concurrency limit /
-    78 a declared precondition the repository cannot satisfy (branch mismatch)
+    76 an identical card already exists / 78 a declared precondition the
+    repository cannot satisfy (branch mismatch)
 
 An exit code says **how the command ended**, not how the task was recorded, and the
 two are deliberately decoupled: a run that breaches a protected path is recorded

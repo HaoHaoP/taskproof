@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     project       TEXT NOT NULL,
     group_name    TEXT NOT NULL DEFAULT 'default',
     brief         TEXT NOT NULL,
+    dispatch_key  TEXT,
     status        TEXT NOT NULL,
     adapter       TEXT NOT NULL DEFAULT 'codex',
     model         TEXT,
@@ -44,6 +45,8 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_dispatch_key
+  ON tasks(dispatch_key) WHERE dispatch_key IS NOT NULL;
 
 -- Audit mirror of events.jsonl. Append-only.
 CREATE TABLE IF NOT EXISTS events (

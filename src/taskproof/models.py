@@ -172,6 +172,9 @@ class Task:
     adapter: str = "codex"
     model: Optional[str] = None
     reasoning: Optional[str] = None
+    #: Stable fingerprint of lane + branch + brief. Only the first unforced
+    #: dispatch of a card writes it; reruns and forced copies keep it NULL.
+    dispatch_key: Optional[str] = None
     attempt: int = 1
     exit_code: Optional[int] = None
     pid: Optional[int] = None

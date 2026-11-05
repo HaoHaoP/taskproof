@@ -135,6 +135,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument("--no-verify", action="store_true", help="skip acceptance (recorded as SKIPPED, not passed)")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="dispatch even when the same lane + branch + brief already exists",
+    )
     p.add_argument("--timeout", type=int, help="override the registry timeout (seconds)")
     p.add_argument(
         "--idle-timeout",
@@ -262,7 +267,8 @@ def main(argv=None) -> int:
             parser.error(f"unknown command: {args.command}")
         return handler(args) or 0
     except errors.TaskproofError as exc:
-        print(f"taskproof: {exc}", file=sys.stderr)
+        stream = sys.stdout if isinstance(exc, errors.DuplicateError) else sys.stderr
+        print(f"taskproof: {exc}", file=stream)
         if getattr(exc, "hint", None):
             print(f"  hint: {exc.hint}", file=sys.stderr)
         return exc.exit_code
@@ -683,6 +689,7 @@ def cmd_run(args):
         skip_verify=args.no_verify,
         timeout=args.timeout,
         idle_timeout=args.idle_timeout,
+        force=args.force,
         cap=cap,
     )
     task = dispatch.task_detail(args.workspace, task_id).get("task") or {}

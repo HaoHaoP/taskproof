@@ -13,6 +13,7 @@ EXIT_USAGE = 64
 EXIT_ADAPTER = 70
 EXIT_VERIFY = 71
 EXIT_CONCURRENCY = 75
+EXIT_DUPLICATE = 76
 #: sysexits' EX_CONFIG: the declaration is understood, the environment cannot
 #: satisfy it. Here: the registry and the repository disagree about reality.
 EXIT_PRECONDITION = 78
@@ -56,6 +57,12 @@ class ConcurrencyError(TaskproofError):
     """Same-group serialisation or the global cap blocked this dispatch. -> 75"""
 
     exit_code = EXIT_CONCURRENCY
+
+
+class DuplicateError(TaskproofError):
+    """An identical card already exists; use --force or rerun. -> 76"""
+
+    exit_code = EXIT_DUPLICATE
 
 
 class PreconditionError(TaskproofError):

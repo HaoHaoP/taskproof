@@ -1051,7 +1051,11 @@ class LaneTimeoutTest(DispatchBase):
                 # A fresh registry each round; `echo hi` never hits the clock.
                 self.write_registry(verify="exit 0", **reg_kwargs)
                 task_id = dispatch(
-                    self.ws, "proj", "x", adapter="custom:echo hi", **run_kwargs
+                    self.ws,
+                    "proj",
+                    f"timeout source {source}",
+                    adapter="custom:echo hi",
+                    **run_kwargs,
                 )
                 started = self._started_payload(task_id)
                 self.assertEqual(started["timeout"], value)
@@ -1170,12 +1174,12 @@ class WorktreeTest(DispatchBase):
         subprocess.run(["git", "add", "seed.txt"], cwd=self.proj, check=True)
         subprocess.run(["git", "commit", "-qm", "seed"], cwd=self.proj, check=True)
 
-    def _run(self, command, **kwargs):
+    def _run(self, command, brief="x", **kwargs):
         """Dispatch a worktree run with stdout captured -> (task_id, stdout)."""
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             task_id = dispatch(
-                self.ws, "proj", "x", worktree=True, adapter=command, **kwargs
+                self.ws, "proj", brief, worktree=True, adapter=command, **kwargs
             )
         return task_id, buf.getvalue()
 
@@ -1240,7 +1244,10 @@ class WorktreeTest(DispatchBase):
         self._git_repo()
         self.write_registry(verify="exit 0")
         first, _ = self._run("custom:sh -c 'echo a > a.txt && echo ok'")
-        second, _ = self._run("custom:sh -c 'echo b > b.txt && echo ok'")
+        second, _ = self._run(
+            "custom:sh -c 'echo b > b.txt && echo ok'",
+            brief="make the second worktree",
+        )
 
         self.assertNotEqual(first, second)
         p1 = os.path.join(self.tmp, f"project-wt-{first}")
@@ -1438,8 +1445,14 @@ class LaneWorkspaceTest(unittest.TestCase):
         with open(os.path.join(self.ws, "projects.toml"), "w", encoding="utf-8") as fh:
             fh.write(body)
 
-    def _run(self, lane_id="lane", command="custom:sh -c 'echo done'", **kwargs):
-        return dispatch(self.ws, lane_id, "do it", adapter=command, **kwargs)
+    def _run(
+        self,
+        lane_id="lane",
+        command="custom:sh -c 'echo done'",
+        brief="do it",
+        **kwargs
+    ):
+        return dispatch(self.ws, lane_id, brief, adapter=command, **kwargs)
 
     def _workdir(self, task_id):
         conn = storage.connect(storage.db_path(self.ws))
@@ -1462,7 +1475,10 @@ class LaneWorkspaceTest(unittest.TestCase):
     def test_second_card_reuses_the_same_workspace(self):
         self._registry()
         first = self._run(command="custom:sh -c 'sleep 0.2; echo done'")
-        second = self._run(command="custom:sh -c 'sleep 0.2; echo done'")
+        second = self._run(
+            command="custom:sh -c 'sleep 0.2; echo done'",
+            brief="do another card in the same workspace",
+        )
 
         self.assertEqual(self._workdir(first), self._workdir(second))
         self.assertEqual(self._workdir(first), self._workspace_path())
@@ -1565,7 +1581,7 @@ class LaneWorkspaceTest(unittest.TestCase):
         self.assertFalse(os.path.isdir(os.path.join(self.repo, ".git", "modules")))
         before = os.lstat(link).st_mtime_ns
         time.sleep(0.01)
-        self._run()
+        self._run(brief="do another card and reuse the dependency link")
         self.assertTrue(os.path.islink(link))
         self.assertEqual(os.lstat(link).st_mtime_ns, before)
 

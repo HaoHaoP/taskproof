@@ -479,7 +479,7 @@ class RerunTest(_Base):
         new_rerun = [
             e["payload"] for e in json.loads(out)["events"] if e["event"] == "rerun"
         ]
-        self.assertIn({"rerun_of": old}, new_rerun)
+        self.assertIn({"rerun_of": old, "duplicate_of": old}, new_rerun)
 
     def test_rerun_is_allowed_on_a_blocked_card(self):
         old = self.breach(verify="exit 0")
@@ -496,7 +496,7 @@ class RerunTest(_Base):
         self.assertNotEqual(new, old)
         self.assertEqual(self.row(new)["status"], STATUS_DONE)
         # Both directions of the ledger link are present.
-        self.assertIn({"rerun_of": old}, [
+        self.assertIn({"rerun_of": old, "duplicate_of": old}, [
             e["payload"] for e in self.events(new) if e["event"] == "rerun"
         ])
         self.assertIn({"rerun_as": new}, [
@@ -587,7 +587,7 @@ class RealProcessTest(_Base):
         self.assertIn({"rerun_as": new}, [
             e["payload"] for e in self.events(blocked) if e["event"] == "rerun"
         ])
-        self.assertIn({"rerun_of": blocked}, [
+        self.assertIn({"rerun_of": blocked, "duplicate_of": blocked}, [
             e["payload"] for e in self.events(new) if e["event"] == "rerun"
         ])
 
