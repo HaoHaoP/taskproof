@@ -96,6 +96,8 @@ taskproof --json register /absolute/path/to/repo --dry-run
 
 卡正文放在文件里，发车时用 `$(cat ...)` 传入——避免 shell 转义，也让卡可复用、可归档。
 
+**一张卡该覆盖多大是量出来的问题，不是口味问题**：按互不依赖的验收面拆，不按文件数拆 —— 数字见 [`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md) 第 7 节。
+
 ### 2.1 结果要人用眼睛看的卡
 
 **观感卡**（布局、配色、尺寸、位置、显隐、文案）比逻辑卡多带三样东西。理由很具体：普通验收命令看不见观感，它会高高兴兴地把十六张被退回的卡全盖章放行。
@@ -288,7 +290,7 @@ worker 报 done 不算证据 —— 你自己再跑一遍机器已经跑过的�
 - 注册表字段与硬错误：[`docs/REGISTRY.md`](../../docs/REGISTRY.md)
 - 设计决策：[`docs/DESIGN.md`](../../docs/DESIGN.md)
 - 从零到一次派发的完整走查：[`docs/WALKTHROUGH.md`](../../docs/WALKTHROUGH.md)
-- 派活的省钱纪律 —— 复核、素材、TDD、闭环/待办、模型降级：[`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md)
+- 派活的省钱纪律 —— 复核、素材、TDD、闭环/待办、模型降级、拆卡：[`references/token-discipline.zh-CN.md`](references/token-discipline.zh-CN.md)
 - 观感卡的纪律 —— 参照物、状态真值表、红绿探针、对拍页、收敛预算：[`references/visual-cards.zh-CN.md`](references/visual-cards.zh-CN.md)
 - 可直接复制的卡模板：[`templates/card.zh-CN.md`](templates/card.zh-CN.md)（简体中文）/ [`templates/card.md`](templates/card.md)（English）
 - 退出码：0 成功 / 2 注册表问题 / 64 用法错误 / 70 适配器失败 / 71 验收失败 / 75 并发受限 / 76 重复卡

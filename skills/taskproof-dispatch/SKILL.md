@@ -96,6 +96,8 @@ Semantics to remember:
 
 The card body lives in a file and is passed with `$(cat ...)` at fire time — this avoids shell escaping and keeps the card reusable and archivable.
 
+**How much one card should cover is a measured question, not a taste one**: split by independent acceptance surfaces, never by file count — the numbers are in [`references/token-discipline.md`](references/token-discipline.md) section 7.
+
 ### 2.1 A card whose result a human will look at
 
 A **visual card** — layout, colour, size, position, visibility, copy — carries three things a logic card does not, because the ordinary acceptance command cannot see a look and will happily rubber-stamp sixteen rejections:
@@ -288,7 +290,7 @@ The three habits this checklist leans on without repeating — closure rework is
 - Registry fields and hard errors: [`docs/REGISTRY.md`](../../docs/REGISTRY.md)
 - Design decisions: [`docs/DESIGN.md`](../../docs/DESIGN.md)
 - A full from-zero-to-one-dispatch walkthrough: [`docs/WALKTHROUGH.md`](../../docs/WALKTHROUGH.md)
-- Dispatch economy — review, source material, TDD, closure/backlog, model downgrade: [`references/token-discipline.md`](references/token-discipline.md)
+- Dispatch economy — review, source material, TDD, closure/backlog, model downgrade, card splitting: [`references/token-discipline.md`](references/token-discipline.md)
 - Visual cards — references, status truth table, red-to-green probe, comparison page, convergence budget: [`references/visual-cards.md`](references/visual-cards.md)
 - Card templates to copy: [`templates/card.md`](templates/card.md) (English) / [`templates/card.zh-CN.md`](templates/card.zh-CN.md) (简体中文)
 - Exit codes: 0 success / 2 registry problem / 64 usage error / 70 adapter failure / 71 verification failure / 75 concurrency limit / 76 duplicate card

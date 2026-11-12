@@ -125,3 +125,20 @@ State of this machine: `--reasoning none` works today. A local **chat** model is
 - Keep the constraints you will actually check; each one costs the worker a read, and the rest is noise that invites it to wander.
 - Keep the card file inside the project's cards directory, so the paths in the card and the worker's working directory are talking about the same tree.
 - **Never a separate doc-sync card.** Which docs and figures stop being true when this card lands goes into the template's own section (`## Docs the card makes false`) at writing time, and the worker fixes them in the same card, in both languages. Measured: the lane timeout (card 81) and the idle watchdog (card 83) each got a pure doc-sync card (82, 84) — a whole extra round trip for each. Cross-feature diagrams that need a redraw wait for one final pass, and whatever is deliberately left out has to say so.
+
+## 7. Splitting cards: by acceptance surface, never by file count
+
+Measured over 455 cards in 30 days, priced at peak rates:
+
+| files changed | cards | median cost | median cost per file | not done |
+|---|---|---|---|---|
+| 1–3 | 210 | ¥0.24 | ¥0.142 | 2% |
+| 4–10 | 169 | ¥0.30 | ¥0.051 | 2% |
+| 11–20 | 28 | ¥0.37 | ¥0.027 | 4% |
+| 21+ | 24 | ¥0.34 | ¥0.013 | 8% |
+
+- **Big cards are not more expensive.** A 21+-file card costs a median ¥0.34, the same order as ¥0.24 for a 1–3-file card, and an order of magnitude less per file. "Split the big card to save tokens" is the wrong instinct: every card re-reads its context and pays the same fixed cost again (a card that changes nothing still emits ~15K, median card ¥0.27). Splitting does not save money; it buys more beginnings.
+- The only size signal is the **not-done rate** (2% → 4% → 8%), but the 21+ bucket holds 24 cards and 2 failures — not enough to support a hard file-count cap.
+- The only splitting criterion: **how many independent acceptance surfaces this card has**. Separate verdicts (build / unit test / real device / database rows) → split. One acceptance surface spread over 40 files → do not split.
+- The one size-related exception: **can a failure be rolled back by half**. A card that touches source + config + data at once leaves you unable to tell which part was right, and one rework costs 2–3x the card — split that to cap a single failure, not to save.
+- Merging is unchanged: micro-cards with no prior measurement (a log line, an assertion, a font size, copy text) — three or more on the same lane in one day get merged.
