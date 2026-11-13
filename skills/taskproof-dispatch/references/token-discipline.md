@@ -115,7 +115,29 @@ Two questions decide it: can you write the acceptance command without re-reading
 - never inside a parallel wave: one lane, one card at a time, other lanes idle;
 - start with one trial card of the documentation-mirroring kind, and read its diff before you trust the lane with anything else.
 
-State of this machine: `--reasoning none` works today. A local **chat** model is not ready — LM Studio's `http://127.0.0.1:1234/v1/models` serves only `text-embedding-nomic-embed-text-v1.5`. When one is loaded, wire the lane, then run the trial card.
+**The card decides the level, not the operator's mood.** Before firing, walk this list — a card may leave the normal model only when it clears **all six**:
+
+- the change surface is named in the card itself (at most two files); nothing has to be located;
+- acceptance is one exit code, with no human or visual judgement;
+- no cross-module investigation, no design decision, no product-wording call;
+- the card body stays under a tenth of the cheap model's window — whole design documents, prototype dumps and multi-file source excerpts stay on the normal model;
+- single pass: no chain where step N's parameters come from step N-1's measurement;
+- no browser, screenshot or DOM measurement.
+
+**When in doubt, stay on the normal model.** A cheap card that reports `done` with green acceptance while changing nothing costs more than the tokens it saved.
+
+Escalate to the normal model on any of these — never a third attempt:
+
+| Signal | Meaning |
+|---|---|
+| `done` with 0 changed files, or a summary admitting the target file was missing | the worker bailed at step one |
+| acceptance red and not environmental (missing deps, missing gitignored config) | it did not get the change right |
+| `Incomplete response … max_output_tokens`, or the worker complaining about context | the card does not fit the window |
+| tool-call payload errors (incompatible `apply_patch` and friends) | this harness/model pair cannot write files |
+
+Escalation is a **redispatch**, not a `rerun`: the ledger links the pair with `rerun_of` / `rerun_as`, and the reason goes in writing in the card directory's `backlog.md`. A silent switch makes the cost report unreadable.
+
+Before trusting a local lane at all: the server answers `GET <base>/v1/models` with a **chat** model, and one trial card's diff has been read end to end. An embedding-only endpoint, or a model whose thinking eats the output budget, will happily return green cards that changed nothing.
 
 ## 6. Writing cards cheaply
 
